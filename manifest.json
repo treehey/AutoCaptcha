@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "NJU 自动验证码识别",
+  "version": "2.0",
+  "permissions": ["activeTab", "scripting"],
+  "content_scripts": [
+    {
+      "matches": ["https://authserver.nju.edu.cn/*"],
+      "js": ["tesseract.min.js", "content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["tesseract.min.js", "langs/*"],
+      "matches": ["https://authserver.nju.edu.cn/*"]
+    }
+  ]
+}
