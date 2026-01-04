@@ -1,10 +1,20 @@
 {
   "manifest_version": 3,
   "name": "NJU 自动登录助手",
-  "version": "2.5",
+  "version": "2.2",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
   "permissions": ["storage", "activeTab"],
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "content_scripts": [
     {
@@ -14,7 +24,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["langs/*"],
+      "resources": ["langs/*", "icon48.png"],
       "matches": ["<all_urls>"]
     }
   ]

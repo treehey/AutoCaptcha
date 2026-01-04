@@ -1,12 +1,77 @@
 // content.js
-console.log("NJU 验证码识别助手 v2.5 已启动...");
+console.log("NJU 验证码识别助手 v2.2 已启动...");
 
 const IMG_SELECTOR = "#captchaImg"; 
 const INPUT_SELECTOR = "#captchaResponse";   
 
+function createLoadingAnimation() {
+    let animationDiv = document.getElementById('nju-loading-animation');
+    if (animationDiv) return animationDiv; // 如果已存在则直接返回
+
+    animationDiv = document.createElement('div');
+    animationDiv.id = 'nju-loading-animation';
+    animationDiv.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 15px 25px;
+        border-radius: 10px;
+        z-index: 99999;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    `;
+
+    const spinner = document.createElement('div');
+    spinner.style.cssText = `
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-top: 4px solid white;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 1s linear infinite;
+    `;
+
+    const text = document.createElement('span');
+    text.textContent = '正在识别验证码...';
+
+    animationDiv.appendChild(spinner);
+    animationDiv.appendChild(text);
+    document.body.appendChild(animationDiv);
+
+    // 添加 CSS 关键帧动画 (直接注入到页面，无需修改 manifest)
+    const style = document.createElement('style');
+    style.innerHTML = `
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    `;
+    document.head.appendChild(style);
+
+    return animationDiv;
+}
+
+function showLoadingAnimation() {
+    const animation = createLoadingAnimation();
+    animation.style.display = 'flex'; // 显示
+}
+
+function hideLoadingAnimation() {
+    const animation = document.getElementById('nju-loading-animation');
+    if (animation) {
+        animation.style.display = 'none'; // 隐藏
+    }
+}
+
 async function solveCaptcha() {
     // --- 新增：检查插件是否启用 ---
-    const settings = await chrome.storage.local.get(['nju_enabled']);
+    const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force']);
     if (settings.nju_enabled === false) {
         console.log("NJU 助手：当前处于关闭状态。");
         return; 
@@ -17,7 +82,22 @@ async function solveCaptcha() {
     const inputElement = document.querySelector(INPUT_SELECTOR);
     const userInput = document.querySelector("#username");
     const passInput = document.querySelector("#password")
-    if (!imgElement || !inputElement) return;
+    if (!imgElement || !inputElement || !userInput || !passInput) {
+        console.log("NJU 助手：未找到所有登录元素，或页面未加载完成。");
+        // 尝试再次调度，直到所有元素都找到
+        setTimeout(solveCaptcha, 1000); 
+        return;
+    }
+
+    // 检查验证码是否已经填入，避免重复识别
+    if (inputElement.value.length >= 4) {
+        console.log("NJU 助手：验证码已填入，跳过识别。");
+        return;
+    }
+
+    // --- 在识别开始时显示动画 ---
+    showLoadingAnimation();
+    // ----------------------------
 
     try {
         const canvas = document.createElement('canvas');
@@ -79,10 +159,18 @@ async function solveCaptcha() {
                 console.log("NJU助手：检测到浏览器已自动填充或未开启强制填充，跳过账号填入");
             }
 
+            // --- 在识别结束后隐藏动画 ---
+            hideLoadingAnimation();
+            // ---------------------------
+
             // 3. 自动登录
             setTimeout(() => {
                 const loginBtn = document.querySelector("#save") || document.querySelector(".auth_login_btn");
-                if (loginBtn) loginBtn.click();
+                if (loginBtn) {
+                    loginBtn.click();
+                } else {
+                    console.warn("NJU 助手：未找到登录按钮，请手动点击。");
+                }
             }, 600);
         }
     } catch (err) {

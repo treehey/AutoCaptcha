@@ -23,3 +23,9 @@ chrome.storage.local.get(['nju_user', 'nju_pass', 'nju_enabled', 'nju_force'], (
   document.getElementById('isEnabled').checked = data.nju_enabled !== false;
   document.getElementById('forceFill').checked = !!data.nju_force;
 });
+
+// 打开 GitHub 仓库
+document.getElementById('githubBtn').addEventListener('click', () => {
+  // *** 请将下面的 URL 替换为你的 GitHub 仓库地址 ***
+  window.open('https://github.com/treehey/AutoCaptcha', '_blank');
+});
