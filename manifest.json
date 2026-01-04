@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NJU 自动登录助手",
+    "description": "为南京大学师生设计的扩展，自动识别验证码并填写账号密码，实现自动登录统一身份认证系统。",
   "version": "2.2",
   "icons": {
     "16": "icon16.png",
