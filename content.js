@@ -140,7 +140,7 @@ async function solveCaptcha() {
         // 设置白名单 (v5 中 setParameters 依然可用)
         await worker.setParameters({
             tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-            tessedit_pageseg_mode: '6',
+            // tessedit_pageseg_mode: '6',
         });
 
         // 识别
