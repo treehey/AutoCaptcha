@@ -1,23 +1,38 @@
-# 🚀 NJU Login Pro - 南京大学统一身份认证自动登录助手
+<div align="center">
 
-![NJU Login Pro Logo](https://github.com/treehey/AutoCaptcha/blob/4c5b446e6c161be5c9edcfb251d893fac1e8949f/assets/icon128.png)
-一个为南京大学师生设计的 Chrome 浏览器扩展，旨在简化统一身份认证系统的登录流程。告别手动输入验证码和账号密码，享受一键登录的便捷体验！
+  <img src="https://github.com/treehey/AutoCaptcha/raw/main/assets/icon128.png" alt="logo" width="100" height="100" />
 
-![GitHub Repo stars](https://img.shields.io/github/stars/treehey/AutoCaptcha?style=social)
-![GitHub forks](https://img.shields.io/github/forks/treehey/AutoCaptcha?style=social)
-[![GitHub license](https://img.shields.io/github/license/treehey/AutoCaptcha)](https://github.com/treehey/AutoCaptcha/blob/main/LICENSE)
+  # NJU Login Pro
+  
+  **南京大学统一身份认证 · 自动登录助手**
+  
+  <br>
 
-## ✨ 主要功能
+  ![Stars](https://img.shields.io/github/stars/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)
+  ![Forks](https://img.shields.io/github/forks/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)
+  ![License](https://img.shields.io/github/license/treehey/AutoCaptcha?style=flat-square&color=634798)
+  ![Version](https://img.shields.io/badge/version-2.2.0-634798?style=flat-square)
 
-* **智能验证码识别**：采用 Tesseract.js 技术，准确识别南大统一身份认证页面上的图形验证码。
-* **账号密码自动填充**：安全存储学号/工号和密码在浏览器本地，登录时自动填充。
-* **智能填充模式**：
-    * 默认情况下，如果浏览器已自动填充账号密码，插件将**只识别验证码并登录**，避免冲突。
-    * 提供“强制填充账号”选项，确保插件总是使用你保存的账号密码进行填充。
-* **全自动登录**：验证码识别并填充完成后，自动点击登录按钮。
-* **“记住我”自动勾选**：自动勾选登录页面的“记住我”选项（如有），延长登录有效期。
-* **用户友好面板**：美观现代的弹出面板，支持启用/关闭插件、配置账号密码。
-* **本地安全存储**：所有敏感数据（账号密码、设置）仅加密存储在您的浏览器本地，绝不上传到任何服务器。
+  <br>
+
+  <p align="center">
+    告别手动输入，体验丝滑的毫秒级自动登录。<br>
+    专为 NJUer 设计，基于 Chrome 扩展架构与 OCR 技术。
+  </p>
+
+</div>
+
+## ✨ 核心特性
+
+| 功能 | 说明 |
+| :--- | :--- |
+| **🧠 智能识别** | 内置 **Tesseract.js** 引擎，本地精准识别图形验证码，无需联网。 |
+| **🛡️ 隐私优先** | 数据仅加密存储于 **浏览器本地 (Chrome Storage)**，绝不上传任何服务器。 |
+| **⚡ 毫秒响应** | 页面加载即刻识别，毫秒级填充并自动提交，无需等待。 |
+| **🤖 智能填充** | 自动判断浏览器填充状态。支持「强制填充」模式，解决账号冲突。 |
+| **🎨 现代交互** | 极简紫韵 UI 面板，支持状态开关、一键配置。 |
+
+<br>
 
 ## 🛠️ 安装指南
 
@@ -79,4 +94,4 @@
 
 本项目采用 MIT 许可证。
 
----
+<div align="center"> <sub>Made with 💜 by <a href="https://www.google.com/search?q=https://github.com/treehey">Treehey</a></sub> </div>
