@@ -1,12 +1,22 @@
 // content.js
-console.log("NJU 验证码识别助手 v2.0 已启动...");
+console.log("NJU 验证码识别助手 v2.5 已启动...");
 
 const IMG_SELECTOR = "#captchaImg"; 
 const INPUT_SELECTOR = "#captchaResponse";   
 
 async function solveCaptcha() {
+    // --- 新增：检查插件是否启用 ---
+    const settings = await chrome.storage.local.get(['nju_enabled']);
+    if (settings.nju_enabled === false) {
+        console.log("NJU 助手：当前处于关闭状态。");
+        return; 
+    }
+    // ----------------------------
+    
     const imgElement = document.querySelector(IMG_SELECTOR);
     const inputElement = document.querySelector(INPUT_SELECTOR);
+    const userInput = document.querySelector("#username");
+    const passInput = document.querySelector("#password")
     if (!imgElement || !inputElement) return;
 
     try {
@@ -51,33 +61,32 @@ async function solveCaptcha() {
         console.log("处理后识别结果:", code);
 
         if (code) {
-            // 1. 格式化并填入
-            const finalCode = code.length > 4 ? code.substring(0, 4) : code;
-            inputElement.value = finalCode;
-            
-            // 2. 模拟人工输入触发验证事件
-            ['input', 'change', 'blur'].forEach(ev => {
-                inputElement.dispatchEvent(new Event(ev, { bubbles: true }));
-            });
-            
-            console.log("已填入验证码:", finalCode);
+            // 1. 填入验证码
+            inputElement.value = code;
+            inputElement.dispatchEvent(new Event('input', { bubbles: true }));
 
-            // 3. 延迟一小会儿后自动点击登录 (给网页脚本留一点响应时间)
+            // 2. 智能填充账号密码
+            // 判断逻辑：(如果开启了强制填充) 或者 (账号和密码框目前都是空的)
+            const shouldFill = settings.nju_force || (!userInput.value && !passInput.value);
+
+            if (shouldFill && settings.nju_user && settings.nju_pass) {
+                console.log("NJU助手：执行账号密码填充");
+                userInput.value = settings.nju_user;
+                passInput.value = settings.nju_pass;
+                userInput.dispatchEvent(new Event('input', { bubbles: true }));
+                passInput.dispatchEvent(new Event('input', { bubbles: true }));
+            } else {
+                console.log("NJU助手：检测到浏览器已自动填充或未开启强制填充，跳过账号填入");
+            }
+
+            // 3. 自动登录
             setTimeout(() => {
-                // 南大登录按钮的 ID 通常是 #save，也可能是 .auth_login_btn
-                const loginBtn = document.querySelector(".auth_login_btn") ||
-                                 document.querySelector("button[type='submit']");
-                
-                if (loginBtn) {
-                    console.log("检测到登录按钮，正在自动登录...");
-                    loginBtn.click();
-                } else {
-                    console.warn("未找到登录按钮，请手动点击。");
-                }
-            }, 1000); // 延迟 1000 毫秒点击，稳定性更高
+                const loginBtn = document.querySelector("#save") || document.querySelector(".auth_login_btn");
+                if (loginBtn) loginBtn.click();
+            }, 600);
         }
     } catch (err) {
-        console.error("识别过程出错:", err);
+        console.error("识别出错:", err);
     }
 }
 

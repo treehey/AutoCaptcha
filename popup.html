@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root { --primary: #634798; --bg: #f8f9fa; --text: #333; }
+    body { width: 260px; margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    .header { background: var(--primary); color: white; padding: 15px; text-align: center; font-weight: 600; font-size: 16px; letter-spacing: 1px; }
+    .container { padding: 20px; }
+    .card { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 15px; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 14px; }
+    input { width: 100%; border: 1px solid #ddd; border-radius: 6px; padding: 10px; margin: 8px 0; font-size: 14px; transition: border 0.3s; box-sizing: border-box; }
+    input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px rgba(99, 71, 152, 0.1); }
+    button { width: 100%; background: var(--primary); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: transform 0.1s, background 0.3s; }
+    button:active { transform: scale(0.98); }
+    button:hover { background: #523a80; }
+    .hint { font-size: 11px; color: #888; margin-top: 8px; line-height: 1.4; }
+    /* 现代开关 */
+    .switch { position: relative; width: 36px; height: 20px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background: #ccc; transition: .3s; border-radius: 20px; }
+    .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background: white; transition: .3s; border-radius: 50%; }
+    input:checked + .slider { background: var(--primary); }
+    input:checked + .slider:before { transform: translateX(16px); }
+    .security-note {
+  margin-top: 15px;
+  padding: 10px;
+  background: #eef2ff;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #4a5568;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+}
+.security-note svg {
+  color: #634798;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+  </style>
+</head>
+<body>
+  <div class="header">NJU Login</div>
+  <div class="container">
+    <div class="card">
+      <div class="row">
+        <span>自动登录总开关</span>
+        <label class="switch"><input type="checkbox" id="isEnabled"><span class="slider"></span></label>
+      </div>
+      <div class="row">
+        <span>强制填充账号</span>
+        <label class="switch"><input type="checkbox" id="forceFill"><span class="slider"></span></label>
+      </div>
+    </div>
+    <div class="card">
+      <input type="text" id="username" placeholder="学号 / 工号">
+      <input type="password" id="password" placeholder="密码">
+      <button id="saveBtn">保存配置</button>
+    </div>
+    <div class="hint">开启“强制填充”：即使浏览器记住了密码，插件也会覆盖填入。</div>
+    <div class="security-note">
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+  </svg>
+  数据仅加密存储在您的浏览器本地，不上传服务器。
+</div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
