@@ -71,7 +71,7 @@ function hideLoadingAnimation() {
 
 async function solveCaptcha() {
     // --- 新增：检查插件是否启用 ---
-    const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force']);
+    const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force', 'nju_autoClick']);
     if (settings.nju_enabled === false) {
         console.log("NJU 助手：当前处于关闭状态。");
         return;
@@ -101,34 +101,34 @@ async function solveCaptcha() {
 
     try {
         const imgElement = document.querySelector(IMG_SELECTOR);
-        
+
         // --- 优化1: 放大图片 (Upscaling) ---
         // 放大 3 倍，让 Tesseract 看得更清楚
-        const scale = 3; 
+        const scale = 3;
         const canvas = document.createElement('canvas');
         canvas.width = imgElement.naturalWidth * scale;
         canvas.height = imgElement.naturalHeight * scale;
         const ctx = canvas.getContext('2d');
-        ctx.imageSmoothingEnabled = false; 
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
 
         // --- 优化2: 图像二值化 (针对性调整) ---
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
-        
+
         for (let i = 0; i < data.length; i += 4) {
-            const r = data[i], g = data[i+1], b = data[i+2];
+            const r = data[i], g = data[i + 1], b = data[i + 2];
             // 灰度化
             const grayscale = 0.299 * r + 0.587 * g + 0.114 * b;
-            
+
             // 【核心调整】：降低阈值
             // 文字很黑(<100)，干扰线是灰的(>120)，背景是白的(>200)
             // 将阈值设为 110，可以有效滤除那些浅色的蜘蛛网线
-            const threshold = 110; 
-            
+            const threshold = 110;
+
             // 低于阈值设为黑(0)，高于设为白(255)
             const v = grayscale < threshold ? 0 : 255;
-            data[i] = data[i+1] = data[i+2] = v;
+            data[i] = data[i + 1] = data[i + 2] = v;
         }
 
         // --- 优化3: 噪点清理 (去除孤立黑点) ---
@@ -136,7 +136,7 @@ async function solveCaptcha() {
         const width = canvas.width;
         const height = canvas.height;
         const originalData = new Uint8ClampedArray(data); // 备份数据用于判断
-        
+
         for (let y = 1; y < height - 1; y++) {
             for (let x = 1; x < width - 1; x++) {
                 const idx = (y * width + x) * 4;
@@ -150,16 +150,16 @@ async function solveCaptcha() {
                     // 如果四周大多是白点（说明它是噪点），把它抹白
                     // 这里判断条件：如果四周有3个以上是白的，就删掉这个黑点
                     if ((up + down + left + right) >= 255 * 3) {
-                        data[idx] = data[idx+1] = data[idx+2] = 255;
+                        data[idx] = data[idx + 1] = data[idx + 2] = 255;
                     }
                 }
             }
         }
-        
+
         ctx.putImageData(imageData, 0, 0);
 
         // ============= v5 核心修改开始 =============
-        
+
         // 在 v5 中，createWorker 直接接收语言和参数，不需要 loadLanguage/initialize
         const worker = await Tesseract.createWorker('eng', 1, {
             workerPath: chrome.runtime.getURL('langs/worker.min.js'),
@@ -167,7 +167,7 @@ async function solveCaptcha() {
             langPath: chrome.runtime.getURL('langs/'), // 这里只需指向文件夹目录，不要带文件名
             gzip: false,
             errorHandler: m => console.error(m),
-            logger: m => {} // 空函数，屏蔽进度日志防止跨域报错
+            logger: m => { } // 空函数，屏蔽进度日志防止跨域报错
         });
 
         // 设置白名单和识别模式
@@ -175,15 +175,15 @@ async function solveCaptcha() {
             tessedit_char_whitelist: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
             // PSM 7 = Treat the image as a single text line. (视为单行文本)
             // 这对于验证码至关重要，否则 Tesseract 可能会把稀疏的字符当成两行或者图形忽略掉
-            tessedit_pageseg_mode: '7', 
+            tessedit_pageseg_mode: '7',
         });
 
         // 识别
         const { data: { text } } = await worker.recognize(canvas);
-        
+
         // 销毁
         await worker.terminate();
-        
+
         // ============= v5 核心修改结束 =============
 
         // 6. 处理结果
@@ -213,15 +213,20 @@ async function solveCaptcha() {
             // ---------------------------
 
             // 3. 自动登录
-            // setTimeout(() => {
-            //     const loginBtn = document.querySelector("#save") || document.querySelector(".auth_login_btn");
-            //     if (loginBtn) {
-            //         loginBtn.click();
-            //     } else {
-            //         console.warn("NJU 助手：未找到登录按钮，请手动点击。");
-            //     }
-            // }, 600);
-        }else {
+            if (settings.nju_auto_click !== false) {
+                console.log("NJU助手：自动登录开关已开启，准备点击登录...");
+                setTimeout(() => {
+                    const loginBtn = document.querySelector("#save") || document.querySelector(".auth_login_btn");
+                    if (loginBtn) {
+                        loginBtn.click();
+                    } else {
+                        console.warn("NJU 助手：未找到登录按钮，请手动点击。");
+                    }
+                }, 600);
+            } else {
+                console.log("NJU助手：自动登录开关关闭，请手动检查后点击。");
+            }
+        } else {
             console.log("识别结果不完整，重试中...");
             imgElement.click(); // 点击刷新验证码，自动触发重试
         }

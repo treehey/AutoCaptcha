@@ -2,8 +2,6 @@ document.getElementById('saveBtn').addEventListener('click', () => {
   const settings = {
     nju_user: document.getElementById('username').value,
     nju_pass: document.getElementById('password').value,
-    nju_enabled: document.getElementById('isEnabled').checked,
-    nju_force: document.getElementById('forceFill').checked
   };
 
   chrome.storage.local.set(settings, () => {
@@ -17,11 +15,31 @@ document.getElementById('saveBtn').addEventListener('click', () => {
   });
 });
 
-chrome.storage.local.get(['nju_user', 'nju_pass', 'nju_enabled', 'nju_force'], (data) => {
+// 绑定元素
+const switches = ['isEnabled', 'forceFill', 'autoClick'];
+const saveBtn = document.getElementById('saveBtn');
+
+// 1. 初始化加载
+chrome.storage.local.get(['nju_user', 'nju_pass', 'nju_enabled', 'nju_force', 'nju_auto_click'], (data) => {
   document.getElementById('username').value = data.nju_user || '';
   document.getElementById('password').value = data.nju_pass || '';
+  
+  // 开关状态加载
   document.getElementById('isEnabled').checked = data.nju_enabled !== false;
   document.getElementById('forceFill').checked = !!data.nju_force;
+  document.getElementById('autoClick').checked = data.nju_auto_click !== false;
+});
+
+// 2. 为开关绑定自动保存事件
+switches.forEach(id => {
+  document.getElementById(id).addEventListener('change', (e) => {
+    const keyMap = {
+      'isEnabled': 'nju_enabled',
+      'forceFill': 'nju_force',
+      'autoClick': 'nju_auto_click'
+    };
+    chrome.storage.local.set({ [keyMap[id]]: e.target.checked });
+  });
 });
 
 // 打开 GitHub 仓库
