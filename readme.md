@@ -11,7 +11,7 @@
   ![Stars](https://img.shields.io/github/stars/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)
   ![Forks](https://img.shields.io/github/forks/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)
   ![License](https://img.shields.io/github/license/treehey/AutoCaptcha?style=flat-square&color=634798)
-  ![Version](https://img.shields.io/badge/version-2.2.0-634798?style=flat-square)
+  ![Version](https://img.shields.io/badge/version-2.3.0-634798?style=flat-square)
 
   <br>
 

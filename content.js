@@ -1,8 +1,8 @@
 // content.js
-console.log("NJU 验证码识别助手 v2.2 已启动...");
+console.log("NJU 验证码识别助手 v2.3 已启动...");
 
-const IMG_SELECTOR = "#captchaImg"; 
-const INPUT_SELECTOR = "#captchaResponse";   
+const IMG_SELECTOR = "#captchaImg";
+const INPUT_SELECTOR = "#captchaResponse";
 
 function createLoadingAnimation() {
     let animationDiv = document.getElementById('nju-loading-animation');
@@ -74,10 +74,10 @@ async function solveCaptcha() {
     const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force']);
     if (settings.nju_enabled === false) {
         console.log("NJU 助手：当前处于关闭状态。");
-        return; 
+        return;
     }
     // ----------------------------
-    
+
     const imgElement = document.querySelector(IMG_SELECTOR);
     const inputElement = document.querySelector(INPUT_SELECTOR);
     const userInput = document.querySelector("#username");
@@ -85,7 +85,7 @@ async function solveCaptcha() {
     if (!imgElement || !inputElement || !userInput || !passInput) {
         console.log("NJU 助手：未找到所有登录元素，或页面未加载完成。");
         // 尝试再次调度，直到所有元素都找到
-        setTimeout(solveCaptcha, 1000); 
+        setTimeout(solveCaptcha, 1000);
         return;
     }
 
@@ -100,6 +100,7 @@ async function solveCaptcha() {
     // ----------------------------
 
     try {
+        // 3. 图像处理 (Canvas 二值化)
         const canvas = document.createElement('canvas');
         canvas.width = imgElement.naturalWidth;
         canvas.height = imgElement.naturalHeight;
@@ -124,21 +125,34 @@ async function solveCaptcha() {
             data[i] = data[i+1] = data[i+2] = v;
         }
         ctx.putImageData(imageData, 0, 0);
-        // ------------------------------------
 
-        // 识别处理后的图片
-        const result = await Tesseract.recognize(
-            canvas, 
-            'eng',
-            {
-                // 强制包含数字，提高 5 的识别率
-                tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                logger: m => console.log("识别状态:", m.status)
-            }
-        );
+        // ============= v5 核心修改开始 =============
+        
+        // 在 v5 中，createWorker 直接接收语言和参数，不需要 loadLanguage/initialize
+        const worker = await Tesseract.createWorker('eng', 1, {
+            workerPath: chrome.runtime.getURL('langs/worker.min.js'),
+            corePath: chrome.runtime.getURL('langs/tesseract-core.wasm.js'),
+            langPath: chrome.runtime.getURL('langs/'), // 这里只需指向文件夹目录，不要带文件名
+            errorHandler: m => console.error(m),
+            logger: m => {} // 空函数，屏蔽进度日志防止跨域报错
+        });
 
-        let code = result.data.text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        console.log("处理后识别结果:", code);
+        // 设置白名单 (v5 中 setParameters 依然可用)
+        await worker.setParameters({
+            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+            tessedit_pageseg_mode: '6',
+        });
+
+        // 识别
+        const { data: { text } } = await worker.recognize(canvas);
+        
+        // 销毁
+        await worker.terminate();
+        
+        // ============= v5 核心修改结束 =============
+
+        // 6. 处理结果
+        let code = text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 4);
 
         if (code) {
             // 1. 填入验证码
