@@ -1,5 +1,5 @@
 // content.js
-console.log("NJU 验证码识别助手 v2.3 已启动...");
+console.log("NJU 验证码识别助手 v2.4 已启动...");
 
 const IMG_SELECTOR = "#captchaImg";
 const INPUT_SELECTOR = "#captchaResponse";
@@ -100,30 +100,62 @@ async function solveCaptcha() {
     // ----------------------------
 
     try {
-        // 3. 图像处理 (Canvas 二值化)
+        const imgElement = document.querySelector(IMG_SELECTOR);
+        
+        // --- 优化1: 放大图片 (Upscaling) ---
+        // 放大 3 倍，让 Tesseract 看得更清楚
+        const scale = 3; 
         const canvas = document.createElement('canvas');
-        canvas.width = imgElement.naturalWidth;
-        canvas.height = imgElement.naturalHeight;
+        canvas.width = imgElement.naturalWidth * scale;
+        canvas.height = imgElement.naturalHeight * scale;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(imgElement, 0, 0);
+        ctx.imageSmoothingEnabled = false; 
+        ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
 
-        // --- 核心图像处理：去噪与二值化 ---
+        // --- 优化2: 图像二值化 (针对性调整) ---
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
         
         for (let i = 0; i < data.length; i += 4) {
-            // 提取红绿蓝三色
             const r = data[i], g = data[i+1], b = data[i+2];
-            // 灰度化处理
-            const grayscale = 0.3 * r + 0.59 * g + 0.11 * b;
+            // 灰度化
+            const grayscale = 0.299 * r + 0.587 * g + 0.114 * b;
             
-            // 关键阈值：南大验证码字符颜色较深，背景线较浅
-            // 尝试将 120-150 之间的值。低于此值的变黑（字符），高于此值的变白（背景）
-            const threshold = 130; 
+            // 【核心调整】：降低阈值
+            // 文字很黑(<100)，干扰线是灰的(>120)，背景是白的(>200)
+            // 将阈值设为 110，可以有效滤除那些浅色的蜘蛛网线
+            const threshold = 110; 
+            
+            // 低于阈值设为黑(0)，高于设为白(255)
             const v = grayscale < threshold ? 0 : 255;
-            
             data[i] = data[i+1] = data[i+2] = v;
         }
+
+        // --- 优化3: 噪点清理 (去除孤立黑点) ---
+        // 这一步能把残留的断裂线条清理干净
+        const width = canvas.width;
+        const height = canvas.height;
+        const originalData = new Uint8ClampedArray(data); // 备份数据用于判断
+        
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const idx = (y * width + x) * 4;
+                if (originalData[idx] === 0) { // 如果是黑点
+                    // 检查上下左右四个点
+                    const up = originalData[((y - 1) * width + x) * 4];
+                    const down = originalData[((y + 1) * width + x) * 4];
+                    const left = originalData[(y * width + (x - 1)) * 4];
+                    const right = originalData[(y * width + (x + 1)) * 4];
+
+                    // 如果四周大多是白点（说明它是噪点），把它抹白
+                    // 这里判断条件：如果四周有3个以上是白的，就删掉这个黑点
+                    if ((up + down + left + right) >= 255 * 3) {
+                        data[idx] = data[idx+1] = data[idx+2] = 255;
+                    }
+                }
+            }
+        }
+        
         ctx.putImageData(imageData, 0, 0);
 
         // ============= v5 核心修改开始 =============
@@ -133,14 +165,17 @@ async function solveCaptcha() {
             workerPath: chrome.runtime.getURL('langs/worker.min.js'),
             corePath: chrome.runtime.getURL('langs/tesseract-core.wasm.js'),
             langPath: chrome.runtime.getURL('langs/'), // 这里只需指向文件夹目录，不要带文件名
+            gzip: false,
             errorHandler: m => console.error(m),
             logger: m => {} // 空函数，屏蔽进度日志防止跨域报错
         });
 
-        // 设置白名单 (v5 中 setParameters 依然可用)
+        // 设置白名单和识别模式
         await worker.setParameters({
-            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-            // tessedit_pageseg_mode: '6',
+            tessedit_char_whitelist: '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
+            // PSM 7 = Treat the image as a single text line. (视为单行文本)
+            // 这对于验证码至关重要，否则 Tesseract 可能会把稀疏的字符当成两行或者图形忽略掉
+            tessedit_pageseg_mode: '7', 
         });
 
         // 识别
@@ -152,9 +187,9 @@ async function solveCaptcha() {
         // ============= v5 核心修改结束 =============
 
         // 6. 处理结果
-        let code = text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 4);
+        let code = text.replace(/[^a-zA-Z0-9]/g, '').substring(0, 4);
 
-        if (code) {
+        if (code && code.length === 4) {
             // 1. 填入验证码
             inputElement.value = code;
             inputElement.dispatchEvent(new Event('input', { bubbles: true }));
@@ -178,14 +213,17 @@ async function solveCaptcha() {
             // ---------------------------
 
             // 3. 自动登录
-            setTimeout(() => {
-                const loginBtn = document.querySelector("#save") || document.querySelector(".auth_login_btn");
-                if (loginBtn) {
-                    loginBtn.click();
-                } else {
-                    console.warn("NJU 助手：未找到登录按钮，请手动点击。");
-                }
-            }, 600);
+            // setTimeout(() => {
+            //     const loginBtn = document.querySelector("#save") || document.querySelector(".auth_login_btn");
+            //     if (loginBtn) {
+            //         loginBtn.click();
+            //     } else {
+            //         console.warn("NJU 助手：未找到登录按钮，请手动点击。");
+            //     }
+            // }, 600);
+        }else {
+            console.log("识别结果不完整，重试中...");
+            imgElement.click(); // 点击刷新验证码，自动触发重试
         }
     } catch (err) {
         console.error("识别出错:", err);
