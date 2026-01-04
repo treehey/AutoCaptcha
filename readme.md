@@ -1,6 +1,6 @@
 # 🚀 NJU Login Pro - 南京大学统一身份认证自动登录助手
 
-![NJU Login Pro Logo](https://raw.githubusercontent.com/treehey/AutoCaptcha/main/assets/logo.png)
+![NJU Login Pro Logo](https://github.com/treehey/AutoCaptcha/blob/d326a5be2eade7a579cafbcb4295ffa896d9e9ee/assets/icon128.png)
 一个为南京大学师生设计的 Chrome 浏览器扩展，旨在简化统一身份认证系统的登录流程。告别手动输入验证码和账号密码，享受一键登录的便捷体验！
 
 ![GitHub Repo stars](https://img.shields.io/github/stars/treehey/AutoCaptcha?style=social)
