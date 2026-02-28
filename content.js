@@ -2,7 +2,7 @@
 console.log("NJU 验证码识别助手 v2.4 已启动...");
 
 const IMG_SELECTOR = "#captchaImg";
-const INPUT_SELECTOR = "#captchaResponse";
+const INPUT_SELECTOR = "#captcha";
 
 function createLoadingAnimation() {
     let animationDiv = document.getElementById('nju-loading-animation');
@@ -216,7 +216,7 @@ async function solveCaptcha() {
             if (settings.nju_auto_click !== false) {
                 console.log("NJU助手：自动登录开关已开启，准备点击登录...");
                 setTimeout(() => {
-                    const loginBtn = document.querySelector("#save") || document.querySelector(".auth_login_btn");
+                    const loginBtn = document.querySelector("#login_submit") || document.querySelector(".auth_login_btn");
                     if (loginBtn) {
                         loginBtn.click();
                     } else {
