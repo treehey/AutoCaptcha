@@ -69,7 +69,34 @@ function hideLoadingAnimation() {
     }
 }
 
+let isSolving = false; // 互斥锁，防止并发重复执行
+let retryTimer = null; // 统一管理重试定时器，防止多个定时器堆积
+
 async function solveCaptcha() {
+    if (isSolving) {
+        console.log("NJU 助手：识别正在进行中，跳过重复调用。");
+        return;
+    }
+    // 清除所有待执行的重试定时器，保证只有一个调用链
+    if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+    }
+    isSolving = true;
+
+    try {
+        await _solveCaptchaImpl();
+    } finally {
+        isSolving = false;
+    }
+}
+
+function scheduleRetry(ms) {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = setTimeout(solveCaptcha, ms);
+}
+
+async function _solveCaptchaImpl() {
     // --- 新增：检查插件是否启用 ---
     const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force', 'nju_autoClick']);
     if (settings.nju_enabled === false) {
@@ -84,8 +111,14 @@ async function solveCaptcha() {
     const passInput = document.querySelector("#password")
     if (!imgElement || !inputElement || !userInput || !passInput) {
         console.log("NJU 助手：未找到所有登录元素，或页面未加载完成。");
-        // 尝试再次调度，直到所有元素都找到
-        setTimeout(solveCaptcha, 1000);
+        scheduleRetry(1000);
+        return;
+    }
+
+    // 图片尚未加载完（naturalWidth 为 0），等待后重试
+    if (imgElement.naturalWidth === 0) {
+        console.log("NJU 助手：验证码图片尚未加载完，等待中...");
+        scheduleRetry(800);
         return;
     }
 
@@ -115,7 +148,6 @@ async function solveCaptcha() {
         // --- 优化2: 图像二值化 (针对性调整) ---
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
-
         for (let i = 0; i < data.length; i += 4) {
             const r = data[i], g = data[i + 1], b = data[i + 2];
             // 灰度化
@@ -228,23 +260,26 @@ async function solveCaptcha() {
             }
         } else {
             console.log("识别结果不完整，重试中...");
-            hideLoadingAnimation(); // 先隐藏 loading，避免蒙层卡死
-            imgElement.click();     // 点击刷新验证码图片，load 事件触发后自动重试
+            hideLoadingAnimation();
+            imgElement.click(); // 触发图片刷新，load 事件会调度下一次识别
+            // 保底：如果 load 事件未触发（图片URL不变等情况），2秒后直接重试
+            scheduleRetry(2000);
         }
     } catch (err) {
         console.error("识别出错:", err);
-        hideLoadingAnimation(); // 出错时同样要隐藏 loading
+        hideLoadingAnimation();
+        scheduleRetry(2000); // 出错后也保底重试
     }
 }
 
 // 稍微增加延迟，等待南大脚本把验证码图片刷出来
-setTimeout(solveCaptcha, 2500);
+scheduleRetry(2500);
 
 // 使用捕获阶段事件委托监听验证码图片刷新
 // load 事件不冒泡，必须用 capture:true；同时避免元素未就绪时 ?. 静默失败
 document.addEventListener('load', (e) => {
     if (e.target && e.target.matches && e.target.matches(IMG_SELECTOR)) {
         console.log("验证码图片已更新，准备识别...");
-        setTimeout(solveCaptcha, 1000);
+        scheduleRetry(500); // 用 scheduleRetry 取代旧定时器，防止与保底重试叠加
     }
 }, true);

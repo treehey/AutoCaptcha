@@ -85,18 +85,22 @@ async function tryGrabOnce() {
       // 找到匹配课程所在行
       result.notFound.splice(i, 1);
 
+      // 检查是否已选
+      const isSelected = rowText.includes('退选') || rowText.includes('已选');
+      if (isSelected) {
+        pushLog(`✅ "${target}" 已在选课列表中，无需再抢`);
+        grabState.successCourses.push(target);
+        continue;
+      }
+
+      // 检查是否已满（收藏页面满员时按钮仍可见，需主动判断文字）
+      // 匹配"已满"或"已满/N"格式，避免误判课程名中含"满"字
+      const isFull = /已满/.test(rowText);
+
       // 检查是否有"选择"按钮（cv-choice）
       const choiceBtn = row.querySelector('.cv-choice');
-      if (!choiceBtn || choiceBtn.disabled || choiceBtn.offsetParent === null) {
-        // 按钮不存在或不可见——课程已满或已选
-        const isFull = rowText.includes('已满') || rowText.includes('满');
-        const isSelected = rowText.includes('退选') || rowText.includes('已选');
-        if (isSelected) {
-          pushLog(`✅ "${target}" 已在选课列表中，无需再抢`);
-          grabState.successCourses.push(target);
-        } else {
-          result.full.push(target);
-        }
+      if (!choiceBtn || choiceBtn.disabled || choiceBtn.offsetParent === null || isFull) {
+        result.full.push(target);
         continue;
       }
 
@@ -111,9 +115,19 @@ async function tryGrabOnce() {
         result.grabbed.push(target);
         grabState.successCourses.push(target);
       } else {
-        pushLog(`⚠️ "${target}" 点击选择后未出现确认框，请手动确认`);
-        result.grabbed.push(target); // 乐观记录
-        grabState.successCourses.push(target);
+        // 未出现确认框（如收藏页面可能直接选上，或点击无效）
+        // 等待一下再检查行状态是否已变为"已选/退选"
+        await sleep(800);
+        const updatedText = row.innerText || row.textContent || '';
+        if (updatedText.includes('退选') || updatedText.includes('已选')) {
+          pushLog(`✅ "${target}" 选课成功（页面直接确认，无弹窗）`);
+          result.grabbed.push(target);
+          grabState.successCourses.push(target);
+        } else {
+          // 实际未成功，继续监控
+          pushLog(`⚠️ "${target}" 点击选择后未出现确认框，且未检测到选课成功，继续监控`);
+          result.full.push(target);
+        }
       }
 
       await sleep(500); // 操作后稍等
@@ -132,7 +146,9 @@ function sleep(ms) {
  * 等待策略：先等旧行消失或数量变化，最多等 2 秒
  */
 async function refreshList() {
-  const refreshBtn = document.querySelector('.cv-btn.refresh-btn');
+  // 兼容普通选课页和收藏页：先找专属 class，再找文本为"刷新"的按钮
+  const refreshBtn = document.querySelector('.cv-btn.refresh-btn')
+    || [...document.querySelectorAll('button, .cv-btn')].find(el => el.textContent.trim() === '刷新');
   if (!refreshBtn) return; // 找不到刷新按钮则跳过
 
   // 视觉反馈：短暂高亮按钮，表明脚本正在点击
