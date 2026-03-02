@@ -62,7 +62,117 @@ async function confirmDialog() {
 }
 
 /**
+ * 公共：点击选择按钮后等待确认弹窗，处理结果
+ * @returns {boolean} 是否成功
+ */
+async function clickAndConfirm(choiceBtn, row, target, result) {
+  pushLog(`🖱️ 发现"${target}"有空位，正在点击选择...`);
+  choiceBtn.click();
+
+  const confirmed = await confirmDialog();
+  if (confirmed) {
+    pushLog(`🎉 "${target}" 抢课成功！确认弹窗已点击`);
+    result.grabbed.push(target);
+    grabState.successCourses.push(target);
+    return true;
+  }
+
+  // 未出现确认框：等待后检查行状态
+  await sleep(800);
+  const updatedText = row.innerText || row.textContent || '';
+  if (updatedText.includes('退选') || updatedText.includes('已选')) {
+    pushLog(`✅ "${target}" 选课成功（页面直接确认，无弹窗）`);
+    result.grabbed.push(target);
+    grabState.successCourses.push(target);
+    return true;
+  }
+
+  pushLog(`⚠️ "${target}" 点击选择后未出现确认框，且未检测到选课成功，继续监控`);
+  result.full.push(target);
+  return false;
+}
+
+/**
+ * 获取专业课展开后的班级子行
+ * 兼容两种渲染方式：行内子元素 / 紧跟的兄弟 tr 行
+ */
+function getExpandedClassRows(row) {
+  // 方式1：展开内容渲染在本行内部（子元素）
+  const inner = [...row.querySelectorAll('tr, [class*="class"], [class*="expand"], [class*="child"]')]
+    .filter(el => el.querySelector('.cv-choice') || /已满|退选|已选/.test(el.textContent));
+  if (inner.length > 0) return inner;
+
+  // 方式2：展开内容作为后续兄弟 tr 插入（直到遇到下一个拥有 cv-zy-expand 的主行）
+  const siblings = [];
+  let next = row.nextElementSibling;
+  while (next && siblings.length < 30) {
+    if (next.querySelector('.cv-zy-expand')) break; // 遇到下一门课的主行，停止
+    if (next.querySelector('.cv-choice') || /已满|退选|已选/.test(next.textContent)) {
+      siblings.push(next);
+    }
+    next = next.nextElementSibling;
+  }
+  return siblings;
+}
+
+/**
+ * 专业课流程：展开班级 → 找有空位的班 → 选择
+ */
+async function grabZhuanye(row, target, result) {
+  const expandBtn = row.querySelector('.cv-zy-expand');
+  if (!expandBtn) return false; // 不是专业课，交给普通流程处理
+
+  pushLog(`📂 "${target}" 检测为专业课，正在展开班级列表...`);
+  expandBtn.click();
+
+  // 等待班级子行出现，最多 2 秒
+  let waited = 0;
+  let classRows = [];
+  while (waited < 2000) {
+    await sleep(100);
+    waited += 100;
+    classRows = getExpandedClassRows(row);
+    if (classRows.length > 0) break;
+  }
+
+  if (classRows.length === 0) {
+    pushLog(`⚠️ "${target}" 班级列表展开失败或无可用班级，继续等待`);
+    result.full.push(target);
+    return true;
+  }
+
+
+  for (const classRow of classRows) {
+    // 只认有“退选”按钮的班级为已选
+    const tuiXuanBtn = Array.from(classRow.querySelectorAll('.cv-choice, .cv-btn')).find(btn => btn.textContent.trim() === '退选');
+    if (tuiXuanBtn && tuiXuanBtn.offsetParent !== null && !tuiXuanBtn.disabled) {
+      pushLog(`✅ "${target}" 已在选课列表中，无需再抢`);
+      grabState.successCourses.push(target);
+      return true;
+    }
+
+    // 该班满员，跳过
+    const classText = classRow.innerText || classRow.textContent || '';
+    if (/已满/.test(classText)) continue;
+
+    // 找选择按钮
+    const choiceBtn = classRow.querySelector('.cv-choice');
+    if (!choiceBtn || choiceBtn.disabled || choiceBtn.offsetParent === null) continue;
+
+    // 有空位，尝试选择
+    await clickAndConfirm(choiceBtn, classRow, target, result);
+    await sleep(500);
+    return true;
+  }
+
+  // 所有班级均满员
+  result.full.push(target);
+  return true;
+}
+
+/**
  * 尝试对页面上匹配课程名的行点击"选择"按钮
+ * 自动识别普通课 / 收藏页 / 专业课（cv-zy-expand）
  * @returns {Object} { grabbed: string[], full: string[], notFound: string[] }
  */
 async function tryGrabOnce() {
@@ -86,51 +196,34 @@ async function tryGrabOnce() {
       result.notFound.splice(i, 1);
 
       // 检查是否已选
-      const isSelected = rowText.includes('退选') || rowText.includes('已选');
-      if (isSelected) {
+      if (rowText.includes('退选') || rowText.includes('已选')) {
         pushLog(`✅ "${target}" 已在选课列表中，无需再抢`);
         grabState.successCourses.push(target);
         continue;
       }
 
-      // 检查是否已满（收藏页面满员时按钮仍可见，需主动判断文字）
-      // 匹配"已满"或"已满/N"格式，避免误判课程名中含"满"字
-      const isFull = /已满/.test(rowText);
+      // ---- 专业课分支（有 cv-zy-expand 按钮） ----
+      if (row.querySelector('.cv-zy-expand')) {
+        await grabZhuanye(row, target, result);
+        await sleep(500);
+        continue;
+      }
 
-      // 检查是否有"选择"按钮（cv-choice）
-      const choiceBtn = row.querySelector('.cv-choice');
-      if (!choiceBtn || choiceBtn.disabled || choiceBtn.offsetParent === null || isFull) {
+      // ---- 普通课 / 收藏页分支 ----
+      // 检查是否已满（收藏页面满员时按钮仍可见，需主动判断文字）
+      if (/已满/.test(rowText)) {
         result.full.push(target);
         continue;
       }
 
-      // 点击选择按钮
-      pushLog(`🖱️ 发现"${target}"有空位，正在点击选择...`);
-      choiceBtn.click();
-
-      // 等待并确认弹窗
-      const confirmed = await confirmDialog();
-      if (confirmed) {
-        pushLog(`🎉 "${target}" 抢课成功！确认弹窗已点击`);
-        result.grabbed.push(target);
-        grabState.successCourses.push(target);
-      } else {
-        // 未出现确认框（如收藏页面可能直接选上，或点击无效）
-        // 等待一下再检查行状态是否已变为"已选/退选"
-        await sleep(800);
-        const updatedText = row.innerText || row.textContent || '';
-        if (updatedText.includes('退选') || updatedText.includes('已选')) {
-          pushLog(`✅ "${target}" 选课成功（页面直接确认，无弹窗）`);
-          result.grabbed.push(target);
-          grabState.successCourses.push(target);
-        } else {
-          // 实际未成功，继续监控
-          pushLog(`⚠️ "${target}" 点击选择后未出现确认框，且未检测到选课成功，继续监控`);
-          result.full.push(target);
-        }
+      const choiceBtn = row.querySelector('.cv-choice');
+      if (!choiceBtn || choiceBtn.disabled || choiceBtn.offsetParent === null) {
+        result.full.push(target);
+        continue;
       }
 
-      await sleep(500); // 操作后稍等
+      await clickAndConfirm(choiceBtn, row, target, result);
+      await sleep(500);
     }
   }
 
