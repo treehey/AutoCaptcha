@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 
 <head>
@@ -11,7 +11,7 @@
         }
 
         body {
-            width: 260px;
+            width: 290px;
             margin: 0;
             font-family: 'Segoe UI', system-ui, sans-serif;
             background: var(--bg);
@@ -21,23 +21,56 @@
         .header {
             background: var(--primary);
             color: white;
-            padding: 15px;
+            padding: 13px 15px;
             text-align: center;
             font-weight: 600;
             font-size: 16px;
             letter-spacing: 1px;
         }
 
+        /* ===== Tab 导航 ===== */
+        .tabs {
+            display: flex;
+            background: white;
+            border-bottom: 2px solid #e0d8f0;
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 9px 0;
+            border: none;
+            background: none;
+            color: #888;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            border-radius: 0;
+            transition: color 0.2s;
+            width: auto;
+        }
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+        .tab-btn:hover:not(.active) {
+            color: #523a80;
+            background: #f5f0ff;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* ===== 通用容器 ===== */
         .container {
-            padding: 20px;
+            padding: 14px;
         }
 
         .card {
             background: white;
             border-radius: 12px;
-            padding: 15px;
+            padding: 13px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
 
         .row {
@@ -48,18 +81,20 @@
             font-size: 14px;
         }
 
-        input {
+        input[type="text"],
+        input[type="password"] {
             width: 100%;
             border: 1px solid #ddd;
             border-radius: 6px;
-            padding: 10px;
-            margin: 8px 0;
-            font-size: 14px;
+            padding: 9px 10px;
+            margin: 6px 0;
+            font-size: 13px;
             transition: border 0.3s;
             box-sizing: border-box;
         }
 
-        input:focus {
+        input[type="text"]:focus,
+        input[type="password"]:focus {
             border-color: var(--primary);
             outline: none;
             box-shadow: 0 0 0 2px rgba(99, 71, 152, 0.1);
@@ -70,11 +105,12 @@
             background: var(--primary);
             color: white;
             border: none;
-            padding: 12px;
+            padding: 11px;
             border-radius: 8px;
             font-weight: 600;
             cursor: pointer;
             transition: transform 0.1s, background 0.3s;
+            font-size: 13px;
         }
 
         button:active {
@@ -88,7 +124,7 @@
         .hint {
             font-size: 11px;
             color: #888;
-            margin-top: 8px;
+            margin-top: 6px;
             line-height: 1.4;
         }
 
@@ -135,8 +171,8 @@
         }
 
         .security-note {
-            margin-top: 15px;
-            padding: 10px;
+            margin-top: 12px;
+            padding: 9px;
             background: #eef2ff;
             border-radius: 6px;
             font-size: 11px;
@@ -154,9 +190,8 @@
         }
 
         .github-btn {
-            margin-top: 15px;
+            margin-top: 12px;
             background: #24292e;
-            /* GitHub 黑色 */
             display: flex;
             align-items: center;
             justify-content: center;
@@ -171,53 +206,173 @@
         .github-btn svg {
             fill: white;
         }
+
+        /* ===== 选课助手专属 ===== */
+        .grab-label {
+            font-size: 12px;
+            color: #555;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        textarea#courseNames {
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 12px;
+            resize: vertical;
+            min-height: 60px;
+            box-sizing: border-box;
+            font-family: inherit;
+            transition: border 0.3s;
+        }
+        textarea#courseNames:focus {
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(99,71,152,0.1);
+        }
+        .grab-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-top: 8px;
+        }
+        .grab-interval {
+            flex: 1;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 8px;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+        .grab-interval:focus { border-color: var(--primary); outline: none; }
+        #grabBtn { flex: 2; padding: 8px; font-size: 13px; }
+        #grabBtn.running { background: #d9534f; }
+        #grabBtn.running:hover { background: #c9302c; }
+        #grabStatus {
+            margin-top: 10px;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 11px;
+            line-height: 1.65;
+            max-height: 165px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+        }
+        #grabStatus .log-line { margin: 1px 0; word-break: break-all; }
+        #grabStatus .log-line.success { color: #6fcf97; }
+        #grabStatus .log-line.warn    { color: #f2c94c; }
+        #grabStatus .log-line.error   { color: #eb5757; }
+        .grab-info {
+            font-size: 11px;
+            color: #888;
+            margin-top: 6px;
+            line-height: 1.5;
+        }
+        .grab-info a { color: var(--primary); text-decoration: none; }
+        .status-badge {
+            display: inline-block;
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-weight: 600;
+            background: #eee;
+            color: #555;
+            margin-left: 6px;
+        }
+        .status-badge.on  { background: #d4edda; color: #155724; }
+        .status-badge.off { background: #f8d7da; color: #721c24; }
     </style>
 </head>
 
 <body>
-    <div class="header">NJU Login</div>
-    <div class="container">
-        <div class="card">
-            <div class="row">
-                <span>自动登录总开关</span>
-                <label class="switch"><input type="checkbox" id="isEnabled"><span class="slider"></span></label>
-            </div>
-            <!-- <div class="row">
-                <span>选课系统自动登录</span>
-                <label class="switch"><input type="checkbox" id="xkEnabled"><span class="slider"></span></label>
-            </div> -->
-            <div class="row">
-                <span>强制填充账号</span>
-                <label class="switch"><input type="checkbox" id="forceFill"><span class="slider"></span></label>
-            </div>
-            <div class="row">
-                <span>识别后自动登录</span>
-                <label class="switch"><input type="checkbox" id="autoClick"><span class="slider"></span></label>
-            </div>
-        </div>
-        
-        <div class="card">
-            <input type="text" id="username" placeholder="学号 / 工号">
-            <input type="password" id="password" placeholder="密码">
-            <button id="saveBtn">保存</button>
-        </div>
-        
-        <div class="hint">开启“强制填充”：即使浏览器记住了密码，插件也会覆盖填入。</div>
-        <div class="security-note">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-                <path
-                    d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" />
-            </svg>
-            数据仅加密存储在您的浏览器本地，不上传服务器。
-        </div>
-        <button id="githubBtn" class="github-btn">
-            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
-                <path
-                    d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2.0-.21.15-.46.55-.38C13.71 14.53 16 11.53 16 8c0-4.42-3.58-8-8-8z" />
-            </svg>
-            在 GitHub 上查看
-        </button>
+    <div class="header">NJU 助手</div>
+
+    <!-- Tab 导航 -->
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="login">&#x1F510; 登录助手</button>
+        <button class="tab-btn" data-tab="grab">&#x1F4DA; 选课助手</button>
     </div>
+
+    <!-- ===== 登录助手 Tab ===== -->
+    <div class="tab-panel active" id="tab-login">
+        <div class="container">
+            <div class="card">
+                <div class="row">
+                    <span>自动登录总开关</span>
+                    <label class="switch"><input type="checkbox" id="isEnabled"><span class="slider"></span></label>
+                </div>
+                <div class="row">
+                    <span>强制填充账号</span>
+                    <label class="switch"><input type="checkbox" id="forceFill"><span class="slider"></span></label>
+                </div>
+                <div class="row">
+                    <span>识别后自动登录</span>
+                    <label class="switch"><input type="checkbox" id="autoClick"><span class="slider"></span></label>
+                </div>
+            </div>
+
+            <div class="card">
+                <input type="text" id="username" placeholder="学号 / 工号">
+                <input type="password" id="password" placeholder="密码">
+                <button id="saveBtn">保存</button>
+            </div>
+
+            <div class="hint">开启"强制填充"：即使浏览器记住了密码，插件也会覆盖填入。</div>
+            <div class="security-note">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" />
+                </svg>
+                数据仅加密存储在您的浏览器本地，不上传服务器。
+            </div>
+            <button id="githubBtn" class="github-btn">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2.0-.21.15-.46.55-.38C13.71 14.53 16 11.53 16 8c0-4.42-3.58-8-8-8z" />
+                </svg>
+                在 GitHub 上查看
+            </button>
+        </div>
+    </div>
+
+    <!-- ===== 选课助手 Tab ===== -->
+    <div class="tab-panel" id="tab-grab">
+        <div class="container">
+            <div class="card">
+                <div class="row" style="margin-bottom:6px;">
+                    <span style="font-weight:600;font-size:14px;">&#x1F3AF; 自动抢课</span>
+                    <span class="status-badge off" id="grabBadge">未运行</span>
+                </div>
+                <div class="row">
+                    <span>选课系统自动登录 <span style="font-size:10px;color:#aaa;font-weight:400;">（开发中）</span></span>
+                    <label class="switch" style="opacity:0.4;pointer-events:none;"><input type="checkbox" id="xkEnabled" disabled><span class="slider"></span></label>
+                </div>
+                <div class="grab-label">目标课程名称（每行一个，支持模糊匹配）</div>
+                <textarea id="courseNames" placeholder="例如：&#10;仙林游泳初级&#10;仙林足球初级"></textarea>
+                <div class="grab-row">
+                    <select class="grab-interval" id="grabInterval">
+                        <option value="1000">间隔 1秒</option>
+                        <option value="2000">间隔 2秒</option>
+                        <option value="3000" selected>间隔 3秒</option>
+                        <option value="5000">间隔 5秒</option>
+                        <option value="10000">间隔 10秒</option>
+                        <option value="15000">间隔 15秒</option>
+                        <option value="30000">间隔 30秒</option>
+                    </select>
+                    <button id="grabBtn">&#x25B6; 开始监控</button>
+                </div>
+                <div class="grab-info">
+                    请先在浏览器中打开
+                    <a href="https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do" target="_blank">选课页面</a>，再点击开始。
+                </div>
+            </div>
+            <div id="grabStatus">
+                <div class="log-line" style="color:#888;">等待启动...</div>
+            </div>
+        </div>
+    </div>
+
     <script src="popup.js"></script>
 </body>
 

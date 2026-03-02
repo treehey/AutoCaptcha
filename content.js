@@ -228,18 +228,23 @@ async function solveCaptcha() {
             }
         } else {
             console.log("识别结果不完整，重试中...");
-            imgElement.click(); // 点击刷新验证码，自动触发重试
+            hideLoadingAnimation(); // 先隐藏 loading，避免蒙层卡死
+            imgElement.click();     // 点击刷新验证码图片，load 事件触发后自动重试
         }
     } catch (err) {
         console.error("识别出错:", err);
+        hideLoadingAnimation(); // 出错时同样要隐藏 loading
     }
 }
 
 // 稍微增加延迟，等待南大脚本把验证码图片刷出来
 setTimeout(solveCaptcha, 2500);
 
-// 点击图片刷新后自动重试
-document.querySelector(IMG_SELECTOR)?.addEventListener('load', () => {
-    console.log("验证码图片已更新，准备识别...");
-    setTimeout(solveCaptcha, 1000);
-});
+// 使用捕获阶段事件委托监听验证码图片刷新
+// load 事件不冒泡，必须用 capture:true；同时避免元素未就绪时 ?. 静默失败
+document.addEventListener('load', (e) => {
+    if (e.target && e.target.matches && e.target.matches(IMG_SELECTOR)) {
+        console.log("验证码图片已更新，准备识别...");
+        setTimeout(solveCaptcha, 1000);
+    }
+}, true);

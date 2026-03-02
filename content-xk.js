@@ -1024,7 +1024,7 @@ async function autoFillCredentials() {
     try {
         // 使用统一身份认证的账号密码，但检查选课系统独立开关
         const settings = await chrome.storage.local.get(['nju_user', 'nju_pass', 'xk_enabled']);
-        if (settings.xk_enabled === false) {
+        if (settings.xk_enabled !== true) {
             console.log("✗ 选课系统自动登录未启用");
             return false;
         }
