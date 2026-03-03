@@ -236,7 +236,8 @@ function sleep(ms) {
 
 /**
  * 点击刷新按钮，等待列表重新渲染
- * 等待策略：先等旧行消失或数量变化，最多等 2 秒
+ * 等待策略：MutationObserver 监听表格任意 DOM 变化（含选课人数文字更新），
+ * 检测到变化后 50ms 继续；若数据完全未变则最多兜底等 800ms
  */
 async function refreshList() {
   // 兼容普通选课页和收藏页：先找专属 class，再找文本为"刷新"的按钮
@@ -249,22 +250,26 @@ async function refreshList() {
   refreshBtn.style.cssText += ';outline:3px solid #634798 !important;opacity:0.6 !important;transition:none !important;';
   setTimeout(() => refreshBtn.setAttribute('style', origStyle), 400);
 
-  // 记录刷新前的行数，用于判断渲染完成
-  const before = document.querySelectorAll('table tbody tr, .cv-tbody tr, .ant-table-tbody tr').length;
   refreshBtn.click();
 
-  // 等待内容刷新：最多 2000ms，每 100ms 检测一次行数是否有变化
-  // 如果行数在刷新后先归零再恢复，或直接恢复，说明渲染完毕
-  let waited = 0;
-  let zeroSeen = false;
-  while (waited < 2000) {
-    await sleep(100);
-    waited += 100;
-    const after = document.querySelectorAll('table tbody tr, .cv-tbody tr, .ant-table-tbody tr').length;
-    if (after === 0) { zeroSeen = true; }
-    if (zeroSeen && after > 0) break;  // 先空后有，渲染完毕
-    if (!zeroSeen && after !== before) break; // 直接变化
-  }
+  // 用 MutationObserver 监听表格区域任意变化（含文字/属性/子元素）
+  // 检测到变化后再等 50ms 让批量更新完成，最多兜底等 800ms
+  // 注意：若本轮刷新前后数据完全未变，则安静等待 800ms 后继续，不会卡满 1s
+  const tableRoot = document.querySelector('table, .cv-tbody, .ant-table-tbody') || document.body;
+  await new Promise(resolve => {
+    const timer = setTimeout(resolve, 800);
+    const observer = new MutationObserver(() => {
+      clearTimeout(timer);
+      observer.disconnect();
+      setTimeout(resolve, 50); // 等批量更新收尾
+    });
+    observer.observe(tableRoot, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true
+    });
+  });
 }
 
 // ============ 监控主循环 ============

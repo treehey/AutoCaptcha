@@ -1323,8 +1323,14 @@ function initAutoLogin() {
     setTimeout(() => {
         const refreshBtn = document.querySelector(CONFIG.refreshBtn);
         if (refreshBtn) {
-            refreshBtn.addEventListener('click', () => {
+            refreshBtn.addEventListener('click', async () => {
                 console.log("🔄 验证码已刷新");
+                // 检查开关，未启用时不自动识别
+                const settings = await chrome.storage.local.get(['xk_enabled']);
+                if (settings.xk_enabled !== true) {
+                    console.log("✗ 选课系统自动登录未启用，跳过自动识别");
+                    return;
+                }
                 window._captchaAttempts = 0;  // 重置计数器
                 setTimeout(autoSolveCaptcha, 800);
             });
