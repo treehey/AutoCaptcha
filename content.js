@@ -1,5 +1,5 @@
 // content.js
-console.log("NJU 验证码识别助手 v2.4 已启动...");
+console.log("NJU 验证码识别助手 v3.1.1 已启动...");
 
 const IMG_SELECTOR = "#captchaImg";
 const INPUT_SELECTOR = "#captcha";
@@ -98,7 +98,7 @@ function scheduleRetry(ms) {
 
 async function _solveCaptchaImpl() {
     // --- 新增：检查插件是否启用 ---
-    const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force', 'nju_autoClick']);
+    const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force', 'nju_auto_click']);
     if (settings.nju_enabled === false) {
         console.log("NJU 助手：当前处于关闭状态。");
         return;
