@@ -71,6 +71,8 @@ function hideLoadingAnimation() {
 
 let isSolving = false; // 互斥锁，防止并发重复执行
 let retryTimer = null; // 统一管理重试定时器，防止多个定时器堆积
+let autoRefreshCount = 0; // 自动刷新次数计数，防止无限循环
+let isProgrammaticRefresh = false; // 标记是否为程序触发的图片刷新
 
 async function solveCaptcha() {
     if (isSolving) {
@@ -137,14 +139,17 @@ async function _solveCaptchaImpl() {
 
         // --- 优化1: 放大图片 (Upscaling) ---
         // 放大 4 倍，使用平滑插值保留笔画细节（尤其弧线）
+        // 用 createImageBitmap 确保图片像素已完全解码，避免 canvas 读到空白
         const scale = 4;
         const canvas = document.createElement('canvas');
-        canvas.width = imgElement.naturalWidth * scale;
-        canvas.height = imgElement.naturalHeight * scale;
+        const bitmap = await createImageBitmap(imgElement);
+        canvas.width = bitmap.width * scale;
+        canvas.height = bitmap.height * scale;
         const ctx = canvas.getContext('2d');
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
 
         const width = canvas.width;
         const height = canvas.height;
@@ -276,6 +281,7 @@ async function _solveCaptchaImpl() {
         let code = text.replace(/[^a-zA-Z0-9]/g, '').substring(0, 4);
 
         if (code && code.length === 4) {
+            autoRefreshCount = 0; // 识别成功，重置刷新计数
             // 1. 填入验证码
             inputElement.value = code;
             inputElement.dispatchEvent(new Event('input', { bubbles: true }));
@@ -313,11 +319,29 @@ async function _solveCaptchaImpl() {
                 console.log("NJU助手：自动登录开关关闭，请手动检查后点击。");
             }
         } else {
-            console.log("识别结果不完整，重试中...");
-            hideLoadingAnimation();
-            imgElement.click(); // 触发图片刷新，load 事件会调度下一次识别
-            // 保底：如果 load 事件未触发（图片URL不变等情况），2秒后直接重试
-            scheduleRetry(2000);
+            const MAX_AUTO_REFRESHES = 3;
+            if (autoRefreshCount < MAX_AUTO_REFRESHES) {
+                autoRefreshCount++;
+                console.log(`NJU 助手：识别结果不完整，自动刷新重试 (${autoRefreshCount}/${MAX_AUTO_REFRESHES})...`);
+                hideLoadingAnimation();
+                isProgrammaticRefresh = true;
+                // 点击页面自带的"刷新"链接，触发 reloadCaptcha(true)，正确刷新验证码图片
+                const refreshBtn = document.querySelector('.captcha-refresh');
+                if (refreshBtn) {
+                    refreshBtn.click();
+                } else if (typeof window.reloadCaptcha === 'function') {
+                    window.reloadCaptcha(true);
+                } else {
+                    // 最终保底：直接修改 src
+                    imgElement.src = imgElement.src.replace(/\?\d+$/, '') + '?' + Date.now();
+                }
+                scheduleRetry(2500); // 保底：如果 load 事件未触发，2.5秒后直接重试
+            } else {
+                console.warn("NJU 助手：连续多次识别失败，已停止自动刷新，请手动点击\"刷新\"后重试。");
+                hideLoadingAnimation();
+                autoRefreshCount = 0;
+                isProgrammaticRefresh = false; // 重置，防止状态卡住导致手动刷新不生效
+            }
         }
     } catch (err) {
         console.error("识别出错:", err);
@@ -334,6 +358,20 @@ scheduleRetry(2500);
 document.addEventListener('load', (e) => {
     if (e.target && e.target.matches && e.target.matches(IMG_SELECTOR)) {
         console.log("验证码图片已更新，准备识别...");
+        // 清空验证码输入框，防止旧值触发"已填入，跳过识别"的逻辑
+        const inputEl = document.querySelector(INPUT_SELECTOR);
+        if (inputEl) {
+            inputEl.value = '';
+            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (isProgrammaticRefresh) {
+            // 程序触发的刷新：不重置计数，继续计数逻辑
+            isProgrammaticRefresh = false;
+        } else {
+            // 用户手动点击刷新：重置自动刷新计数，给新一轮完整的重试机会
+            console.log("NJU 助手：检测到用户手动刷新验证码，重置自动刷新计数。");
+            autoRefreshCount = 0;
+        }
         scheduleRetry(500); // 用 scheduleRetry 取代旧定时器，防止与保底重试叠加
     }
 }, true);
