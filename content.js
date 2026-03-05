@@ -1,5 +1,5 @@
 // content.js
-console.log("NJU 验证码识别助手 v3.1.1 已启动...");
+console.log("NJU 验证码识别助手 v3.2 已启动...");
 
 const IMG_SELECTOR = "#captchaImg";
 const INPUT_SELECTOR = "#captcha";
