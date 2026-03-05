@@ -136,52 +136,106 @@ async function _solveCaptchaImpl() {
         const imgElement = document.querySelector(IMG_SELECTOR);
 
         // --- 优化1: 放大图片 (Upscaling) ---
-        // 放大 3 倍，让 Tesseract 看得更清楚
-        const scale = 3;
+        // 放大 4 倍，使用平滑插值保留笔画细节（尤其弧线）
+        const scale = 4;
         const canvas = document.createElement('canvas');
         canvas.width = imgElement.naturalWidth * scale;
         canvas.height = imgElement.naturalHeight * scale;
         const ctx = canvas.getContext('2d');
-        ctx.imageSmoothingEnabled = false;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
 
-        // --- 优化2: 图像二值化 (针对性调整) ---
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // --- 优化2: 颜色感知的二值化 ---
+        // 验证码文字通常是带颜色的（如绿/蓝/红），干扰线通常更浅或低饱和度
+        // 利用饱和度+亮度综合判断，比纯灰度阈值更精确
+        const imageData = ctx.getImageData(0, 0, width, height);
         const data = imageData.data;
         for (let i = 0; i < data.length; i += 4) {
             const r = data[i], g = data[i + 1], b = data[i + 2];
-            // 灰度化
-            const grayscale = 0.299 * r + 0.587 * g + 0.114 * b;
 
-            // 【核心调整】：降低阈值
-            // 文字很黑(<100)，干扰线是灰的(>120)，背景是白的(>200)
-            // 将阈值设为 110，可以有效滤除那些浅色的蜘蛛网线
-            const threshold = 110;
+            // 亮度
+            const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
 
-            // 低于阈值设为黑(0)，高于设为白(255)
-            const v = grayscale < threshold ? 0 : 255;
+            // 饱和度 (HSV 模型)：有颜色的文字饱和度较高
+            const maxC = Math.max(r, g, b);
+            const minC = Math.min(r, g, b);
+            const saturation = maxC > 0 ? (maxC - minC) / maxC : 0;
+
+            // 文字判定：
+            //   1. 有明显颜色(饱和度>0.15) 且 亮度不太高(<170)  → 彩色文字
+            //   2. 亮度很低(<80) → 深色/黑色文字
+            const isText = (saturation > 0.15 && luminance < 170) || luminance < 80;
+
+            const v = isText ? 0 : 255;
             data[i] = data[i + 1] = data[i + 2] = v;
         }
 
-        // --- 优化3: 噪点清理 (去除孤立黑点) ---
-        // 这一步能把残留的断裂线条清理干净
-        const width = canvas.width;
-        const height = canvas.height;
-        const originalData = new Uint8ClampedArray(data); // 备份数据用于判断
+        // --- 优化3: 形态学闭运算 (先膨胀再腐蚀) ---
+        // 目的：修复因二值化造成的笔画断裂（例如 U 的弧线变断）
 
+        // 3a. 膨胀：将黑色像素向 8 邻域扩展 1 像素
+        const afterDilate = new Uint8ClampedArray(data);
         for (let y = 1; y < height - 1; y++) {
             for (let x = 1; x < width - 1; x++) {
                 const idx = (y * width + x) * 4;
-                if (originalData[idx] === 0) { // 如果是黑点
-                    // 检查上下左右四个点
-                    const up = originalData[((y - 1) * width + x) * 4];
-                    const down = originalData[((y + 1) * width + x) * 4];
-                    const left = originalData[(y * width + (x - 1)) * 4];
-                    const right = originalData[(y * width + (x + 1)) * 4];
+                if (data[idx] === 0) { // 原来是黑
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const ni = ((y + dy) * width + (x + dx)) * 4;
+                            afterDilate[ni] = afterDilate[ni + 1] = afterDilate[ni + 2] = 0;
+                        }
+                    }
+                }
+            }
+        }
 
-                    // 如果四周大多是白点（说明它是噪点），把它抹白
-                    // 这里判断条件：如果四周有3个以上是白的，就删掉这个黑点
-                    if ((up + down + left + right) >= 255 * 3) {
+        // 3b. 腐蚀：只保留 8 邻域全黑的像素，恢复原始粗细
+        const afterErode = new Uint8ClampedArray(afterDilate);
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const idx = (y * width + x) * 4;
+                if (afterDilate[idx] === 0) {
+                    let allBlack = true;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            if (afterDilate[((y + dy) * width + (x + dx)) * 4] !== 0) {
+                                allBlack = false;
+                                break;
+                            }
+                        }
+                        if (!allBlack) break;
+                    }
+                    if (!allBlack) {
+                        afterErode[idx] = afterErode[idx + 1] = afterErode[idx + 2] = 255;
+                    }
+                }
+            }
+        }
+
+        // 写回
+        for (let i = 0; i < data.length; i++) data[i] = afterErode[i];
+
+        // --- 优化4: 噪点清理 (8 邻域，仅删除极度孤立的点) ---
+        const cleanRef = new Uint8ClampedArray(data);
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const idx = (y * width + x) * 4;
+                if (cleanRef[idx] === 0) { // 如果是黑点
+                    let blackNeighbors = 0;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            if (dy === 0 && dx === 0) continue;
+                            if (cleanRef[((y + dy) * width + (x + dx)) * 4] === 0) {
+                                blackNeighbors++;
+                            }
+                        }
+                    }
+                    // 8 邻域中黑色邻居 ≤ 1 才视为噪点（比原来宽容很多）
+                    if (blackNeighbors <= 1) {
                         data[idx] = data[idx + 1] = data[idx + 2] = 255;
                     }
                 }
