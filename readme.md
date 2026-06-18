@@ -11,7 +11,7 @@
   ![Stars](https://img.shields.io/github/stars/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)
   ![Forks](https://img.shields.io/github/forks/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)
   ![License](https://img.shields.io/github/license/treehey/AutoCaptcha?style=flat-square&color=634798)
-  ![Version](https://img.shields.io/badge/version-3.1.0-634798?style=flat-square)
+  ![Version](https://img.shields.io/badge/version-3.3-634798?style=flat-square)
 
   <br>
 
@@ -123,6 +123,10 @@
 * **HTML/CSS/JavaScript**：构建插件界面和核心逻辑。
 * **Chrome Extension API**：`chrome.storage` 本地数据存储；`chrome.tabs` + `chrome.runtime.sendMessage` 实现 Popup 与页面脚本的实时通信。
 * **Tesseract.js**：浏览器端的 OCR 识别库，用于处理验证码图片。
+
+## 📋 更新记录
+
+完整版本更新记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## ⚠️ 注意事项
 

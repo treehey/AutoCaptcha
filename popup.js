@@ -1,3 +1,8 @@
+const versionBadge = document.getElementById('versionBadge');
+if (versionBadge && chrome.runtime && chrome.runtime.getManifest) {
+  versionBadge.textContent = `v${chrome.runtime.getManifest().version}`;
+}
+
 // ============ Tab 切换 ============
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
