@@ -11,7 +11,7 @@
   ![Stars](https://img.shields.io/github/stars/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)
   ![Forks](https://img.shields.io/github/forks/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)
   ![License](https://img.shields.io/github/license/treehey/AutoCaptcha?style=flat-square&color=634798)
-  ![Version](https://img.shields.io/badge/version-3.6.1-634798?style=flat-square)
+  ![Version](https://img.shields.io/badge/version-3.6.2-634798?style=flat-square)
 
   <br>
 
@@ -64,7 +64,13 @@
 
 ## 🛠️ 安装指南
 
-本插件为非官方扩展，需以“开发者模式”安装。
+本插件已发布到 Microsoft Edge Add-ons，也可以以“开发者模式”从源码安装。
+
+### 从 Edge 商店安装
+
+访问 [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/hebfkinlcalfnmeeeaciaghoialpmnfp) 并点击获取。
+
+### 从源码安装
 
 1.  **下载仓库**：将本 GitHub 仓库克隆或下载到本地：
     ```bash
@@ -147,6 +153,9 @@
 ## 📋 更新记录
 
 完整版本更新记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+插件商店描述见 [STORE_DESCRIPTION.md](STORE_DESCRIPTION.md)。
+隐私政策见 [PRIVACY.md](PRIVACY.md)。
 
 ## ⚠️ 注意事项
 

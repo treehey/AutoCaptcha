@@ -1,15 +1,16 @@
 {
   "manifest_version": 3,
   "name": "NJU 自动登录助手",
-  "description": "为南京大学师生设计的扩展，自动识别统一身份认证图形验证码并填写账号密码，同时提供选课系统登录后的自动抢课助手。",
-  "version": "3.6.1",
+  "description": "南大统一身份认证本地 OCR 自动登录助手，内置选课系统登录后的课程监控与自动抢课，无需大模型 API。",
+  "version": "3.6.2",
   "default_locale": "zh_CN",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
     "128": "icon128.png"
   },
-  "permissions": ["storage", "activeTab", "tabs"],
+  "permissions": ["storage"],
+  "host_permissions": ["https://xk.nju.edu.cn/*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

@@ -1,4 +1,4 @@
 {
   "appName": { "message": "NJU Login Pro" },
-  "appDesc": { "message": "Auto-login helper for Nanjing University. Supports OCR captcha solving and automated course-grabbing with continuous seat monitoring." }
+  "appDesc": { "message": "Local OCR auto-login helper for NJU unified authentication, with post-login course monitoring and auto-grabbing for the course system." }
 }
