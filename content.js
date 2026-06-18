@@ -8,6 +8,7 @@ const IMG_SELECTOR = "#captchaImg";
 const INPUT_SELECTOR = "#captcha";
 const CAPTCHA_CHAR_WHITELIST = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 let captchaWorkerPromise = null;
+const CAPTCHA_OCR_MAX_WORKERS = 2;
 const CAPTCHA_OCR_VARIANTS = [
     {
         name: 'strict-color',
@@ -31,7 +32,8 @@ const CAPTCHA_OCR_VARIANTS = [
         lineMaxSaturation: 0.26,
         lineMinLuminance: 80,
         scale: 6,
-        priority: 4
+        priority: 4,
+        fallbackOnly: true
     },
     {
         name: 'loose-color',
@@ -914,6 +916,27 @@ function correctVisualConfusions(code, base, results) {
     return corrected;
 }
 
+function isSameCaptchaChar(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    return /[a-zA-Z]/.test(a)
+        && /[a-zA-Z]/.test(b)
+        && a.toLowerCase() === b.toLowerCase();
+}
+
+function countCandidateSupport(result, candidates) {
+    let support = 0;
+    for (let i = 0; i < result.code.length; i++) {
+        support += candidates.filter(other => {
+            return other !== result
+                && other.code
+                && other.code.length === result.code.length
+                && isSameCaptchaChar(other.code[i], result.code[i]);
+        }).length;
+    }
+    return support;
+}
+
 function selectCaptchaCode(results) {
     const valid = results.filter(result => result.code.length === 4);
     if (!valid.length) return '';
@@ -951,13 +974,45 @@ function selectCaptchaCode(results) {
     const selected = consensus.length === 4 ? consensus : bestWhole.code;
     const exactMatches = valid.filter(result => result.code === selected);
     const maxConfidence = exactMatches.reduce((max, result) => Math.max(max, result.confidence || 0), 0);
-    const reliable = exactMatches.length >= 3 || (exactMatches.length >= 2 && maxConfidence >= 35);
+    const reliable = exactMatches.length >= 3 || (exactMatches.length >= 2 && maxConfidence >= 30);
     const trustedHighConfidence = valid
-        .filter(result => ['loose-color', 'simple-threshold', 'legacy-fallback'].includes(result.variant))
-        .filter(result => (result.confidence || 0) >= 75)
+        .filter(result => ['balanced-color', 'loose-color', 'simple-threshold', 'legacy-fallback'].includes(result.variant))
+        .filter(result => (result.confidence || 0) >= 72)
         .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
 
-    return reliable ? selected : (trustedHighConfidence ? trustedHighConfidence.code : '');
+    if (reliable) return selected;
+    if (trustedHighConfidence) return trustedHighConfidence.code;
+
+    const supportedWhole = valid
+        .map(result => {
+            const support = countCandidateSupport(result, valid);
+            return {
+                result,
+                support,
+                score: support * 10 + result.priority + Math.max(0, result.confidence || 0) / 10
+            };
+        })
+        .filter(item => item.support >= 6)
+        .filter(item => (item.result.confidence || 0) >= (item.support >= 7 ? 40 : 50))
+        .sort((a, b) => b.score - a.score)[0];
+
+    if (supportedWhole) return supportedWhole.result.code;
+
+    const moderatelyTrusted = valid
+        .map(result => ({
+            result,
+            support: countCandidateSupport(result, valid)
+        }))
+        .filter(item => ['loose-color', 'simple-threshold'].includes(item.result.variant))
+        .filter(item => (item.result.confidence || 0) >= 55)
+        .filter(item => item.support >= 3)
+        .sort((a, b) => {
+            const scoreA = a.support * 10 + (a.result.confidence || 0);
+            const scoreB = b.support * 10 + (b.result.confidence || 0);
+            return scoreB - scoreA;
+        })[0];
+
+    return moderatelyTrusted ? moderatelyTrusted.result.code : '';
 }
 
 async function createCaptchaWorker() {
@@ -972,16 +1027,74 @@ async function createCaptchaWorker() {
 
     await worker.setParameters({
         tessedit_char_whitelist: CAPTCHA_CHAR_WHITELIST,
-        tessedit_pageseg_mode: '7',
+        tessedit_pageseg_mode: '13',
         user_defined_dpi: '300'
     });
 
     return worker;
 }
 
+function getCaptchaWorkerTargetCount() {
+    if (!Tesseract.createScheduler) return 1;
+
+    const cores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+        ? navigator.hardwareConcurrency
+        : CAPTCHA_OCR_MAX_WORKERS;
+    return Math.max(1, Math.min(CAPTCHA_OCR_MAX_WORKERS, cores));
+}
+
+async function createCaptchaOcrEngine() {
+    if (!Tesseract.createScheduler) {
+        const worker = await createCaptchaWorker();
+        return {
+            parallel: false,
+            workerCount: 1,
+            recognize: image => worker.recognize(image),
+            terminate: () => worker.terminate()
+        };
+    }
+
+    const scheduler = Tesseract.createScheduler();
+    let terminated = false;
+    let extraWorkersPromise = Promise.resolve();
+    const firstWorker = await createCaptchaWorker();
+    scheduler.addWorker(firstWorker);
+
+    const engine = {
+        parallel: true,
+        workerCount: 1,
+        recognize: image => scheduler.addJob('recognize', image),
+        terminate: async () => {
+            terminated = true;
+            await extraWorkersPromise.catch(() => { });
+            await scheduler.terminate();
+        }
+    };
+
+    const extraWorkerCount = getCaptchaWorkerTargetCount() - 1;
+    if (extraWorkerCount > 0) {
+        extraWorkersPromise = Promise.all(
+            Array.from({ length: extraWorkerCount }, () => createCaptchaWorker())
+        ).then(workers => {
+            for (const worker of workers) {
+                if (terminated) {
+                    worker.terminate().catch(() => { });
+                } else {
+                    scheduler.addWorker(worker);
+                    engine.workerCount++;
+                }
+            }
+        }).catch(err => {
+            console.warn("NJU 助手：并行 OCR worker 初始化失败，已降级为单 worker:", err);
+        });
+    }
+
+    return engine;
+}
+
 function getCaptchaWorker() {
     if (!captchaWorkerPromise) {
-        captchaWorkerPromise = createCaptchaWorker().catch(err => {
+        captchaWorkerPromise = createCaptchaOcrEngine().catch(err => {
             captchaWorkerPromise = null;
             throw err;
         });
@@ -992,8 +1105,8 @@ function getCaptchaWorker() {
 async function resetCaptchaWorker() {
     if (!captchaWorkerPromise) return;
     try {
-        const worker = await captchaWorkerPromise;
-        await worker.terminate();
+        const engine = await captchaWorkerPromise;
+        await engine.terminate();
     } catch (err) {
         console.warn("NJU 助手：重置 OCR worker 时出现异常:", err);
     } finally {
@@ -1001,37 +1114,66 @@ async function resetCaptchaWorker() {
     }
 }
 
+async function recognizeCaptchaVariant(engine, base, variant) {
+    const canvas = createPreprocessedCanvas(base, variant);
+    const { data } = await engine.recognize(canvas);
+    return {
+        variant: variant.name,
+        text: data.text || '',
+        code: normalizeCaptchaCode(data.text),
+        confidence: data.confidence || 0,
+        priority: variant.priority
+    };
+}
+
+async function recognizeCaptchaVariants(engine, base, variants = CAPTCHA_OCR_VARIANTS) {
+    if (engine.parallel) {
+        return Promise.all(
+            variants.map(variant => recognizeCaptchaVariant(engine, base, variant))
+        );
+    }
+
+    const results = [];
+    for (const variant of variants) {
+        results.push(await recognizeCaptchaVariant(engine, base, variant));
+    }
+    return results;
+}
+
+function getFastCaptchaVariants() {
+    return CAPTCHA_OCR_VARIANTS.filter(variant => !variant.fallbackOnly);
+}
+
+function getFallbackCaptchaVariants() {
+    return CAPTCHA_OCR_VARIANTS.filter(variant => variant.fallbackOnly);
+}
+
 async function recognizeCaptchaCode(imgElement) {
     const base = await readCaptchaBitmap(imgElement);
-    const worker = await getCaptchaWorker();
-    const results = [];
+    const engine = await getCaptchaWorker();
+    let results = [];
 
     try {
-        for (const variant of CAPTCHA_OCR_VARIANTS) {
-            const canvas = createPreprocessedCanvas(base, variant);
-            const { data } = await worker.recognize(canvas);
-            results.push({
-                variant: variant.name,
-                text: data.text || '',
-                code: normalizeCaptchaCode(data.text),
-                confidence: data.confidence || 0,
-                priority: variant.priority
-            });
+        results = await recognizeCaptchaVariants(engine, base, getFastCaptchaVariants());
+        let selectedCode = selectCaptchaCode(results);
+        if (!selectedCode) {
+            const fallbackResults = await recognizeCaptchaVariants(engine, base, getFallbackCaptchaVariants());
+            results = results.concat(fallbackResults);
+            selectedCode = selectCaptchaCode(results);
         }
+
+        const code = selectedCode ? correctVisualConfusions(selectedCode, base, results) : '';
+        console.log(
+            "NJU 助手：OCR候选：",
+            results.map(r => `${r.variant}${r.variant === 'balanced-color' ? '*' : ''}=${r.code || '空'}(${Math.round(r.confidence)})`).join(' | '),
+            "=>",
+            code || '无有效结果'
+        );
+        return code;
     } catch (err) {
         await resetCaptchaWorker();
         throw err;
     }
-
-    const selectedCode = selectCaptchaCode(results);
-    const code = selectedCode ? correctVisualConfusions(selectedCode, base, results) : '';
-    console.log(
-        "NJU 助手：OCR候选：",
-        results.map(r => `${r.variant}=${r.code || '空'}(${Math.round(r.confidence)})`).join(' | '),
-        "=>",
-        code || '无有效结果'
-    );
-    return code;
 }
 
 chrome.storage.local.get(['nju_enabled']).then(settings => {
