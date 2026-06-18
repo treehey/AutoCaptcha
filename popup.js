@@ -44,9 +44,6 @@ chrome.storage.local.get(['nju_user', 'nju_pass', 'nju_enabled', 'nju_force', 'n
   document.getElementById('isEnabled').checked = data.nju_enabled !== false;
   document.getElementById('forceFill').checked = !!data.nju_force;
   document.getElementById('autoClick').checked = data.nju_auto_click !== false;
-  
-  // 选课系统自动登录尚未完成，强制禁用
-  chrome.storage.local.set({ xk_enabled: false });
 });
 
 // 2. 为开关绑定自动保存事件
