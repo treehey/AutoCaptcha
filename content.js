@@ -923,6 +923,33 @@ function isLikelyDigitFive(mask, width, height, charIndex, charCount) {
     return hasTopBar && hasMiddleBar && hasBottomCurve && fiveSidePattern;
 }
 
+function isLikelyRightHeavyDigitFive(mask, width, height, charIndex, charCount) {
+    const region = getPrimaryCharRegion(mask, width, height, charIndex, charCount)
+        || getCharRegion(mask, width, height, charIndex, charCount);
+    if (!region) return false;
+
+    const slotWidth = width / charCount;
+    const charW = region.maxX - region.minX + 1;
+    const charH = region.maxY - region.minY + 1;
+    if (charH < height * 0.42 || charW < slotWidth * 0.28) return false;
+
+    const topRun = getLongestHorizontalRun(mask, width, region, 0, 0.25);
+    const midRun = getLongestHorizontalRun(mask, width, region, 0.36, 0.62);
+    const bottomRun = getLongestHorizontalRun(mask, width, region, 0.72, 1);
+    const upperLeft = getRelativeDensity(mask, width, region, 0, 0.38, 0.18, 0.48);
+    const upperRight = getRelativeDensity(mask, width, region, 0.62, 1, 0.18, 0.50);
+    const lowerLeft = getRelativeDensity(mask, width, region, 0, 0.40, 0.54, 0.84);
+    const lowerRight = getRelativeDensity(mask, width, region, 0.60, 1, 0.50, 0.90);
+
+    return topRun >= charW * 0.42
+        && midRun >= charW * 0.34
+        && bottomRun >= charW * 0.26
+        && lowerRight >= 0.50
+        && lowerLeft <= 0.24
+        && lowerRight >= lowerLeft + 0.28
+        && (upperLeft <= 0.28 || upperRight <= 0.25);
+}
+
 function isLikelyDigitSeven(mask, width, height, charIndex, charCount) {
     const region = getPrimaryCharRegion(mask, width, height, charIndex, charCount);
     if (!region) return false;
@@ -947,11 +974,182 @@ function isLikelyDigitSeven(mask, width, height, charIndex, charCount) {
         && bottomRun <= charW * 0.42;
 }
 
+function isLikelyDigitSix(mask, width, height, charIndex, charCount) {
+    const region = getPrimaryCharRegion(mask, width, height, charIndex, charCount)
+        || getCharRegion(mask, width, height, charIndex, charCount);
+    if (!region) return false;
+
+    const slotWidth = width / charCount;
+    const charW = region.maxX - region.minX + 1;
+    const charH = region.maxY - region.minY + 1;
+    if (charH < height * 0.42 || charW < slotWidth * 0.30) return false;
+
+    const topRun = getLongestHorizontalRun(mask, width, region, 0, 0.24);
+    const midRun = getLongestHorizontalRun(mask, width, region, 0.36, 0.64);
+    const bottomRun = getLongestHorizontalRun(mask, width, region, 0.70, 1);
+    const left = getRelativeDensity(mask, width, region, 0, 0.30, 0.10, 0.90);
+    const right = getRelativeDensity(mask, width, region, 0.70, 1, 0.10, 0.90);
+    const upperLeft = getRelativeDensity(mask, width, region, 0, 0.38, 0.18, 0.48);
+    const upperRight = getRelativeDensity(mask, width, region, 0.62, 1, 0.18, 0.50);
+    const lowerLeft = getRelativeDensity(mask, width, region, 0, 0.40, 0.54, 0.84);
+    const lowerRight = getRelativeDensity(mask, width, region, 0.60, 1, 0.50, 0.90);
+
+    return topRun >= charW * 0.42
+        && midRun >= charW * 0.48
+        && bottomRun >= charW * 0.42
+        && left >= 0.55
+        && upperLeft >= upperRight + 0.35
+        && upperRight <= 0.25
+        && lowerLeft >= 0.58
+        && lowerRight >= 0.45
+        && left >= right + 0.18;
+}
+
+function correctDigitSixFromShape(code, base, mask) {
+    if (!/[bB]/.test(code)) return code;
+
+    const chars = code.split('');
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== 'b' && chars[i] !== 'B') continue;
+
+        if (isLikelyDigitSix(mask, base.width, base.height, i, chars.length)) {
+            chars[i] = '6';
+        }
+    }
+
+    return chars.join('');
+}
+
+function isLikelyRightSideUppercaseB(mask, width, height, charIndex, charCount) {
+    const region = getPrimaryCharRegion(mask, width, height, charIndex, charCount)
+        || getCharRegion(mask, width, height, charIndex, charCount);
+    if (!region) return false;
+
+    const slotWidth = width / charCount;
+    const charW = region.maxX - region.minX + 1;
+    const charH = region.maxY - region.minY + 1;
+    if (charH < height * 0.42 || charW < slotWidth * 0.28) return false;
+
+    const topRun = getLongestHorizontalRun(mask, width, region, 0, 0.24);
+    const midRun = getLongestHorizontalRun(mask, width, region, 0.36, 0.64);
+    const bottomRun = getLongestHorizontalRun(mask, width, region, 0.70, 1);
+    const left = getRelativeDensity(mask, width, region, 0, 0.30, 0.10, 0.90);
+    const right = getRelativeDensity(mask, width, region, 0.70, 1, 0.10, 0.90);
+    const upperRight = getRelativeDensity(mask, width, region, 0.62, 1, 0.18, 0.50);
+    const lowerRight = getRelativeDensity(mask, width, region, 0.60, 1, 0.50, 0.90);
+    const center = getRelativeDensity(mask, width, region, 0.36, 0.64, 0.18, 0.82);
+
+    return right >= 0.55
+        && left <= 0.22
+        && upperRight >= 0.55
+        && lowerRight >= 0.52
+        && center >= 0.70
+        && topRun >= charW * 0.50
+        && bottomRun >= charW * 0.55
+        && midRun <= bottomRun + 2;
+}
+
+function correctUppercaseBFromShape(code, base, mask) {
+    if (!/8/.test(code)) return code;
+
+    const chars = code.split('');
+    let colorMask = null;
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== '8') continue;
+
+        let shapeLooksLikeB = isLikelyRightSideUppercaseB(mask, base.width, base.height, i, chars.length);
+        if (!shapeLooksLikeB) {
+            colorMask = colorMask || buildColorClusterMask(base);
+            shapeLooksLikeB = isLikelyRightSideUppercaseB(colorMask, base.width, base.height, i, chars.length);
+        }
+        if (shapeLooksLikeB) {
+            chars[i] = 'B';
+        }
+    }
+
+    return chars.join('');
+}
+
+function isLikelyDigitFour(mask, width, height, charIndex, charCount) {
+    const region = getPrimaryCharRegion(mask, width, height, charIndex, charCount)
+        || getCharRegion(mask, width, height, charIndex, charCount);
+    if (!region) return false;
+
+    const slotWidth = width / charCount;
+    const charW = region.maxX - region.minX + 1;
+    const charH = region.maxY - region.minY + 1;
+    if (charH < height * 0.42 || charW < slotWidth * 0.30) return false;
+
+    const topRun = getLongestHorizontalRun(mask, width, region, 0, 0.24);
+    const midRun = getLongestHorizontalRun(mask, width, region, 0.36, 0.64);
+    const bottomRun = getLongestHorizontalRun(mask, width, region, 0.70, 1);
+    const midCenter = getRelativeDensity(mask, width, region, 0.22, 0.78, 0.36, 0.64);
+    const bottomCenter = getRelativeDensity(mask, width, region, 0.22, 0.78, 0.70, 1);
+
+    return midRun >= charW * 0.62
+        && topRun <= charW * 0.45
+        && bottomRun <= charW * 0.36
+        && midCenter >= 0.65
+        && bottomCenter <= 0.42;
+}
+
+function isLikelyStrongDigitFour(mask, width, height, charIndex, charCount) {
+    const region = getPrimaryCharRegion(mask, width, height, charIndex, charCount)
+        || getCharRegion(mask, width, height, charIndex, charCount);
+    if (!region) return false;
+
+    const slotWidth = width / charCount;
+    const charW = region.maxX - region.minX + 1;
+    const charH = region.maxY - region.minY + 1;
+    if (charH < height * 0.42 || charW < slotWidth * 0.30) return false;
+
+    const midRun = getLongestHorizontalRun(mask, width, region, 0.36, 0.64);
+    const bottomRun = getLongestHorizontalRun(mask, width, region, 0.70, 1);
+    const midCenter = getRelativeDensity(mask, width, region, 0.22, 0.78, 0.36, 0.64);
+    const bottomCenter = getRelativeDensity(mask, width, region, 0.22, 0.78, 0.70, 1);
+
+    return midRun >= charW * 0.62
+        && bottomRun <= charW * 0.36
+        && midCenter >= 0.64
+        && bottomCenter <= 0.30;
+}
+
+function correctDigitFourFromShape(code, base, results, mask) {
+    if (!/[dD]/.test(code)) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+    let colorMask = null;
+
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== 'd' && chars[i] !== 'D') continue;
+
+        let shapeLooksLikeFour = isLikelyDigitFour(mask, base.width, base.height, i, chars.length);
+        let strongShapeLooksLikeFour = isLikelyStrongDigitFour(mask, base.width, base.height, i, chars.length);
+        if (!shapeLooksLikeFour && !strongShapeLooksLikeFour) {
+            colorMask = colorMask || buildColorClusterMask(base);
+            shapeLooksLikeFour = isLikelyDigitFour(colorMask, base.width, base.height, i, chars.length);
+            strongShapeLooksLikeFour = isLikelyStrongDigitFour(colorMask, base.width, base.height, i, chars.length);
+        }
+
+        const hasFourProxyCandidate = valid.some(result => {
+            return (result.code[i] === 'A' || result.code[i] === '4')
+                && countSameOtherPositions(chars, result.code, i) >= 2;
+        });
+        if ((shapeLooksLikeFour && hasFourProxyCandidate) || strongShapeLooksLikeFour) {
+            chars[i] = '4';
+        }
+    }
+
+    return chars.join('');
+}
+
 function correctDigitFiveFromShape(code, base, results, mask) {
     if (!/[SsZz]/.test(code)) return code;
 
     const chars = code.split('');
     const valid = results.filter(result => result.code && result.code.length === chars.length);
+    let colorMask = null;
 
     for (let i = 0; i < chars.length; i++) {
         if (!['S', 's', 'Z', 'z'].includes(chars[i])) continue;
@@ -977,8 +1175,14 @@ function correctDigitFiveFromShape(code, base, results, mask) {
         }
 
         const shapeLooksLikeFive = isLikelyDigitFive(mask, base.width, base.height, i, chars.length);
+        let strongShapeLooksLikeFive = isLikelyRightHeavyDigitFive(mask, base.width, base.height, i, chars.length);
+        if (!strongShapeLooksLikeFive) {
+            colorMask = colorMask || buildColorClusterMask(base);
+            strongShapeLooksLikeFive = isLikelyRightHeavyDigitFive(colorMask, base.width, base.height, i, chars.length);
+        }
         const hasUsefulCandidate = candidateVotes5 > 0 && candidateVotes5 + 1.5 >= candidateVotesS;
-        if (shapeLooksLikeFive && (hasUsefulCandidate || i === 0 || chars[i] === 'Z' || chars[i] === 'z')) {
+        if ((shapeLooksLikeFive || strongShapeLooksLikeFive)
+            && hasUsefulCandidate) {
             chars[i] = '5';
         }
     }
@@ -1420,6 +1624,7 @@ function correctEFamilyFromShape(code, base, results, mask) {
 
     const chars = code.split('');
     const valid = results.filter(result => result.code && result.code.length === chars.length);
+    let colorMask = null;
 
     for (let i = 0; i < chars.length; i++) {
         if (!['E', 'B', 'e'].includes(chars[i])) continue;
@@ -1437,11 +1642,17 @@ function correctEFamilyFromShape(code, base, results, mask) {
             .filter(result => result.code[i] === chars[i])
             .reduce((score, result) => score + result.priority + Math.max(0, result.confidence || 0) / 25, 0);
 
-        if (candidateVotesF > candidateVotesCurrent + 1 || isLikelyUppercaseF(mask, base.width, base.height, i, chars.length)) {
+        if (candidateVotesF > candidateVotesCurrent + 1
+            || (candidateVotesF > 0 && isLikelyUppercaseF(mask, base.width, base.height, i, chars.length))) {
             chars[i] = 'F';
             continue;
         }
-        if (candidateVotesL > candidateVotesCurrent + 1 || isLikelyUppercaseL(mask, base.width, base.height, i, chars.length)) {
+        let shapeLooksLikeL = isLikelyUppercaseL(mask, base.width, base.height, i, chars.length);
+        if (!shapeLooksLikeL) {
+            colorMask = colorMask || buildColorClusterMask(base);
+            shapeLooksLikeL = isLikelyUppercaseL(colorMask, base.width, base.height, i, chars.length);
+        }
+        if (candidateVotesL > candidateVotesCurrent + 1 || shapeLooksLikeL) {
             chars[i] = 'L';
             continue;
         }
@@ -1668,6 +1879,166 @@ function correctQFromCompatibleCandidate(code, results) {
     return chars.join('');
 }
 
+function correctQFromSimilarCandidate(code, results) {
+    if (!/[yY]/.test(code)) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== 'y' && chars[i] !== 'Y') continue;
+
+        const similarQ = valid.some(result => {
+            return (result.code[i] === 'q' || result.code[i] === 'Q')
+                && countSameOtherPositions(chars, result.code, i) >= 3;
+        });
+
+        if (similarQ) {
+            chars[i] = 'q';
+        }
+    }
+
+    return chars.join('');
+}
+
+function correctPFromSimilarCandidate(code, results) {
+    if (!/[EF]/.test(code)) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== 'E' && chars[i] !== 'F') continue;
+
+        const similarP = valid.some(result => {
+            return (result.code[i] === 'P' || result.code[i] === 'p')
+                && countSameOtherPositions(chars, result.code, i) >= 3;
+        });
+
+        if (similarP) {
+            chars[i] = 'P';
+        }
+    }
+
+    return chars.join('');
+}
+
+function correctDigitSevenFromSimilarCandidate(code, results) {
+    if (!/[AZ]/.test(code)) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== 'A' && chars[i] !== 'Z') continue;
+
+        const similarSeven = valid.some(result => {
+            return result.code[i] === '7'
+                && countSameOtherPositions(chars, result.code, i) >= 3;
+        });
+
+        if (similarSeven) {
+            chars[i] = '7';
+        }
+    }
+
+    return chars.join('');
+}
+
+function correctTFromSimilarCandidate(code, results) {
+    if (!/[rR]/.test(code)) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== 'r' && chars[i] !== 'R') continue;
+
+        const similarT = valid.filter(result => {
+            return (result.code[i] === 'T' || result.code[i] === 't')
+                && countSameOtherPositions(chars, result.code, i) >= 2;
+        });
+        if (!similarT.length) continue;
+
+        const tScore = similarT.reduce((score, result) => {
+            return score
+                + result.priority
+                + Math.max(0, result.confidence || 0) / 25
+                + Math.max(0, countSameOtherPositions(chars, result.code, i) - 2);
+        }, 0);
+        const currentScore = valid
+            .filter(result => result.code[i] === chars[i])
+            .reduce((score, result) => score + result.priority + Math.max(0, result.confidence || 0) / 25, 0);
+        const hasNearWholeMatch = similarT.some(result => countSameOtherPositions(chars, result.code, i) >= 3);
+
+        if ((similarT.length >= 2 || hasNearWholeMatch) && tScore >= currentScore - 0.5) {
+            chars[i] = 'T';
+        }
+    }
+
+    return chars.join('');
+}
+
+function isLikelyUppercaseWShape(mask, width, height, charIndex, charCount) {
+    const region = getPrimaryCharRegion(mask, width, height, charIndex, charCount)
+        || getCharRegion(mask, width, height, charIndex, charCount);
+    if (!region) return false;
+
+    const slotWidth = width / charCount;
+    const charW = region.maxX - region.minX + 1;
+    const charH = region.maxY - region.minY + 1;
+    if (charH < height * 0.40 || charW < slotWidth * 0.45) return false;
+
+    const midRun = getLongestHorizontalRun(mask, width, region, 0.36, 0.64);
+    const lowerLeft = getRelativeDensity(mask, width, region, 0, 0.40, 0.54, 0.84);
+    const lowerRight = getRelativeDensity(mask, width, region, 0.60, 1, 0.50, 0.90);
+    const bottomLeft = getRelativeDensity(mask, width, region, 0, 0.46, 0.66, 1);
+    const bottomRight = getRelativeDensity(mask, width, region, 0.54, 1, 0.66, 1);
+
+    return midRun >= charW * 0.38
+        && lowerLeft >= 0.30
+        && lowerRight >= 0.33
+        && bottomLeft >= 0.28
+        && bottomRight >= 0.30;
+}
+
+function correctWFromSimilarCandidate(code, base, results, mask) {
+    if (!/[nN]/.test(code)) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+    let colorMask = null;
+
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== 'n' && chars[i] !== 'N') continue;
+
+        const similarW = valid.filter(result => {
+            return (result.code[i] === 'W' || result.code[i] === 'w')
+                && countSameOtherPositions(chars, result.code, i) >= 3;
+        });
+        if (!similarW.length) continue;
+
+        const wScore = similarW.reduce((score, result) => {
+            return score + result.priority + Math.max(0, result.confidence || 0) / 25;
+        }, 0);
+        const currentScore = valid
+            .filter(result => result.code[i] === chars[i])
+            .reduce((score, result) => score + result.priority + Math.max(0, result.confidence || 0) / 25, 0);
+
+        let shapeLooksLikeW = isLikelyUppercaseWShape(mask, base.width, base.height, i, chars.length);
+        if (!shapeLooksLikeW) {
+            colorMask = colorMask || buildColorClusterMask(base);
+            shapeLooksLikeW = isLikelyUppercaseWShape(colorMask, base.width, base.height, i, chars.length);
+        }
+
+        if (shapeLooksLikeW && wScore >= currentScore - 1.5) {
+            chars[i] = 'W';
+        }
+    }
+
+    return chars.join('');
+}
+
 function correctUppercaseKFromShape(code, base, results, mask) {
     if (!/k/.test(code)) return code;
 
@@ -1769,6 +2140,208 @@ function correctSimpleUppercaseFromShape(code, base, results, mask) {
     return chars.join('');
 }
 
+function correctTallUppercaseFromShape(code, base, results, mask) {
+    if (!/[csvw]/.test(code)) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+
+    for (let i = 0; i < chars.length; i++) {
+        if (!['c', 's', 'v', 'w'].includes(chars[i])) continue;
+        if (!isLikelyUppercaseSimpleShape(mask, base.width, base.height, i, chars.length)) continue;
+
+        const upper = chars[i].toUpperCase();
+        const upperVotes = valid
+            .filter(result => result.code[i] === upper)
+            .reduce((score, result) => score + result.priority + Math.max(0, result.confidence || 0) / 25, 0);
+        const lowerVotes = valid
+            .filter(result => result.code[i] === chars[i])
+            .reduce((score, result) => score + result.priority + Math.max(0, result.confidence || 0) / 25, 0);
+
+        const hasUpperCandidate = upperVotes > 0;
+        const strongLowerConsensus = lowerVotes > upperVotes + 5;
+        if (hasUpperCandidate && !strongLowerConsensus) {
+            chars[i] = upper;
+        }
+    }
+
+    return chars.join('');
+}
+
+function correctCaseFromWholeCandidate(code, results) {
+    if (!/[a-zA-Z]/.test(code)) return code;
+
+    const valid = results.filter(result => result.code && result.code.length === code.length);
+    const sameLetters = valid
+        .filter(result => {
+            for (let i = 0; i < code.length; i++) {
+                if (/[a-zA-Z]/.test(code[i]) || /[a-zA-Z]/.test(result.code[i])) {
+                    if (code[i].toLowerCase() !== result.code[i].toLowerCase()) return false;
+                } else if (code[i] !== result.code[i]) {
+                    return false;
+                }
+            }
+            return true;
+        })
+        .sort((a, b) => {
+            const scoreA = a.priority * 10 + (a.confidence || 0);
+            const scoreB = b.priority * 10 + (b.confidence || 0);
+            return scoreB - scoreA;
+        });
+
+    return sameLetters.length ? sameLetters[0].code : code;
+}
+
+function correctCaseFromColorClusterCandidate(code, results) {
+    if (!/[a-zA-Z]/.test(code)) return code;
+
+    const color = results
+        .filter(result => result.variant === 'color-cluster')
+        .filter(result => result.code && result.code.length === code.length)
+        .filter(result => (result.confidence || 0) >= 35)
+        .filter(result => {
+            for (let i = 0; i < code.length; i++) {
+                if (/[a-zA-Z]/.test(code[i]) || /[a-zA-Z]/.test(result.code[i])) {
+                    if (code[i].toLowerCase() !== result.code[i].toLowerCase()) return false;
+                } else if (code[i] !== result.code[i]) {
+                    return false;
+                }
+            }
+            return result.code !== code;
+        })
+        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
+
+    return color ? color.code : code;
+}
+
+function correctDigitTwoFromCandidates(code, results) {
+    if (!/[vV]/.test(code)) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+
+    for (let i = 0; i < chars.length; i++) {
+        if (chars[i] !== 'v' && chars[i] !== 'V') continue;
+
+        const twoCandidates = valid
+            .filter(result => result.code[i] === '2')
+            .filter(result => countSameOtherPositions(chars, result.code, i) >= 2);
+        if (twoCandidates.length >= 2 || twoCandidates.some(result => (result.confidence || 0) >= 20)) {
+            chars[i] = '2';
+            continue;
+        }
+
+        const twoEvidence = valid
+            .filter(result => result.code[i] === '2')
+            .filter(result => countSameOtherPositions(chars, result.code, i) >= 2)
+            .reduce((score, result) => score + result.priority + Math.max(0, result.confidence || 0) / 25, 0);
+        const vEvidence = valid
+            .filter(result => result.code[i] === chars[i])
+            .reduce((score, result) => score + result.priority + Math.max(0, result.confidence || 0) / 25, 0);
+
+        if (twoEvidence >= Math.max(2.5, vEvidence - 1)) {
+            chars[i] = '2';
+        }
+    }
+
+    return chars.join('');
+}
+
+function correctFromAgreementCandidates(code, results) {
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+
+    for (let i = 0; i < chars.length; i++) {
+        const votes = new Map();
+        for (const result of valid) {
+            const candidate = result.code[i];
+            if (!candidate || candidate === chars[i]) continue;
+
+            const sameOther = countSameOtherPositions(chars, result.code, i);
+            if (sameOther < 2) continue;
+
+            const score = result.priority
+                + Math.max(0, result.confidence || 0) / 25
+                + Math.max(0, sameOther - 2) * 2;
+            votes.set(candidate, (votes.get(candidate) || 0) + score);
+        }
+
+        let bestChar = '';
+        let bestScore = 0;
+        for (const [char, score] of votes) {
+            if (score > bestScore) {
+                bestChar = char;
+                bestScore = score;
+            }
+        }
+
+        const currentScore = valid
+            .filter(result => result.code[i] === chars[i])
+            .reduce((score, result) => score + result.priority + Math.max(0, result.confidence || 0) / 25, 0);
+
+        if (bestChar && bestScore >= 5 && bestScore >= currentScore + 2.5) {
+            chars[i] = bestChar;
+        }
+    }
+
+    return chars.join('');
+}
+
+function isTrustedExactWhole(code, results) {
+    return results.some(result => {
+        if (result.code !== code) return false;
+        const confidence = result.confidence || 0;
+        return (result.variant === 'thin-line-clean' && confidence >= 58)
+            || (result.variant === 'legacy-fallback' && confidence >= 58);
+    });
+}
+
+function hasSupportedSingleCharCandidate(original, expectedChar, charIndex, results, minSame = 3) {
+    return results
+        .filter(result => result.code && result.code.length === original.length)
+        .some(result => {
+            return isSameCaptchaChar(result.code[charIndex], expectedChar)
+                && countSameOtherPositions(original, result.code, charIndex) >= minSame;
+        });
+}
+
+function allowsTrustedShapeOverride(original, corrected, base, mask, results = []) {
+    if (!original || !corrected || original.length !== corrected.length) return false;
+
+    let diffIndex = -1;
+    let diffCount = 0;
+    for (let i = 0; i < original.length; i++) {
+        if (isSameCaptchaChar(original[i], corrected[i])) continue;
+        diffIndex = i;
+        diffCount++;
+    }
+    if (diffCount !== 1) return false;
+
+    const from = original[diffIndex];
+    const to = corrected[diffIndex];
+    if (/[SsZz]/.test(from) && to === '5') {
+        return isLikelyRightHeavyDigitFive(mask, base.width, base.height, diffIndex, original.length)
+            || isLikelyRightHeavyDigitFive(buildColorClusterMask(base), base.width, base.height, diffIndex, original.length);
+    }
+    if (from === '8' && (to === 'B' || to === 'b')) {
+        return isLikelyRightSideUppercaseB(mask, base.width, base.height, diffIndex, original.length)
+            || isLikelyRightSideUppercaseB(buildColorClusterMask(base), base.width, base.height, diffIndex, original.length);
+    }
+    if ((from === 'y' || from === 'Y') && (to === 'q' || to === 'Q')) {
+        return hasSupportedSingleCharCandidate(original, to, diffIndex, results);
+    }
+    if (['i', 'I', 'l', '1'].includes(from) && (to === 'J' || to === 'j')) {
+        return isLikelyUppercaseJ(mask, base.width, base.height, diffIndex, original.length)
+            || isLikelyUppercaseJ(buildColorClusterMask(base), base.width, base.height, diffIndex, original.length);
+    }
+    if ((from === 'd' || from === 'D') && to === '4') {
+        return isLikelyStrongDigitFour(mask, base.width, base.height, diffIndex, original.length)
+            || isLikelyStrongDigitFour(buildColorClusterMask(base), base.width, base.height, diffIndex, original.length);
+    }
+
+    return false;
+}
+
 // 检测字符是否更像小写 c（无中横线）而非 e（有中横线）
 function isLikelyLowercaseC(mask, width, height, charIndex, charCount) {
     const region = getPrimaryCharRegion(mask, width, height, charIndex, charCount);
@@ -1834,14 +2407,22 @@ function correctCFromShape(code, base, results, mask) {
 function correctVisualConfusions(code, base, results) {
     if (!code) return code;
 
+    const preserveOriginal = isTrustedExactWhole(code, results);
     const mask = getCorrectionMask(base);
     let corrected = correctCaseFromCandidates(code, results);
     corrected = correctWFromThinLineCandidate(corrected, results);
     corrected = correctGFromSimilarCandidate(corrected, results);
     corrected = correctQFromCompatibleCandidate(corrected, results);
+    corrected = correctQFromSimilarCandidate(corrected, results);
+    corrected = correctPFromSimilarCandidate(corrected, results);
+    corrected = correctDigitSevenFromSimilarCandidate(corrected, results);
+    corrected = correctTFromSimilarCandidate(corrected, results);
+    corrected = correctWFromSimilarCandidate(corrected, base, results, mask);
     corrected = correctJFromShape(corrected, base, results, mask);
     corrected = correctDFromShape(corrected, base, results, mask);
     corrected = correctDigitFiveFromShape(corrected, base, results, mask);
+    corrected = correctDigitSixFromShape(corrected, base, mask);
+    corrected = correctDigitFourFromShape(corrected, base, results, mask);
     corrected = correctMFromShape(corrected, base, results, mask);
     corrected = correctUFromShape(corrected, base, results, mask);
     corrected = correctUppercaseJFromShape(corrected, base, results, mask);
@@ -1854,6 +2435,15 @@ function correctVisualConfusions(code, base, results) {
     corrected = correctUppercaseLFromShape(corrected, base, mask);
     corrected = correctLFromThinLineCandidate(corrected, results);
     corrected = correctSimpleUppercaseFromShape(corrected, base, results, mask);
+    corrected = correctTallUppercaseFromShape(corrected, base, results, mask);
+    corrected = correctCaseFromWholeCandidate(corrected, results);
+    corrected = correctCaseFromColorClusterCandidate(corrected, results);
+    corrected = correctDigitTwoFromCandidates(corrected, results);
+    if (preserveOriginal
+        && countSameOtherPositions(code, corrected, -1) < 4
+        && !allowsTrustedShapeOverride(code, corrected, base, mask, results)) {
+        return code;
+    }
     return corrected;
 }
 
@@ -1993,6 +2583,92 @@ function findRepeatedPConsensus(valid) {
     return '';
 }
 
+function findTrustedVariantWhole(valid, selected) {
+    const trusted = valid
+        .map(result => ({
+            result,
+            support: countCandidateSupport(result, valid),
+            hasClosePeer: valid.some(other => {
+                return other !== result
+                    && other.code
+                    && other.code.length === result.code.length
+                    && countSameOtherPositions(result.code, other.code, -1) >= 3;
+            })
+        }))
+        .filter(item => {
+            const confidence = item.result.confidence || 0;
+            if (item.result.code === selected) return false;
+            if (item.result.variant === 'thin-line-clean') {
+                return confidence >= 58;
+            }
+            if (item.result.variant === 'legacy-fallback') {
+                return confidence >= 55 && item.support >= 5 && item.hasClosePeer;
+            }
+            return false;
+        })
+        .sort((a, b) => {
+            const scoreA = a.support * 10 + getVariantTieBreakBonus(a.result.variant) + (a.result.confidence || 0) / 10;
+            const scoreB = b.support * 10 + getVariantTieBreakBonus(b.result.variant) + (b.result.confidence || 0) / 10;
+            return scoreB - scoreA;
+        });
+
+    return trusted.length ? trusted[0].result.code : '';
+}
+
+function findSupportedLowConfidenceWhole(valid) {
+    const supported = valid
+        .map(result => ({
+            result,
+            support: countCandidateSupport(result, valid)
+        }))
+        .filter(item => ['simple-threshold', 'loose-color', 'balanced-color'].includes(item.result.variant))
+        .filter(item => (item.result.confidence || 0) >= 1)
+        .filter(item => item.support >= 5)
+        .sort((a, b) => {
+            const scoreA = a.support * 10 + getVariantTieBreakBonus(a.result.variant) + (a.result.confidence || 0) / 10;
+            const scoreB = b.support * 10 + getVariantTieBreakBonus(b.result.variant) + (b.result.confidence || 0) / 10;
+            return scoreB - scoreA;
+        });
+
+    return supported.length ? supported[0].result.code : '';
+}
+
+function isDigitLetterCorrection(from, to) {
+    const pair = `${from}${to}`;
+    return pair === 'S5'
+        || pair === 's5'
+        || pair === 'Z5'
+        || pair === 'z5';
+}
+
+function findTrustedThinDigitVariant(valid, selected) {
+    if (!selected) return '';
+
+    const trusted = valid
+        .filter(result => result.variant === 'thin-line-clean')
+        .filter(result => (result.confidence || 0) >= 75)
+        .filter(result => result.code && result.code.length === selected.length)
+        .filter(result => {
+            let diffIndex = -1;
+            let diffCount = 0;
+            for (let i = 0; i < selected.length; i++) {
+                if (isSameCaptchaChar(selected[i], result.code[i])) continue;
+                diffIndex = i;
+                diffCount++;
+            }
+            return diffCount === 1
+                && isDigitLetterCorrection(selected[diffIndex], result.code[diffIndex])
+                && !valid.some(other => {
+                    return other.variant === 'legacy-fallback'
+                        && other.code === selected
+                        && (other.confidence || 0) >= (result.confidence || 0) + 8;
+                });
+        })
+        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
+
+    return trusted ? trusted.code : '';
+}
+
 function selectCaptchaCode(results) {
     const valid = results.filter(result => result.code.length === 4);
     if (!valid.length) return '';
@@ -2030,28 +2706,61 @@ function selectCaptchaCode(results) {
     const selected = consensus.length === 4 ? consensus : bestWhole.code;
     const exactMatches = valid.filter(result => result.code === selected);
     const maxConfidence = exactMatches.reduce((max, result) => Math.max(max, result.confidence || 0), 0);
+    const reliableExactMajority = exactMatches.length >= 3
+        && (maxConfidence >= 20 || !hasConfidentAlternative(valid, selected, 70));
+    const reliableExactPair = exactMatches.length >= 2
+        && (
+            (maxConfidence >= 30 && !hasConfidentAlternative(valid, selected, Math.max(40, maxConfidence - 8)))
+            || !hasConfidentAlternative(valid, selected, 45)
+        );
+    const reliable = reliableExactMajority || reliableExactPair;
 
     const trustedCEFallback = findTrustedCEFallback(valid);
     if (trustedCEFallback) return trustedCEFallback;
+    if (reliable) return selected;
+
+    const trustedThinDigit = findTrustedThinDigitVariant(valid, selected);
+    if (trustedThinDigit) return trustedThinDigit;
+
+    const directTrustedThinLine = valid
+        .filter(result => result.variant === 'thin-line-clean')
+        .filter(result => (result.confidence || 0) >= 55)
+        .filter(result => !valid.some(other => {
+            return other.variant === 'legacy-fallback'
+                && (other.confidence || 0) >= 55
+                && countSameOtherPositions(result.code, other.code, -1) >= 2;
+        }))
+        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
+    if (directTrustedThinLine) return directTrustedThinLine.code;
+
+    const trustedVariantWhole = findTrustedVariantWhole(valid, selected);
+    if (trustedVariantWhole) return trustedVariantWhole;
 
     const standoutThinLine = valid
         .filter(result => result.variant === 'thin-line-clean')
         .filter(result => (result.confidence || 0) >= Math.max(78, maxConfidence + 8))
         .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
-    const reliableExactMajority = exactMatches.length >= 3
-        && (maxConfidence >= 20 || !hasConfidentAlternative(valid, selected));
-    const reliableExactPair = exactMatches.length >= 2
-        && maxConfidence >= 30
-        && !hasConfidentAlternative(valid, selected, Math.max(40, maxConfidence - 8));
-    const reliable = reliableExactMajority || reliableExactPair;
     const trustedHighConfidence = valid
-        .filter(result => ['balanced-color', 'loose-color', 'thin-line-clean', 'simple-threshold', 'legacy-fallback'].includes(result.variant))
-        .filter(result => (result.confidence || 0) >= 72)
-        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
+        .map(result => {
+            const support = countCandidateSupport(result, valid);
+            const variantBonus = result.variant === 'thin-line-clean'
+                ? 8
+                : (result.variant === 'loose-color' || result.variant === 'simple-threshold')
+                    ? 5
+                    : result.variant === 'balanced-color'
+                        ? 2
+                        : 0;
+            return {
+                result,
+                score: support * 8 + (result.confidence || 0) / 5 + variantBonus
+            };
+        })
+        .filter(item => ['balanced-color', 'loose-color', 'thin-line-clean', 'simple-threshold', 'legacy-fallback'].includes(item.result.variant))
+        .filter(item => (item.result.confidence || 0) >= 72)
+        .sort((a, b) => b.score - a.score)[0];
 
     if (standoutThinLine) return standoutThinLine.code;
-    if (reliable) return selected;
-    if (trustedHighConfidence) return trustedHighConfidence.code;
+    if (trustedHighConfidence) return trustedHighConfidence.result.code;
 
     const repeatedPConsensus = findRepeatedPConsensus(valid);
     if (repeatedPConsensus) return repeatedPConsensus;
@@ -2130,6 +2839,9 @@ function selectCaptchaCode(results) {
         })[0];
 
     if (supportedLegacy) return supportedLegacy.result.code;
+
+    const supportedLowConfidence = findSupportedLowConfidenceWhole(valid);
+    if (supportedLowConfidence) return supportedLowConfidence;
 
     const complementaryPartial = findComplementaryPartialCode(results, valid);
     return complementaryPartial || '';
