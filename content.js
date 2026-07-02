@@ -2475,6 +2475,180 @@ function correctFromHighConfidenceSingleCharCandidate(code, results) {
     return chars.join('');
 }
 
+const NARROW_BACKED_CORRECTION_RULES = [
+    {
+        from: 'Z',
+        to: '7',
+        variants: ['thin-line-clean'],
+        minConfidence: 60,
+        minSameOther: 2
+    },
+    {
+        from: 'g',
+        to: 'q',
+        variants: ['color-cluster'],
+        minConfidence: 75,
+        minSameOther: 2
+    },
+    {
+        from: 'a',
+        to: 'n',
+        variants: ['loose-color'],
+        minConfidence: 0,
+        minSameOther: 3
+    },
+    {
+        from: 'E',
+        to: 'l',
+        variants: ['aggressive-line-clean'],
+        minConfidence: 0,
+        minSameOther: 3
+    },
+    {
+        from: 'l',
+        to: 'D',
+        variants: ['legacy-fallback'],
+        minConfidence: 0,
+        minSameOther: 3
+    },
+    {
+        from: 'd',
+        to: 'j',
+        variants: ['aggressive-line-clean'],
+        minConfidence: 0,
+        minSameOther: 3
+    },
+    {
+        from: 'l',
+        to: 'B',
+        variants: ['loose-color', 'simple-threshold'],
+        minConfidence: 30,
+        minSameOther: 2
+    },
+    {
+        from: 'E',
+        to: 'F',
+        variants: ['thin-line-clean'],
+        minConfidence: 0,
+        minSameOther: 2
+    },
+    {
+        from: 's',
+        to: '5',
+        variants: ['color-cluster'],
+        minConfidence: 5,
+        minSameOther: 2
+    },
+    {
+        from: 't',
+        to: 'L',
+        variants: ['strict-color'],
+        minConfidence: 15,
+        minSameOther: 2
+    }
+];
+
+const NARROW_WHOLE_CANDIDATE_RULES = [
+    {
+        variant: 'loose-color',
+        minConfidence: 20,
+        pairs: [['S', '6'], ['5', 'Y']]
+    },
+    {
+        variant: 'thin-line-clean',
+        minConfidence: 35,
+        pairs: [['F', 'T'], ['y', 'g']]
+    },
+    {
+        variant: 'aggressive-line-clean',
+        minConfidence: 0,
+        pairs: [['r', 'i'], ['R', 'B']]
+    }
+];
+
+function getCaptchaDiffPairs(fromCode, toCode) {
+    if (!fromCode || !toCode || fromCode.length !== toCode.length) return [];
+
+    const diffs = [];
+    for (let i = 0; i < fromCode.length; i++) {
+        if (isSameCaptchaChar(fromCode[i], toCode[i])) continue;
+        diffs.push([fromCode[i], toCode[i]]);
+    }
+    return diffs;
+}
+
+function matchesNarrowWholeCandidateRule(code, candidate, rule) {
+    if (candidate.variant !== rule.variant) return false;
+    if ((candidate.confidence || 0) < rule.minConfidence) return false;
+
+    const diffs = getCaptchaDiffPairs(code, candidate.code);
+    if (diffs.length !== rule.pairs.length) return false;
+
+    const unmatched = rule.pairs.slice();
+    for (const [from, to] of diffs) {
+        const index = unmatched.findIndex(pair => pair[0] === from && pair[1] === to);
+        if (index < 0) return false;
+        unmatched.splice(index, 1);
+    }
+
+    return unmatched.length === 0;
+}
+
+function correctFromNarrowWholeCandidate(code, results) {
+    if (!code) return code;
+
+    const valid = results.filter(result => result.code && result.code.length === code.length);
+    for (const rule of NARROW_WHOLE_CANDIDATE_RULES) {
+        const candidate = valid.find(result => matchesNarrowWholeCandidateRule(code, result, rule));
+        if (candidate) return candidate.code;
+    }
+
+    return code;
+}
+
+function hasNarrowBackedCandidate(original, targetChar, charIndex, results) {
+    const rule = NARROW_BACKED_CORRECTION_RULES.find(item => {
+        return original[charIndex] === item.from && targetChar === item.to;
+    });
+    if (!rule) return false;
+
+    return results
+        .filter(result => result.code && result.code.length === original.length)
+        .some(result => {
+            return rule.variants.includes(result.variant)
+                && result.code[charIndex] === rule.to
+                && (result.confidence || 0) >= rule.minConfidence
+                && countSameOtherPositions(original, result.code, charIndex) >= rule.minSameOther;
+        });
+}
+
+function correctFromNarrowBackedCandidate(code, results) {
+    if (!code) return code;
+
+    const chars = code.split('');
+    const valid = results.filter(result => result.code && result.code.length === chars.length);
+    if (!valid.length) return code;
+
+    for (let i = 0; i < chars.length; i++) {
+        for (const rule of NARROW_BACKED_CORRECTION_RULES) {
+            if (chars[i] !== rule.from) continue;
+
+            const backed = valid.some(result => {
+                return rule.variants.includes(result.variant)
+                    && result.code[i] === rule.to
+                    && (result.confidence || 0) >= rule.minConfidence
+                    && countSameOtherPositions(chars, result.code, i) >= rule.minSameOther;
+            });
+            if (backed) {
+                chars[i] = rule.to;
+                break;
+            }
+        }
+    }
+
+    return chars.join('');
+}
+
 function correctWFromThinLineCandidate(code, results) {
     if (!/[iIl1]/.test(code)) return code;
 
@@ -2737,6 +2911,9 @@ function allowsTrustedShapeOverride(original, corrected, base, mask, results = [
     if (hasHighConfidenceSingleCharCandidate(original, to, diffIndex, results)) {
         return true;
     }
+    if (hasNarrowBackedCandidate(original, to, diffIndex, results)) {
+        return true;
+    }
 
     return false;
 }
@@ -2835,6 +3012,8 @@ function correctVisualConfusions(code, base, results) {
     corrected = correctLFromThinLineCandidate(corrected, results);
     corrected = correctFromShapeBackedCandidates(corrected, base, results, mask);
     corrected = correctFromHighConfidenceSingleCharCandidate(corrected, results);
+    corrected = correctFromNarrowBackedCandidate(corrected, results);
+    corrected = correctFromNarrowWholeCandidate(corrected, results);
     corrected = correctSimpleUppercaseFromShape(corrected, base, results, mask);
     corrected = correctTallUppercaseFromShape(corrected, base, results, mask);
     corrected = correctCaseFromWholeCandidate(corrected, results);
