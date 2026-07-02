@@ -2475,180 +2475,6 @@ function correctFromHighConfidenceSingleCharCandidate(code, results) {
     return chars.join('');
 }
 
-const NARROW_BACKED_CORRECTION_RULES = [
-    {
-        from: 'Z',
-        to: '7',
-        variants: ['thin-line-clean'],
-        minConfidence: 60,
-        minSameOther: 2
-    },
-    {
-        from: 'g',
-        to: 'q',
-        variants: ['color-cluster'],
-        minConfidence: 75,
-        minSameOther: 2
-    },
-    {
-        from: 'a',
-        to: 'n',
-        variants: ['loose-color'],
-        minConfidence: 0,
-        minSameOther: 3
-    },
-    {
-        from: 'E',
-        to: 'l',
-        variants: ['aggressive-line-clean'],
-        minConfidence: 0,
-        minSameOther: 3
-    },
-    {
-        from: 'l',
-        to: 'D',
-        variants: ['legacy-fallback'],
-        minConfidence: 0,
-        minSameOther: 3
-    },
-    {
-        from: 'd',
-        to: 'j',
-        variants: ['aggressive-line-clean'],
-        minConfidence: 0,
-        minSameOther: 3
-    },
-    {
-        from: 'l',
-        to: 'B',
-        variants: ['loose-color', 'simple-threshold'],
-        minConfidence: 30,
-        minSameOther: 2
-    },
-    {
-        from: 'E',
-        to: 'F',
-        variants: ['thin-line-clean'],
-        minConfidence: 0,
-        minSameOther: 2
-    },
-    {
-        from: 's',
-        to: '5',
-        variants: ['color-cluster'],
-        minConfidence: 5,
-        minSameOther: 2
-    },
-    {
-        from: 't',
-        to: 'L',
-        variants: ['strict-color'],
-        minConfidence: 15,
-        minSameOther: 2
-    }
-];
-
-const NARROW_WHOLE_CANDIDATE_RULES = [
-    {
-        variant: 'loose-color',
-        minConfidence: 20,
-        pairs: [['S', '6'], ['5', 'Y']]
-    },
-    {
-        variant: 'thin-line-clean',
-        minConfidence: 35,
-        pairs: [['F', 'T'], ['y', 'g']]
-    },
-    {
-        variant: 'aggressive-line-clean',
-        minConfidence: 0,
-        pairs: [['r', 'i'], ['R', 'B']]
-    }
-];
-
-function getCaptchaDiffPairs(fromCode, toCode) {
-    if (!fromCode || !toCode || fromCode.length !== toCode.length) return [];
-
-    const diffs = [];
-    for (let i = 0; i < fromCode.length; i++) {
-        if (isSameCaptchaChar(fromCode[i], toCode[i])) continue;
-        diffs.push([fromCode[i], toCode[i]]);
-    }
-    return diffs;
-}
-
-function matchesNarrowWholeCandidateRule(code, candidate, rule) {
-    if (candidate.variant !== rule.variant) return false;
-    if ((candidate.confidence || 0) < rule.minConfidence) return false;
-
-    const diffs = getCaptchaDiffPairs(code, candidate.code);
-    if (diffs.length !== rule.pairs.length) return false;
-
-    const unmatched = rule.pairs.slice();
-    for (const [from, to] of diffs) {
-        const index = unmatched.findIndex(pair => pair[0] === from && pair[1] === to);
-        if (index < 0) return false;
-        unmatched.splice(index, 1);
-    }
-
-    return unmatched.length === 0;
-}
-
-function correctFromNarrowWholeCandidate(code, results) {
-    if (!code) return code;
-
-    const valid = results.filter(result => result.code && result.code.length === code.length);
-    for (const rule of NARROW_WHOLE_CANDIDATE_RULES) {
-        const candidate = valid.find(result => matchesNarrowWholeCandidateRule(code, result, rule));
-        if (candidate) return candidate.code;
-    }
-
-    return code;
-}
-
-function hasNarrowBackedCandidate(original, targetChar, charIndex, results) {
-    const rule = NARROW_BACKED_CORRECTION_RULES.find(item => {
-        return original[charIndex] === item.from && targetChar === item.to;
-    });
-    if (!rule) return false;
-
-    return results
-        .filter(result => result.code && result.code.length === original.length)
-        .some(result => {
-            return rule.variants.includes(result.variant)
-                && result.code[charIndex] === rule.to
-                && (result.confidence || 0) >= rule.minConfidence
-                && countSameOtherPositions(original, result.code, charIndex) >= rule.minSameOther;
-        });
-}
-
-function correctFromNarrowBackedCandidate(code, results) {
-    if (!code) return code;
-
-    const chars = code.split('');
-    const valid = results.filter(result => result.code && result.code.length === chars.length);
-    if (!valid.length) return code;
-
-    for (let i = 0; i < chars.length; i++) {
-        for (const rule of NARROW_BACKED_CORRECTION_RULES) {
-            if (chars[i] !== rule.from) continue;
-
-            const backed = valid.some(result => {
-                return rule.variants.includes(result.variant)
-                    && result.code[i] === rule.to
-                    && (result.confidence || 0) >= rule.minConfidence
-                    && countSameOtherPositions(chars, result.code, i) >= rule.minSameOther;
-            });
-            if (backed) {
-                chars[i] = rule.to;
-                break;
-            }
-        }
-    }
-
-    return chars.join('');
-}
-
 function correctWFromThinLineCandidate(code, results) {
     if (!/[iIl1]/.test(code)) return code;
 
@@ -2911,9 +2737,6 @@ function allowsTrustedShapeOverride(original, corrected, base, mask, results = [
     if (hasHighConfidenceSingleCharCandidate(original, to, diffIndex, results)) {
         return true;
     }
-    if (hasNarrowBackedCandidate(original, to, diffIndex, results)) {
-        return true;
-    }
 
     return false;
 }
@@ -3012,8 +2835,6 @@ function correctVisualConfusions(code, base, results) {
     corrected = correctLFromThinLineCandidate(corrected, results);
     corrected = correctFromShapeBackedCandidates(corrected, base, results, mask);
     corrected = correctFromHighConfidenceSingleCharCandidate(corrected, results);
-    corrected = correctFromNarrowBackedCandidate(corrected, results);
-    corrected = correctFromNarrowWholeCandidate(corrected, results);
     corrected = correctSimpleUppercaseFromShape(corrected, base, results, mask);
     corrected = correctTallUppercaseFromShape(corrected, base, results, mask);
     corrected = correctCaseFromWholeCandidate(corrected, results);
@@ -3218,6 +3039,195 @@ function getConsensusCandidates(valid) {
     return stable.length ? stable : valid;
 }
 
+function getCaptchaCodeKey(code) {
+    return (code || '').split('').map(char => {
+        return /[a-zA-Z]/.test(char) ? char.toLowerCase() : char;
+    }).join('');
+}
+
+function getCaptchaCharVoteKey(char) {
+    return /[a-zA-Z]/.test(char) ? char.toLowerCase() : char;
+}
+
+function isSameCaptchaCode(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (!isSameCaptchaChar(a[i], b[i])) return false;
+    }
+    return true;
+}
+
+function getWholeCandidateEvidenceWeight(result) {
+    const confidence = Math.max(0, result.confidence || 0);
+    switch (result.variant) {
+        case 'balanced-color':
+            return 4 + Math.min(confidence, 65) / 25;
+        case 'loose-color':
+            return 3 + Math.min(confidence, 65) / 25;
+        case 'simple-threshold':
+        case 'strict-color':
+        case 'color-cluster':
+            return 2 + Math.min(confidence, 65) / 25;
+        case 'legacy-fallback':
+            return 2 + Math.min(confidence, 60) / 25;
+        case 'thin-line-clean':
+            return 2 + Math.min(confidence, 45) / 25;
+        case 'aggressive-line-clean':
+            return 0.75 + Math.min(confidence, 25) / 25;
+        default:
+            return 1 + Math.min(confidence, 45) / 25;
+    }
+}
+
+function buildWholeCandidateGroups(valid) {
+    const groups = new Map();
+
+    for (const result of valid) {
+        const key = getCaptchaCodeKey(result.code);
+        if (!key) continue;
+
+        const group = groups.get(key) || {
+            key,
+            results: [],
+            variants: new Set(),
+            score: 0,
+            stableCount: 0,
+            lineCount: 0,
+            bestConfidence: 0,
+            maxStableConfidence: 0,
+            maxLegacyConfidence: 0,
+            maxAggressiveConfidence: 0,
+            representative: result
+        };
+
+        const weight = getWholeCandidateEvidenceWeight(result);
+        group.results.push(result);
+        group.variants.add(result.variant);
+        group.score += weight;
+        group.bestConfidence = Math.max(group.bestConfidence, result.confidence || 0);
+
+        if (result.variant === 'aggressive-line-clean' || result.variant === 'thin-line-clean') {
+            group.lineCount++;
+        } else {
+            group.stableCount++;
+            group.maxStableConfidence = Math.max(group.maxStableConfidence, result.confidence || 0);
+        }
+
+        if (result.variant === 'legacy-fallback') {
+            group.maxLegacyConfidence = Math.max(group.maxLegacyConfidence, result.confidence || 0);
+        }
+        if (result.variant === 'aggressive-line-clean') {
+            group.maxAggressiveConfidence = Math.max(group.maxAggressiveConfidence, result.confidence || 0);
+        }
+        if (weight > getWholeCandidateEvidenceWeight(group.representative)) {
+            group.representative = result;
+        }
+
+        groups.set(key, group);
+    }
+
+    for (const group of groups.values()) {
+        const representative = group.representative.code;
+        group.closeStablePeerCount = valid.filter(result => {
+            return result.variant !== 'aggressive-line-clean'
+                && getCaptchaCodeKey(result.code) !== group.key
+                && countSameOtherPositions(representative, result.code, -1) >= 3;
+        }).length;
+    }
+
+    return [...groups.values()];
+}
+
+function hasStrongCompetingWholeGroup(groups, selectedGroup) {
+    return groups.some(group => {
+        return group.key !== selectedGroup.key
+            && (group.variants.has('thin-line-clean') || group.variants.has('legacy-fallback'))
+            && group.bestConfidence >= selectedGroup.maxStableConfidence + 18
+            && group.score >= selectedGroup.score - 4;
+    });
+}
+
+function findStableWholeCandidate(valid, selected) {
+    const selectedKey = getCaptchaCodeKey(selected);
+    const groups = buildWholeCandidateGroups(valid);
+    const selectedGroup = groups.find(group => group.key === selectedKey);
+    const selectedScore = selectedGroup ? selectedGroup.score : 0;
+    const selectedIsExactCandidate = Boolean(selectedGroup);
+    if (selectedGroup) {
+        const hasLooseBalancedAgreement = selectedGroup.variants.has('loose-color')
+            && selectedGroup.variants.has('balanced-color');
+        const hasStrongCompetitor = hasStrongCompetingWholeGroup(groups, selectedGroup);
+        if (!hasStrongCompetitor
+            && ((selectedGroup.stableCount >= 3 && selectedGroup.maxStableConfidence >= 50)
+                || (hasLooseBalancedAgreement && selectedGroup.maxStableConfidence >= 48))) {
+            return selected;
+        }
+    }
+
+    const ranked = groups
+        .filter(group => group.key !== selectedKey)
+        .sort((a, b) => {
+            const scoreA = a.score + a.stableCount * 1.5 + a.closeStablePeerCount * 0.75;
+            const scoreB = b.score + b.stableCount * 1.5 + b.closeStablePeerCount * 0.75;
+            return scoreB - scoreA;
+        });
+
+    for (const group of ranked) {
+        const hasColorFamily = ['strict-color', 'loose-color', 'simple-threshold', 'color-cluster', 'balanced-color']
+            .some(variant => group.variants.has(variant));
+        const hasLineFamily = group.variants.has('thin-line-clean') || group.variants.has('aggressive-line-clean');
+
+        if (group.stableCount >= 3
+            && group.score >= selectedScore - 2
+            && group.maxStableConfidence >= 18
+            && (!selectedGroup
+                || selectedGroup.bestConfidence < group.maxStableConfidence + 18
+                || group.score >= selectedScore + 4)) {
+            return group.representative.code;
+        }
+
+        if (group.stableCount >= 2
+            && group.variants.has('balanced-color')
+            && hasColorFamily
+            && group.maxStableConfidence >= 45
+            && group.score >= selectedScore + 0.75
+            && (!selectedGroup
+                || selectedGroup.bestConfidence < group.maxStableConfidence + 18
+                || group.score >= selectedScore + 4)) {
+            return group.representative.code;
+        }
+
+        if (group.maxLegacyConfidence >= 60
+            && group.closeStablePeerCount >= 2
+            && (!selectedGroup
+                || (selectedGroup.maxStableConfidence < 55 && selectedGroup.bestConfidence < 75)
+                || group.score >= selectedScore - 3.5)) {
+            return group.representative.code;
+        }
+
+        if (group.lineCount >= 2
+            && group.closeStablePeerCount >= 3
+            && group.bestConfidence >= 45
+            && selectedGroup
+            && selectedGroup.stableCount <= 2
+            && !selectedGroup.variants.has('balanced-color')
+            && group.score + group.closeStablePeerCount * 1.5 >= selectedScore - 2.5) {
+            return group.representative.code;
+        }
+
+        if (!selectedIsExactCandidate
+            && group.stableCount >= 1
+            && group.lineCount >= 1
+            && hasLineFamily
+            && group.bestConfidence >= 45
+            && group.score >= 5.5) {
+            return group.representative.code;
+        }
+    }
+
+    return '';
+}
+
 function findTrustedAggressiveLineVariant(valid, selected) {
     const diffCount = (a, b) => {
         if (!a || !b || a.length !== b.length) return 99;
@@ -3349,17 +3359,28 @@ function selectCaptchaCode(results) {
         const confidenceBonus = Math.min(3, Math.max(0, result.confidence || 0) / 25);
         const weight = result.priority + confidenceBonus;
         for (let i = 0; i < 4; i++) {
-            totals[i].set(result.code[i], (totals[i].get(result.code[i]) || 0) + weight);
+            const voteKey = getCaptchaCharVoteKey(result.code[i]);
+            const item = totals[i].get(voteKey) || {
+                char: result.code[i],
+                weight: 0,
+                bestSingleWeight: 0
+            };
+            item.weight += weight;
+            if (weight > item.bestSingleWeight) {
+                item.char = result.code[i];
+                item.bestSingleWeight = weight;
+            }
+            totals[i].set(voteKey, item);
         }
     }
 
     const consensus = totals.map(positionVotes => {
         let bestChar = '';
         let bestWeight = -1;
-        for (const [char, weight] of positionVotes) {
-            if (weight > bestWeight) {
-                bestChar = char;
-                bestWeight = weight;
+        for (const item of positionVotes.values()) {
+            if (item.weight > bestWeight) {
+                bestChar = item.char;
+                bestWeight = item.weight;
             }
         }
         return bestChar;
@@ -3372,7 +3393,7 @@ function selectCaptchaCode(results) {
     })[0];
 
     const selected = consensus.length === 4 ? consensus : bestWhole.code;
-    const exactMatches = consensusCandidates.filter(result => result.code === selected);
+    const exactMatches = consensusCandidates.filter(result => isSameCaptchaCode(result.code, selected));
     const maxConfidence = exactMatches.reduce((max, result) => Math.max(max, result.confidence || 0), 0);
     const reliableExactMajority = exactMatches.length >= 3
         && (maxConfidence >= 20 || !hasConfidentAlternative(valid, selected, 70));
@@ -3385,6 +3406,9 @@ function selectCaptchaCode(results) {
 
     const trustedCEFallback = findTrustedCEFallback(valid);
     if (trustedCEFallback) return trustedCEFallback;
+
+    const stableWholeCandidate = findStableWholeCandidate(valid, selected);
+    if (stableWholeCandidate) return stableWholeCandidate;
 
     const trustedThinDigit = findTrustedThinDigitVariant(valid, selected);
     if (trustedThinDigit) return trustedThinDigit;
@@ -3658,6 +3682,17 @@ function shouldRunFallbackVariants(results, selectedCode) {
 
     const valid = results.filter(result => result.code.length === 4);
     if (valid.length < 3) return false;
+
+    const compatibleExactMatches = valid.filter(result => isSameCaptchaCode(result.code, selectedCode));
+    const strongCloseDisagreement = valid.some(result => {
+        return result.code
+            && result.code.length === selectedCode.length
+            && !isSameCaptchaCode(result.code, selectedCode)
+            && ['thin-line-clean', 'legacy-fallback'].includes(result.variant)
+            && (result.confidence || 0) >= 50
+            && countSameOtherPositions(selectedCode, result.code, -1) >= 2;
+    });
+    if (compatibleExactMatches.length <= 2 && strongCloseDisagreement) return true;
 
     const exactMatches = valid.filter(result => result.code === selectedCode);
     const maxConfidence = exactMatches.reduce((max, result) => Math.max(max, result.confidence || 0), 0);
