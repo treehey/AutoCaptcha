@@ -6,7 +6,8 @@ console.log(`NJU 验证码识别助手 v${EXTENSION_VERSION} 已启动...`);
 
 const IMG_SELECTOR = "#captchaImg";
 const INPUT_SELECTOR = "#captcha";
-const CAPTCHA_CHAR_WHITELIST = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+// Labeled samples indicate the captcha alphabet excludes 0/1/o/O/z/Z.
+const CAPTCHA_CHAR_WHITELIST = '23456789abcdefghijklmnpqrstuvwxyABCDEFGHIJKLMNPQRSTUVWXY';
 let captchaWorkerPromise = null;
 const CAPTCHA_OCR_MAX_WORKERS = 2;
 const CAPTCHA_OCR_VARIANTS = [
