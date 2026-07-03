@@ -10,6 +10,21 @@ const INPUT_SELECTOR = "#captcha";
 const CAPTCHA_CHAR_WHITELIST = '23456789abcdefghijklmnpqrstuvwxyABCDEFGHIJKLMNPQRSTUVWXY';
 let captchaWorkerPromise = null;
 const CAPTCHA_OCR_MAX_WORKERS = 2;
+const CAPTCHA_TEMPLATE_FEATURE_WIDTH = 24;
+const CAPTCHA_TEMPLATE_FEATURE_HEIGHT = 32;
+const CAPTCHA_TEMPLATE_RERANK_DEFAULTS = {
+    enabled: false,
+    mode: 'thin',
+    k: 5,
+    margin: 10,
+    ocrWeight: 0,
+    supportWeight: 0,
+    allTemplateLabels: true,
+    protectHighConfidence: false,
+    highConfidenceThreshold: 88,
+    highConfidenceMargin: 18,
+    debug: false
+};
 const CAPTCHA_OCR_VARIANTS = [
     {
         name: 'color-cluster',
@@ -675,6 +690,430 @@ function createPreprocessedCanvas(base, variant) {
     if (variant.legacy) return createLegacyPreprocessedCanvas(base, variant);
     if (variant.simpleThreshold) return createThresholdPreprocessedCanvas(base, variant);
     return createColorPreprocessedCanvas(base, variant);
+}
+
+function getTemplateRerankConfig(override = null) {
+    const runtimeConfig = typeof window !== 'undefined'
+        ? (window.NJU_TEMPLATE_RERANK_CONFIG || null)
+        : null;
+    return {
+        ...CAPTCHA_TEMPLATE_RERANK_DEFAULTS,
+        ...(runtimeConfig || {}),
+        ...(override || {})
+    };
+}
+
+function normalizeTemplateLabel(char) {
+    return /[a-zA-Z]/.test(char || '') ? char.toLowerCase() : (char || '');
+}
+
+function getTemplateMaskVariant(mode) {
+    if (mode === 'aggressive') {
+        return {
+            minSaturation: 0.09,
+            minChroma: 10,
+            maxLuminance: 210,
+            darkLuminance: 100,
+            darkMinSaturation: 0.02,
+            lineMaxSaturation: 0.36,
+            lineMinLuminance: 88
+        };
+    }
+
+    return {
+        minSaturation: 0.10,
+        minChroma: 12,
+        maxLuminance: 205,
+        darkLuminance: 95,
+        darkMinSaturation: 0.02,
+        lineMaxSaturation: 0.22,
+        lineMinLuminance: 120
+    };
+}
+
+function buildTemplateRerankMask(base, mode = 'thin') {
+    if (mode === 'color') return buildColorClusterMask(base);
+
+    const variant = getTemplateMaskVariant(mode);
+    const mask = buildTextMask(base, variant);
+    suppressInterferenceLines(mask, base, variant);
+    if (mode === 'aggressive') {
+        removeDirectionalInterference(mask, base);
+    }
+    removeOnePixelInterference(mask, base);
+    removeDenseHorizontalRows(mask, base.width, base.height);
+    filterSmallComponents(mask, base.width, base.height);
+    bridgeOnePixelGaps(mask, base.width, base.height);
+    if (mode === 'aggressive') bridgeOnePixelGaps(mask, base.width, base.height);
+    return mask;
+}
+
+function getTemplateColumnCounts(mask, width, height, y0, y1) {
+    const counts = new Array(width).fill(0);
+    for (let x = 0; x < width; x++) {
+        let count = 0;
+        for (let y = y0; y <= y1; y++) {
+            if (mask[y * width + x]) count++;
+        }
+        counts[x] = count;
+    }
+    return counts;
+}
+
+function getSmoothedTemplateColumn(counts, x) {
+    let total = 0;
+    let weight = 0;
+    for (let dx = -2; dx <= 2; dx++) {
+        const index = x + dx;
+        if (index < 0 || index >= counts.length) continue;
+        const w = 3 - Math.abs(dx);
+        total += counts[index] * w;
+        weight += w;
+    }
+    return total / Math.max(1, weight);
+}
+
+function segmentTemplateRerankMask(mask, width, height) {
+    const bounds = getMaskBounds(mask, width, height) || {
+        minX: 0,
+        minY: 0,
+        maxX: width - 1,
+        maxY: height - 1
+    };
+    const xMin = Math.max(0, bounds.minX - 2);
+    const xMax = Math.min(width - 1, bounds.maxX + 2);
+    const yMin = Math.max(0, bounds.minY - 2);
+    const yMax = Math.min(height - 1, bounds.maxY + 2);
+    const totalW = xMax - xMin + 1;
+    const minSeg = Math.max(10, Math.floor(totalW * 0.14));
+    const maxSeg = Math.max(minSeg + 4, Math.floor(totalW * 0.36));
+    const counts = getTemplateColumnCounts(mask, width, height, yMin, yMax);
+    const expected = [0.25, 0.50, 0.75].map(ratio => xMin + totalW * ratio);
+    let best = null;
+
+    const c1End = Math.min(xMax - minSeg * 3, xMin + Math.floor(totalW * 0.38));
+    for (let c1 = xMin + minSeg; c1 <= c1End; c1++) {
+        const c2Start = Math.max(c1 + minSeg, xMin + Math.floor(totalW * 0.34));
+        const c2End = Math.min(xMax - minSeg * 2, xMin + Math.floor(totalW * 0.64));
+        for (let c2 = c2Start; c2 <= c2End; c2++) {
+            const c3Start = Math.max(c2 + minSeg, xMin + Math.floor(totalW * 0.58));
+            const c3End = Math.min(xMax - minSeg, xMin + Math.floor(totalW * 0.86));
+            for (let c3 = c3Start; c3 <= c3End; c3++) {
+                const cuts = [c1, c2, c3];
+                const edges = [xMin, c1, c2, c3, xMax + 1];
+                const widths = [
+                    edges[1] - edges[0],
+                    edges[2] - edges[1],
+                    edges[3] - edges[2],
+                    edges[4] - edges[3]
+                ];
+                if (widths.some(w => w < minSeg || w > maxSeg)) continue;
+
+                let score = 0;
+                for (let i = 0; i < 3; i++) {
+                    score += getSmoothedTemplateColumn(counts, cuts[i]) * 6;
+                    score += Math.abs(cuts[i] - expected[i]) * 0.10;
+                }
+                const idealW = totalW / 4;
+                for (const w of widths) score += Math.abs(w - idealW) * 0.12;
+
+                for (let i = 0; i < 4; i++) {
+                    let ink = 0;
+                    for (let x = edges[i]; x < edges[i + 1]; x++) {
+                        ink += counts[x] || 0;
+                    }
+                    if (ink < 6) score += 200;
+                }
+
+                if (!best || score < best.score) {
+                    best = { score, cuts, edges, bounds: { xMin, xMax, yMin, yMax } };
+                }
+            }
+        }
+    }
+
+    if (!best) {
+        const step = totalW / 4;
+        const cuts = [1, 2, 3].map(index => Math.round(xMin + step * index));
+        best = { cuts, edges: [xMin, ...cuts, xMax + 1], bounds: { xMin, xMax, yMin, yMax }, score: 9999 };
+    }
+
+    const boxes = [];
+    for (let i = 0; i < 4; i++) {
+        const sx0 = Math.max(0, best.edges[i] - 2);
+        const sx1 = Math.min(width - 1, best.edges[i + 1] + 1);
+        let minX = sx1, minY = height - 1, maxX = sx0, maxY = 0;
+
+        for (let y = 0; y < height; y++) {
+            for (let x = sx0; x <= sx1; x++) {
+                if (!mask[y * width + x]) continue;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+
+        if (maxX < minX) {
+            minX = sx0;
+            maxX = sx1;
+            minY = best.bounds.yMin;
+            maxY = best.bounds.yMax;
+        }
+
+        boxes.push({
+            x0: Math.max(0, minX - 2),
+            y0: Math.max(0, minY - 2),
+            x1: Math.min(width - 1, maxX + 2),
+            y1: Math.min(height - 1, maxY + 2)
+        });
+    }
+
+    return { ...best, boxes };
+}
+
+function extractTemplateFeatureFromBox(mask, width, height, box) {
+    const featureW = CAPTCHA_TEMPLATE_FEATURE_WIDTH;
+    const featureH = CAPTCHA_TEMPLATE_FEATURE_HEIGHT;
+    const vector = new Array(featureW * featureH).fill(0);
+    const col = new Array(featureW).fill(0);
+    const row = new Array(featureH).fill(0);
+    const boxW = Math.max(1, box.x1 - box.x0 + 1);
+    const boxH = Math.max(1, box.y1 - box.y0 + 1);
+    const scale = Math.min((featureW - 4) / boxW, (featureH - 4) / boxH);
+    const drawW = boxW * scale;
+    const drawH = boxH * scale;
+    const ox = Math.floor((featureW - drawW) / 2);
+    const oy = Math.floor((featureH - drawH) / 2);
+
+    for (let y = box.y0; y <= box.y1; y++) {
+        for (let x = box.x0; x <= box.x1; x++) {
+            if (!mask[y * width + x]) continue;
+            const fx = Math.max(0, Math.min(featureW - 1, Math.floor(ox + (x - box.x0) * scale)));
+            const fy = Math.max(0, Math.min(featureH - 1, Math.floor(oy + (y - box.y0) * scale)));
+            vector[fy * featureW + fx] = 1;
+        }
+    }
+
+    for (let y = 0; y < featureH; y++) {
+        for (let x = 0; x < featureW; x++) {
+            if (!vector[y * featureW + x]) continue;
+            col[x] += 1 / featureH;
+            row[y] += 1 / featureW;
+        }
+    }
+
+    return { vector, col, row };
+}
+
+function extractCaptchaTemplateFeatures(base, mode = 'thin') {
+    const mask = buildTemplateRerankMask(base, mode);
+    const segmentation = segmentTemplateRerankMask(mask, base.width, base.height);
+    return {
+        mode,
+        segmentation,
+        chars: segmentation.boxes.map(box => extractTemplateFeatureFromBox(mask, base.width, base.height, box))
+    };
+}
+
+function getShiftedTemplateDistance(a, b, dx, dy) {
+    const featureW = CAPTCHA_TEMPLATE_FEATURE_WIDTH;
+    const featureH = CAPTCHA_TEMPLATE_FEATURE_HEIGHT;
+    let diff = 0;
+    let union = 0;
+
+    for (let y = 0; y < featureH; y++) {
+        const by = y + dy;
+        for (let x = 0; x < featureW; x++) {
+            const bx = x + dx;
+            const av = a.vector[y * featureW + x] ? 1 : 0;
+            const bv = bx >= 0 && bx < featureW && by >= 0 && by < featureH
+                ? (b.vector[by * featureW + bx] ? 1 : 0)
+                : 0;
+            if (av || bv) union++;
+            if (av !== bv) diff++;
+        }
+    }
+
+    return union ? diff / union : 1;
+}
+
+function getTemplateFeatureDistance(a, b, useShiftDistance = false) {
+    let best = getShiftedTemplateDistance(a, b, 0, 0);
+    if (useShiftDistance) {
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                const distance = getShiftedTemplateDistance(a, b, dx, dy);
+                if (distance < best) best = distance;
+            }
+        }
+    }
+
+    let projection = 0;
+    for (let i = 0; i < CAPTCHA_TEMPLATE_FEATURE_WIDTH; i++) {
+        projection += Math.abs((a.col[i] || 0) - (b.col[i] || 0));
+    }
+    for (let i = 0; i < CAPTCHA_TEMPLATE_FEATURE_HEIGHT; i++) {
+        projection += Math.abs((a.row[i] || 0) - (b.row[i] || 0));
+    }
+
+    return best + projection * 0.04;
+}
+
+function scoreTemplateLabels(feature, training, k = 5, useShiftDistance = false, allowedLabels = null) {
+    const scopedTraining = allowedLabels && allowedLabels.size
+        ? training.filter(item => allowedLabels.has(item.label))
+        : training;
+    const sourceTraining = scopedTraining.length ? scopedTraining : training;
+    const neighbors = sourceTraining
+        .map(item => ({
+            label: item.label,
+            distance: getTemplateFeatureDistance(feature, item, useShiftDistance)
+        }))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, k);
+
+    const scores = new Map();
+    for (const item of neighbors) {
+        scores.set(item.label, (scores.get(item.label) || 0) + 1 / Math.max(0.02, item.distance));
+    }
+    return scores;
+}
+
+function getTemplateCodeScore(code, labelScores) {
+    if (!code || code.length !== 4) return -Infinity;
+    let score = 0;
+    for (let i = 0; i < 4; i++) {
+        const label = normalizeTemplateLabel(code[i]);
+        score += labelScores[i].get(label) ?? -8;
+    }
+    return score;
+}
+
+function getTemplateTrainingSamples(model, mode) {
+    const samples = model && Array.isArray(model.samples) ? model.samples : [];
+    return samples
+        .filter(item => !item.mode || item.mode === mode)
+        .filter(item => item.label && item.vector && item.col && item.row);
+}
+
+function getCandidateOcrEvidence(results, code) {
+    const exact = results.filter(result => result.code && isSameCaptchaCode(result.code, code));
+    const maxConfidence = exact.reduce((max, result) => Math.max(max, result.confidence || 0), 0);
+    const support = exact.reduce((sum, result) => sum + (result.priority || 0) + Math.max(0, result.confidence || 0) / 25, 0);
+    const variants = exact.map(result => result.variant);
+    return { maxConfidence, support, variants };
+}
+
+function rerankCaptchaCodeWithTemplate(base, results, selectedCode, override = null) {
+    const config = getTemplateRerankConfig(override);
+    const model = config.model;
+    const mode = config.mode || 'thin';
+    const training = getTemplateTrainingSamples(model, mode);
+    const debug = {
+        enabled: Boolean(config.enabled),
+        selectedBefore: selectedCode || '',
+        selectedAfter: selectedCode || '',
+        overridden: false,
+        reason: 'disabled',
+        candidates: []
+    };
+
+    if (!config.enabled) return debug;
+    if (!training.length) {
+        debug.reason = 'no-template-model';
+        return debug;
+    }
+
+    const candidateMap = new Map();
+    if (selectedCode && selectedCode.length === 4) {
+        candidateMap.set(selectedCode, { code: selectedCode, source: 'selected' });
+    }
+    for (const result of results) {
+        if (!result.code || result.code.length !== 4) continue;
+        if (!candidateMap.has(result.code)) {
+            candidateMap.set(result.code, { code: result.code, source: result.variant });
+        }
+    }
+    if (!candidateMap.size) {
+        debug.reason = 'no-whole-candidates';
+        return debug;
+    }
+
+    const candidateLabels = [new Set(), new Set(), new Set(), new Set()];
+    for (const item of candidateMap.values()) {
+        for (let i = 0; i < 4; i++) {
+            candidateLabels[i].add(normalizeTemplateLabel(item.code[i]));
+        }
+    }
+
+    const features = extractCaptchaTemplateFeatures(base, mode);
+    const labelScores = features.chars.map((feature, index) => {
+        return scoreTemplateLabels(
+            feature,
+            training,
+            Math.max(1, config.k || 5),
+            Boolean(config.shiftDistance),
+            config.allTemplateLabels ? null : candidateLabels[index]
+        );
+    });
+
+    const selectedEvidence = getCandidateOcrEvidence(results, selectedCode || '');
+    const currentTemplateScore = getTemplateCodeScore(selectedCode || '', labelScores);
+    let best = {
+        code: selectedCode || '',
+        source: 'selected',
+        templateScore: currentTemplateScore,
+        ocrScore: selectedEvidence.maxConfidence * (config.ocrWeight || 0)
+            + selectedEvidence.support * (config.supportWeight || 0),
+        evidence: selectedEvidence
+    };
+    best.combinedScore = best.templateScore + best.ocrScore;
+
+    for (const item of candidateMap.values()) {
+        const evidence = getCandidateOcrEvidence(results, item.code);
+        const templateScore = getTemplateCodeScore(item.code, labelScores);
+        const ocrScore = evidence.maxConfidence * (config.ocrWeight || 0)
+            + evidence.support * (config.supportWeight || 0);
+        const candidate = {
+            ...item,
+            templateScore,
+            ocrScore,
+            combinedScore: templateScore + ocrScore,
+            evidence
+        };
+        debug.candidates.push(candidate);
+        if (candidate.combinedScore > best.combinedScore) best = candidate;
+    }
+
+    debug.candidates.sort((a, b) => b.combinedScore - a.combinedScore);
+    const margin = Number(config.margin ?? 10);
+    const currentCombinedScore = currentTemplateScore
+        + selectedEvidence.maxConfidence * (config.ocrWeight || 0)
+        + selectedEvidence.support * (config.supportWeight || 0);
+    const advantage = best.combinedScore - currentCombinedScore;
+
+    if (!best.code || best.code === selectedCode) {
+        debug.reason = 'selected-still-best';
+        return debug;
+    }
+
+    if (advantage < margin) {
+        debug.reason = `margin-not-met:${advantage.toFixed(2)}<${margin}`;
+        return debug;
+    }
+
+    if (config.protectHighConfidence
+        && selectedEvidence.maxConfidence >= (config.highConfidenceThreshold || 88)
+        && advantage < (config.highConfidenceMargin || 18)) {
+        debug.reason = `protected-high-confidence:${Math.round(selectedEvidence.maxConfidence)}`;
+        return debug;
+    }
+
+    debug.selectedAfter = best.code;
+    debug.overridden = true;
+    debug.reason = `template-rerank:${advantage.toFixed(2)}`;
+    return debug;
 }
 
 function getCorrectionMask(base) {
@@ -3714,10 +4153,18 @@ async function recognizeCaptchaCode(imgElement) {
             selectedCode = selectCaptchaCode(results);
         }
 
-        const code = selectedCode ? correctVisualConfusions(selectedCode, base, results) : '';
+        let code = selectedCode ? correctVisualConfusions(selectedCode, base, results) : '';
+        const templateRerank = rerankCaptchaCodeWithTemplate(base, results, code);
+        if (templateRerank.overridden) {
+            code = templateRerank.selectedAfter;
+        }
+        const templateRerankEnabled = templateRerank.enabled;
         console.log(
             "NJU 助手：OCR候选：",
             results.map(r => `${r.variant}${r.variant === 'balanced-color' ? '*' : ''}=${r.code || '空'}(${Math.round(r.confidence)})`).join(' | '),
+            templateRerankEnabled
+                ? `| 模板重排：${templateRerank.selectedBefore || '空'}=>${templateRerank.selectedAfter || '空'} ${templateRerank.reason}`
+                : '',
             "=>",
             code || '无有效结果'
         );

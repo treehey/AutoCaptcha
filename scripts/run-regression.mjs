@@ -13,6 +13,20 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const verbose = process.argv.includes('--verbose') || process.env.OCR_REGRESSION_VERBOSE === '1';
 const args = process.argv.slice(2).filter(arg => arg !== '--verbose');
+const templateRerankEnabled = args.includes('--template-rerank');
+const templateTrainArg = args.find(arg => arg.startsWith('--template-train='))?.slice('--template-train='.length) || '';
+const templateMode = args.find(arg => arg.startsWith('--template-mode='))?.slice('--template-mode='.length) || 'thin';
+const templateK = Number(args.find(arg => arg.startsWith('--template-k='))?.slice('--template-k='.length) || 5);
+const templateMargin = Number(args.find(arg => arg.startsWith('--template-margin='))?.slice('--template-margin='.length) || 10);
+const templateOcrWeight = Number(args.find(arg => arg.startsWith('--template-ocr-weight='))?.slice('--template-ocr-weight='.length) || 0);
+const templateSupportWeight = Number(args.find(arg => arg.startsWith('--template-support-weight='))?.slice('--template-support-weight='.length) || 0);
+const templateProtectHighConfidence = args.includes('--template-protect-high-confidence');
+const templateAllLabels = !args.includes('--template-candidate-labels-only');
+
+function parseRoundList(value) {
+  if (!value) return [];
+  return value.split(',').filter(Boolean).map(round => `round-${round.padStart(3, '0')}`);
+}
 
 // Round selection: comma-separated or 'all' (default: 'all')
 const roundArg = args.find(arg => /^(all|\d{3}(,\d{3})*)$/.test(arg)) || 'all';
@@ -87,6 +101,54 @@ function sameCaptchaAnswer(actual, expected) {
     }
   }
   return true;
+}
+
+function normalizeTemplateLabel(char) {
+  return /[a-zA-Z]/.test(char || '') ? char.toLowerCase() : (char || '');
+}
+
+async function buildTemplateModel(page, origin, trainRounds, mode) {
+  const samples = [];
+
+  for (const round of trainRounds) {
+    const sampleDir = path.join(repoRoot, 'data', 'captcha-samples', round);
+    const answersPath = path.join(sampleDir, 'answers.csv');
+    if (!existsSync(answersPath)) {
+      console.log(`[template] SKIP ${round} — no answers.csv found`);
+      continue;
+    }
+
+    const answers = parseCsv(await readFile(answersPath, 'utf8'));
+    console.log(`[template] Extracting ${answers.length} samples from ${round} (${mode})...`);
+
+    for (const sample of answers) {
+      const imageUrl = `${origin}/${path.relative(repoRoot, path.join(sampleDir, sample.file)).replaceAll(path.sep, '/')}`;
+      const features = await page.evaluate(async ({ imageUrl, mode }) => {
+        const img = new Image();
+        img.src = imageUrl;
+        await img.decode();
+        const base = await window.readCaptchaBitmap(img);
+        return window.extractCaptchaTemplateFeatures(base, mode);
+      }, { imageUrl, mode });
+
+      for (let pos = 0; pos < 4; pos++) {
+        samples.push({
+          label: normalizeTemplateLabel(sample.answer[pos]),
+          mode,
+          round,
+          id: sample.id,
+          pos,
+          ...features.chars[pos],
+        });
+      }
+    }
+  }
+
+  return {
+    featureSize: { width: 24, height: 32 },
+    mode,
+    samples,
+  };
 }
 
 function charDiff(actual, expected) {
@@ -179,6 +241,35 @@ try {
   await page.addScriptTag({ url: `${origin}/tesseract.min.js` });
   await page.addScriptTag({ url: `${origin}/content.js` });
   await page.waitForFunction(() => typeof window.recognizeCaptchaCode === 'function');
+  await page.waitForFunction(() => typeof window.extractCaptchaTemplateFeatures === 'function');
+
+  if (templateRerankEnabled) {
+    const trainRounds = parseRoundList(templateTrainArg);
+    if (!trainRounds.length) {
+      throw new Error('Template rerank requires --template-train=010,011,...');
+    }
+    const model = await buildTemplateModel(page, origin, trainRounds, templateMode);
+    await page.evaluate(config => {
+      window.NJU_TEMPLATE_RERANK_CONFIG = config;
+    }, {
+      enabled: true,
+      mode: templateMode,
+      k: templateK,
+      margin: templateMargin,
+      ocrWeight: templateOcrWeight,
+      supportWeight: templateSupportWeight,
+      allTemplateLabels: templateAllLabels,
+      protectHighConfidence: templateProtectHighConfidence,
+      model,
+      debug: verbose,
+    });
+    console.log(`[template] Rerank enabled: train=${trainRounds.join(', ')} mode=${templateMode} k=${templateK} margin=${templateMargin} ocrWeight=${templateOcrWeight} supportWeight=${templateSupportWeight} allLabels=${templateAllLabels} protectHighConfidence=${templateProtectHighConfidence}`);
+    console.log('');
+  } else {
+    await page.evaluate(() => {
+      window.NJU_TEMPLATE_RERANK_CONFIG = { enabled: false };
+    });
+  }
 
   for (const round of rounds) {
     const sampleDir = path.join(repoRoot, 'data', 'captcha-samples', round);
@@ -219,12 +310,17 @@ try {
           usedFallback = true;
         }
 
-        const code = selected ? window.correctVisualConfusions(selected, base, candidates) : '';
+        let code = selected ? window.correctVisualConfusions(selected, base, candidates) : '';
+        const templateRerank = window.rerankCaptchaCodeWithTemplate(base, candidates, code);
+        if (templateRerank.overridden) {
+          code = templateRerank.selectedAfter;
+        }
         return {
           code,
           selected,
           elapsedMs: performance.now() - started,
           usedFallback,
+          templateRerank,
           candidates: candidates.map(c => ({
             variant: c.variant,
             code: c.code || '',
@@ -246,6 +342,13 @@ try {
       if (!ok && verbose) {
         const candStr = result.candidates.map(c => `${c.variant}=${c.code || '空'}(${c.confidence})`).join(' | ');
         console.log(`    candidates: ${candStr}`);
+        if (result.templateRerank?.enabled) {
+          const rerankStr = result.templateRerank.candidates
+            .slice(0, 8)
+            .map(c => `${c.code || '空'}:${Number(c.combinedScore || 0).toFixed(1)}[t=${Number(c.templateScore || 0).toFixed(1)},o=${Number(c.ocrScore || 0).toFixed(1)}]`)
+            .join(' | ');
+          console.log(`    template: ${result.templateRerank.selectedBefore || '空'} -> ${result.templateRerank.selectedAfter || '空'} ${result.templateRerank.reason}; ${rerankStr}`);
+        }
       }
     }
 
@@ -271,6 +374,7 @@ try {
         ok: r.ok,
         elapsedMs: r.elapsedMs,
         usedFallback: r.usedFallback,
+        templateRerank: r.templateRerank || null,
         candidates: r.candidates,
       })),
       errors: errors.map(e => ({
@@ -278,6 +382,7 @@ try {
         expected: e.answer,
         actual: e.code || '',
         selected: e.selected || '',
+        templateRerank: e.templateRerank || null,
         diffs: e.diffs,
         confusions: e.confusions,
         candidates: e.candidates,
@@ -336,6 +441,17 @@ try {
   const report = {
     timestamp: now.toISOString(),
     rounds: allRoundResults.map(r => r.round),
+    templateRerank: templateRerankEnabled ? {
+      enabled: true,
+      trainRounds: parseRoundList(templateTrainArg),
+      mode: templateMode,
+      k: templateK,
+      margin: templateMargin,
+      ocrWeight: templateOcrWeight,
+      supportWeight: templateSupportWeight,
+      allTemplateLabels: templateAllLabels,
+      protectHighConfidence: templateProtectHighConfidence,
+    } : { enabled: false },
     totalCorrect,
     totalSamples,
     accuracy: totalCorrect / totalSamples,
