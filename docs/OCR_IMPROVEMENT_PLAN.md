@@ -81,6 +81,13 @@ http://127.0.0.1:<port>/tools/ocr-benchmark.html?sample=data/captcha-samples/rou
 - Tesseract 兜底：只在快路径低置信时跑多变体 OCR。
 - 对每轮错误样本先归因，再抽象为跨样本规则；禁止直接追加只服务单张图的修正。
 
+实验结论：
+
+- `scripts/run-segmentation-experiment.mjs` 验证了“动态切 4 段 + Tesseract 单字符 `psm 10`”方向，`round-012` 首轮仅 `8/30`。切框大体可用，但单字符 Tesseract 对当前字体和噪声不稳定，不能直接替代整行 OCR。
+- `scripts/run-template-experiment.mjs` 验证了本地模板分类器。模板单独做整码识别仍偏低，但字符级准确率在 leave-one-round-out 中常见 `80%+`。
+- 最有效的当前方向是“模板特征重排现有 OCR 候选”：固定参数 `thin/knn5/margin=10` 在 `round-012` 至 `round-015` 的 leave-one-round-out 汇总为 `91/120`，约 `75.8%`；用 `round-010` 至 `round-013` 训练、`round-014` 至 `round-015` 测试可达 `50/60`，约 `83.3%`。
+- 下一步接入主流程时，应把模板分类器作为候选重排旁证，而不是生成答案的主引擎；同时保留当前多变体 OCR 和 fallback。
+
 ## 5. 交互优化
 
 - Popup 增加登录助手实时状态：未配置、识别中、已填充、已提交、失败重试。
