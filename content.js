@@ -12,19 +12,26 @@ let captchaWorkerPromise = null;
 const CAPTCHA_OCR_MAX_WORKERS = 2;
 const CAPTCHA_TEMPLATE_FEATURE_WIDTH = 24;
 const CAPTCHA_TEMPLATE_FEATURE_HEIGHT = 32;
+const CAPTCHA_TEMPLATE_MODEL_PATH = 'assets/captcha-template-model.json';
 const CAPTCHA_TEMPLATE_RERANK_DEFAULTS = {
     enabled: false,
     mode: 'thin',
-    k: 5,
+    k: 3,
     margin: 10,
     ocrWeight: 0,
     supportWeight: 0,
     allTemplateLabels: true,
+    protectWeakSingleVariant: true,
+    weakSingleVariantMargin: 30,
+    weakSingleVariantConfidence: 0,
     protectHighConfidence: false,
     highConfidenceThreshold: 88,
     highConfidenceMargin: 18,
     debug: false
 };
+let captchaTemplateModelPromise = null;
+let captchaTemplateRuntimeConfigPromise = null;
+let captchaTemplateModelWarned = false;
 const CAPTCHA_OCR_VARIANTS = [
     {
         name: 'color-cluster',
@@ -703,6 +710,65 @@ function getTemplateRerankConfig(override = null) {
     };
 }
 
+async function loadCaptchaTemplateModel() {
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.getURL) return null;
+    const url = chrome.runtime.getURL(CAPTCHA_TEMPLATE_MODEL_PATH);
+    const response = await fetch(url, { cache: 'force-cache' });
+    if (!response.ok) {
+        throw new Error(`Template model unavailable: ${response.status}`);
+    }
+    return await response.json();
+}
+
+async function getCaptchaTemplateModel() {
+    if (!captchaTemplateModelPromise) {
+        captchaTemplateModelPromise = loadCaptchaTemplateModel().catch(err => {
+            if (!captchaTemplateModelWarned) {
+                console.warn('NJU 助手：模板 OCR 模型加载失败，已回退旧 OCR 流程:', err);
+                captchaTemplateModelWarned = true;
+            }
+            return null;
+        });
+    }
+    return await captchaTemplateModelPromise;
+}
+
+async function getCaptchaTemplateRuntimeConfig() {
+    if (typeof window !== 'undefined' && window.NJU_TEMPLATE_RERANK_CONFIG) {
+        return getTemplateRerankConfig();
+    }
+
+    if (captchaTemplateRuntimeConfigPromise) {
+        return await captchaTemplateRuntimeConfigPromise;
+    }
+
+    captchaTemplateRuntimeConfigPromise = buildCaptchaTemplateRuntimeConfig();
+    return await captchaTemplateRuntimeConfigPromise;
+}
+
+async function buildCaptchaTemplateRuntimeConfig() {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        return getTemplateRerankConfig({ enabled: false });
+    }
+
+    const settings = await chrome.storage.local.get(['nju_template_rerank', 'nju_template_debug']);
+    if (settings.nju_template_rerank === false) {
+        return getTemplateRerankConfig({ enabled: false });
+    }
+
+    const model = await getCaptchaTemplateModel();
+    if (!model) {
+        return getTemplateRerankConfig({ enabled: false });
+    }
+
+    return getTemplateRerankConfig({
+        ...(model.recommended || {}),
+        enabled: true,
+        model,
+        debug: Boolean(settings.nju_template_debug)
+    });
+}
+
 function normalizeTemplateLabel(char) {
     return /[a-zA-Z]/.test(char || '') ? char.toLowerCase() : (char || '');
 }
@@ -965,13 +1031,20 @@ function scoreTemplateLabels(feature, training, k = 5, useShiftDistance = false,
         ? training.filter(item => allowedLabels.has(item.label))
         : training;
     const sourceTraining = scopedTraining.length ? scopedTraining : training;
-    const neighbors = sourceTraining
-        .map(item => ({
-            label: item.label,
-            distance: getTemplateFeatureDistance(feature, item, useShiftDistance)
-        }))
-        .sort((a, b) => a.distance - b.distance)
-        .slice(0, k);
+    const neighbors = [];
+    const limit = Math.max(1, k || 5);
+
+    for (const item of sourceTraining) {
+        const distance = getTemplateFeatureDistance(feature, item, useShiftDistance);
+        if (neighbors.length < limit) {
+            neighbors.push({ label: item.label, distance });
+            neighbors.sort((a, b) => a.distance - b.distance);
+            continue;
+        }
+        if (distance >= neighbors[neighbors.length - 1].distance) continue;
+        neighbors[neighbors.length - 1] = { label: item.label, distance };
+        neighbors.sort((a, b) => a.distance - b.distance);
+    }
 
     const scores = new Map();
     for (const item of neighbors) {
@@ -992,9 +1065,21 @@ function getTemplateCodeScore(code, labelScores) {
 
 function getTemplateTrainingSamples(model, mode) {
     const samples = model && Array.isArray(model.samples) ? model.samples : [];
-    return samples
+    if (!model || !samples.length) return [];
+
+    const cacheKey = mode || '__all__';
+    if (!model._trainingCache) {
+        Object.defineProperty(model, '_trainingCache', {
+            value: Object.create(null),
+            enumerable: false
+        });
+    }
+    if (model._trainingCache[cacheKey]) return model._trainingCache[cacheKey];
+
+    model._trainingCache[cacheKey] = samples
         .filter(item => !item.mode || item.mode === mode)
         .filter(item => item.label && item.vector && item.col && item.row);
+    return model._trainingCache[cacheKey];
 }
 
 function getCandidateOcrEvidence(results, code) {
@@ -1107,6 +1192,19 @@ function rerankCaptchaCodeWithTemplate(base, results, selectedCode, override = n
         && selectedEvidence.maxConfidence >= (config.highConfidenceThreshold || 88)
         && advantage < (config.highConfidenceMargin || 18)) {
         debug.reason = `protected-high-confidence:${Math.round(selectedEvidence.maxConfidence)}`;
+        return debug;
+    }
+
+    const weakSingleVariantMargin = Number(config.weakSingleVariantMargin ?? 30);
+    const weakSingleVariantConfidence = Number(config.weakSingleVariantConfidence ?? 0);
+    if (config.protectWeakSingleVariant !== false
+        && selectedCode
+        && best.evidence
+        && (best.evidence.maxConfidence || 0) <= weakSingleVariantConfidence
+        && (best.evidence.variants || []).length <= 1
+        && (best.evidence.support || 0) < (selectedEvidence.support || 0)
+        && advantage < weakSingleVariantMargin) {
+        debug.reason = `protected-weak-single-variant:${advantage.toFixed(2)}<${weakSingleVariantMargin}`;
         return debug;
     }
 
@@ -4154,7 +4252,8 @@ async function recognizeCaptchaCode(imgElement) {
         }
 
         let code = selectedCode ? correctVisualConfusions(selectedCode, base, results) : '';
-        const templateRerank = rerankCaptchaCodeWithTemplate(base, results, code);
+        const templateRerankConfig = await getCaptchaTemplateRuntimeConfig();
+        const templateRerank = rerankCaptchaCodeWithTemplate(base, results, code, templateRerankConfig);
         if (templateRerank.overridden) {
             code = templateRerank.selectedAfter;
         }
@@ -4180,6 +4279,15 @@ chrome.storage.local.get(['nju_enabled']).then(settings => {
         getCaptchaWorker().catch(err => console.warn("NJU 助手：预热 OCR worker 失败:", err));
     }
 });
+
+if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local') return;
+        if (changes.nju_template_rerank || changes.nju_template_debug) {
+            captchaTemplateRuntimeConfigPromise = null;
+        }
+    });
+}
 
 window.addEventListener('beforeunload', () => {
     resetCaptchaWorker();

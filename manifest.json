@@ -37,6 +37,7 @@
         "langs/eng.traineddata",
         "langs/worker.min.js",
         "langs/tesseract-core.wasm.js",
+        "assets/captcha-template-model.json",
         "icon48.png"
       ],
       "matches": ["<all_urls>"]

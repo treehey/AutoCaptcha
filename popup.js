@@ -32,11 +32,11 @@ document.getElementById('saveBtn').addEventListener('click', () => {
 });
 
 // 绑定元素
-const switches = ['isEnabled', 'forceFill', 'autoClick'];
+const switches = ['isEnabled', 'forceFill', 'autoClick', 'templateRerank'];
 const saveBtn = document.getElementById('saveBtn');
 
 // 1. 初始化加载
-chrome.storage.local.get(['nju_user', 'nju_pass', 'nju_enabled', 'nju_force', 'nju_auto_click'], (data) => {
+chrome.storage.local.get(['nju_user', 'nju_pass', 'nju_enabled', 'nju_force', 'nju_auto_click', 'nju_template_rerank'], (data) => {
   document.getElementById('username').value = data.nju_user || '';
   document.getElementById('password').value = data.nju_pass || '';
   
@@ -44,6 +44,7 @@ chrome.storage.local.get(['nju_user', 'nju_pass', 'nju_enabled', 'nju_force', 'n
   document.getElementById('isEnabled').checked = data.nju_enabled !== false;
   document.getElementById('forceFill').checked = !!data.nju_force;
   document.getElementById('autoClick').checked = data.nju_auto_click !== false;
+  document.getElementById('templateRerank').checked = data.nju_template_rerank !== false;
 });
 
 // 2. 为开关绑定自动保存事件
@@ -52,7 +53,8 @@ switches.forEach(id => {
     const keyMap = {
       'isEnabled': 'nju_enabled',
       'forceFill': 'nju_force',
-      'autoClick': 'nju_auto_click'
+      'autoClick': 'nju_auto_click',
+      'templateRerank': 'nju_template_rerank'
     };
     chrome.storage.local.set({ [keyMap[id]]: e.target.checked });
   });

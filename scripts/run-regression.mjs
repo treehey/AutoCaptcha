@@ -13,15 +13,18 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const verbose = process.argv.includes('--verbose') || process.env.OCR_REGRESSION_VERBOSE === '1';
 const args = process.argv.slice(2).filter(arg => arg !== '--verbose');
+const pluginFlow = args.includes('--plugin-flow');
 const templateRerankEnabled = args.includes('--template-rerank');
 const templateTrainArg = args.find(arg => arg.startsWith('--template-train='))?.slice('--template-train='.length) || '';
 const templateMode = args.find(arg => arg.startsWith('--template-mode='))?.slice('--template-mode='.length) || 'thin';
-const templateK = Number(args.find(arg => arg.startsWith('--template-k='))?.slice('--template-k='.length) || 5);
+const templateK = Number(args.find(arg => arg.startsWith('--template-k='))?.slice('--template-k='.length) || 3);
 const templateMargin = Number(args.find(arg => arg.startsWith('--template-margin='))?.slice('--template-margin='.length) || 10);
 const templateOcrWeight = Number(args.find(arg => arg.startsWith('--template-ocr-weight='))?.slice('--template-ocr-weight='.length) || 0);
 const templateSupportWeight = Number(args.find(arg => arg.startsWith('--template-support-weight='))?.slice('--template-support-weight='.length) || 0);
 const templateProtectHighConfidence = args.includes('--template-protect-high-confidence');
 const templateAllLabels = !args.includes('--template-candidate-labels-only');
+const templateProtectWeakSingleVariant = !args.includes('--template-no-weak-single-protect');
+const templateWeakSingleVariantMargin = Number(args.find(arg => arg.startsWith('--template-weak-single-margin='))?.slice('--template-weak-single-margin='.length) || 30);
 
 function parseRoundList(value) {
   if (!value) return [];
@@ -227,23 +230,32 @@ try {
   });
 
   await page.goto(`${origin}/benchmark.html`);
-  await page.evaluate(() => {
+  await page.evaluate(({ pluginFlow }) => {
     window.chrome = {
       runtime: {
         getManifest: () => ({ version: 'regression' }),
         getURL: resource => new URL(resource, window.location.href).href,
       },
       storage: {
-        local: { get: async () => ({ nju_enabled: false }) },
+        local: {
+          get: async () => ({
+            nju_enabled: false,
+            nju_template_rerank: pluginFlow,
+            nju_template_debug: false,
+          }),
+        },
       },
     };
-  });
+  }, { pluginFlow });
   await page.addScriptTag({ url: `${origin}/tesseract.min.js` });
   await page.addScriptTag({ url: `${origin}/content.js` });
   await page.waitForFunction(() => typeof window.recognizeCaptchaCode === 'function');
   await page.waitForFunction(() => typeof window.extractCaptchaTemplateFeatures === 'function');
 
-  if (templateRerankEnabled) {
+  if (pluginFlow) {
+    console.log('[template] Plugin flow enabled: using packaged model via recognizeCaptchaCode()');
+    console.log('');
+  } else if (templateRerankEnabled) {
     const trainRounds = parseRoundList(templateTrainArg);
     if (!trainRounds.length) {
       throw new Error('Template rerank requires --template-train=010,011,...');
@@ -259,11 +271,13 @@ try {
       ocrWeight: templateOcrWeight,
       supportWeight: templateSupportWeight,
       allTemplateLabels: templateAllLabels,
+      protectWeakSingleVariant: templateProtectWeakSingleVariant,
+      weakSingleVariantMargin: templateWeakSingleVariantMargin,
       protectHighConfidence: templateProtectHighConfidence,
       model,
       debug: verbose,
     });
-    console.log(`[template] Rerank enabled: train=${trainRounds.join(', ')} mode=${templateMode} k=${templateK} margin=${templateMargin} ocrWeight=${templateOcrWeight} supportWeight=${templateSupportWeight} allLabels=${templateAllLabels} protectHighConfidence=${templateProtectHighConfidence}`);
+    console.log(`[template] Rerank enabled: train=${trainRounds.join(', ')} mode=${templateMode} k=${templateK} margin=${templateMargin} ocrWeight=${templateOcrWeight} supportWeight=${templateSupportWeight} allLabels=${templateAllLabels} protectWeakSingleVariant=${templateProtectWeakSingleVariant} weakSingleMargin=${templateWeakSingleVariantMargin} protectHighConfidence=${templateProtectHighConfidence}`);
     console.log('');
   } else {
     await page.evaluate(() => {
@@ -291,12 +305,24 @@ try {
 
     for (const sample of answers) {
       const imageUrl = `${origin}/${path.relative(repoRoot, path.join(sampleDir, sample.file)).replaceAll(path.sep, '/')}`;
-      const result = await page.evaluate(async ({ imageUrl }) => {
+      const result = await page.evaluate(async ({ imageUrl, pluginFlow }) => {
         const img = new Image();
         img.src = imageUrl;
         await img.decode();
 
         const started = performance.now();
+        if (pluginFlow) {
+          const code = await window.recognizeCaptchaCode(img);
+          return {
+            code,
+            selected: '',
+            elapsedMs: performance.now() - started,
+            usedFallback: null,
+            templateRerank: null,
+            candidates: [],
+          };
+        }
+
         const base = await window.readCaptchaBitmap(img);
         const engine = await window.getCaptchaWorker();
         let candidates = await window.recognizeCaptchaVariants(engine, base, window.getFastCaptchaVariants());
@@ -327,7 +353,7 @@ try {
             confidence: Math.round(c.confidence || 0),
           })),
         };
-      }, { imageUrl });
+      }, { imageUrl, pluginFlow });
 
       const ok = sameCaptchaAnswer(result.code, sample.answer);
       const diffs = ok ? [] : charDiff(result.code, sample.answer);
@@ -441,7 +467,11 @@ try {
   const report = {
     timestamp: now.toISOString(),
     rounds: allRoundResults.map(r => r.round),
-    templateRerank: templateRerankEnabled ? {
+    templateRerank: pluginFlow ? {
+      enabled: true,
+      pluginFlow: true,
+      packagedModel: 'assets/captcha-template-model.json',
+    } : templateRerankEnabled ? {
       enabled: true,
       trainRounds: parseRoundList(templateTrainArg),
       mode: templateMode,
@@ -450,6 +480,8 @@ try {
       ocrWeight: templateOcrWeight,
       supportWeight: templateSupportWeight,
       allTemplateLabels: templateAllLabels,
+      protectWeakSingleVariant: templateProtectWeakSingleVariant,
+      weakSingleVariantMargin: templateWeakSingleVariantMargin,
       protectHighConfidence: templateProtectHighConfidence,
     } : { enabled: false },
     totalCorrect,
