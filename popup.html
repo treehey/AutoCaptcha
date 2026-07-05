@@ -443,7 +443,7 @@
 
     .interval-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 6px;
       margin-top: 8px;
     }
@@ -717,12 +717,16 @@
             <span id="intervalLabel">3s</span>
           </div>
           <select class="hidden-select" id="grabInterval" aria-label="刷新间隔">
+            <option value="1000">1s</option>
+            <option value="2000">2s</option>
             <option value="3000" selected>3s</option>
             <option value="5000">5s</option>
             <option value="10000">10s</option>
             <option value="30000">30s</option>
           </select>
           <div class="interval-grid" id="intervalGrid">
+            <button class="interval-option" data-value="1000" type="button">1s</button>
+            <button class="interval-option" data-value="2000" type="button">2s</button>
             <button class="interval-option active" data-value="3000" type="button">3s</button>
             <button class="interval-option" data-value="5000" type="button">5s</button>
             <button class="interval-option" data-value="10000" type="button">10s</button>

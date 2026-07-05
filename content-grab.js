@@ -6,7 +6,7 @@ console.log('[AutoGrab] 南京大学自动抢课脚本已加载');
 let grabState = {
   running: false,
   courseNames: [],      // 目标课程名称列表（支持模糊匹配）
-  interval: 3000,       // 刷新间隔(ms)，最小3秒
+  interval: 3000,       // 刷新间隔(ms)，最小1秒
   timer: null,
   round: 0,
   successCourses: [],
