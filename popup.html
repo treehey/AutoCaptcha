@@ -1,397 +1,756 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 
 <head>
-    <meta charset="UTF-8">
-    <style>
-        :root {
-            --primary: #634798;
-            --bg: #f8f9fa;
-            --text: #333;
-        }
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      --primary: #634798;
+      --primary-strong: #523a80;
+      --primary-soft: #f0ebfa;
+      --bg: #f5f6fb;
+      --surface: #ffffff;
+      --surface-muted: #f8f9fc;
+      --border: #e4e7ef;
+      --text: #1f2430;
+      --muted: #6b7280;
+      --faint: #9aa3b2;
+      --success: #14804a;
+      --success-soft: #e8f6ef;
+      --warning: #9a6700;
+      --warning-soft: #fff5d6;
+      --danger: #b42318;
+      --danger-soft: #fde7e5;
+      --info: #2563eb;
+      --info-soft: #eaf1ff;
+      --radius: 8px;
+      --shadow: 0 12px 28px rgba(24, 28, 41, 0.10);
+    }
 
-        body {
-            width: 290px;
-            margin: 0;
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-        }
+    * {
+      box-sizing: border-box;
+    }
 
-        .header {
-            background: var(--primary);
-            color: white;
-            padding: 13px 15px;
-            position: relative;
-            text-align: center;
-            font-weight: 600;
-            font-size: 16px;
-            letter-spacing: 1px;
-        }
+    body {
+      width: 340px;
+      min-height: 500px;
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+    }
 
-        .version-badge {
-            position: absolute;
-            right: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            padding: 2px 6px;
-            border: 1px solid rgba(255, 255, 255, 0.35);
-            border-radius: 999px;
-            font-size: 11px;
-            font-weight: 500;
-            letter-spacing: 0;
-            color: rgba(255, 255, 255, 0.92);
-        }
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
 
-        /* ===== Tab 导航 ===== */
-        .tabs {
-            display: flex;
-            background: white;
-            border-bottom: 2px solid #e0d8f0;
-        }
-        .tab-btn {
-            flex: 1;
-            padding: 9px 0;
-            border: none;
-            background: none;
-            color: #888;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            margin-bottom: -2px;
-            border-radius: 0;
-            transition: color 0.2s;
-            width: auto;
-        }
-        .tab-btn.active {
-            color: var(--primary);
-            border-bottom-color: var(--primary);
-        }
-        .tab-btn:hover:not(.active) {
-            color: #523a80;
-            background: #f5f0ff;
-        }
-        .tab-panel { display: none; }
-        .tab-panel.active { display: block; }
+    button {
+      border: 0;
+      cursor: pointer;
+    }
 
-        /* ===== 通用容器 ===== */
-        .container {
-            padding: 14px;
-        }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
 
-        .card {
-            background: white;
-            border-radius: 12px;
-            padding: 13px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            margin-bottom: 12px;
-        }
+    .shell {
+      padding: 12px;
+    }
 
-        .row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            font-size: 14px;
-        }
+    .topbar {
+      padding: 14px;
+      color: #fff;
+      background: #2d2938;
+      border-radius: 0 0 12px 12px;
+      box-shadow: var(--shadow);
+    }
 
-        input[type="text"],
-        input[type="password"] {
-            width: 100%;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            padding: 9px 10px;
-            margin: 6px 0;
-            font-size: 13px;
-            transition: border 0.3s;
-            box-sizing: border-box;
-        }
+    .brand-row,
+    .tab-list,
+    .status-grid,
+    .section-head,
+    .setting-row,
+    .field-head,
+    .action-row,
+    .log-head,
+    .course-meta,
+    .grab-summary {
+      display: flex;
+      align-items: center;
+    }
 
-        input[type="text"]:focus,
-        input[type="password"]:focus {
-            border-color: var(--primary);
-            outline: none;
-            box-shadow: 0 0 0 2px rgba(99, 71, 152, 0.1);
-        }
+    .brand-row {
+      justify-content: space-between;
+      gap: 12px;
+    }
 
-        button {
-            width: 100%;
-            background: var(--primary);
-            color: white;
-            border: none;
-            padding: 11px;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.1s, background 0.3s;
-            font-size: 13px;
-        }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
 
-        button:active {
-            transform: scale(0.98);
-        }
+    .brand-subtitle {
+      margin-top: 3px;
+      color: rgba(255, 255, 255, 0.74);
+      font-size: 11px;
+      line-height: 1.35;
+    }
 
-        button:hover {
-            background: #523a80;
-        }
+    .version-badge {
+      flex: 0 0 auto;
+      padding: 3px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      border-radius: 999px;
+      color: rgba(255, 255, 255, 0.94);
+      font-size: 11px;
+      font-weight: 600;
+    }
 
-        .hint {
-            font-size: 11px;
-            color: #888;
-            margin-top: 6px;
-            line-height: 1.4;
-        }
+    .status-grid {
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
 
-        /* 现代开关 */
-        .switch {
-            position: relative;
-            width: 36px;
-            height: 20px;
-        }
+    .pill {
+      min-height: 23px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      color: rgba(255, 255, 255, 0.9);
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      font-size: 11px;
+      line-height: 1;
+    }
 
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
+    .pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
 
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            inset: 0;
-            background: #ccc;
-            transition: .3s;
-            border-radius: 20px;
-        }
+    .tabs-card {
+      margin-top: 12px;
+      padding: 4px;
+      border-radius: 10px;
+      background: #eceff6;
+      border: 1px solid var(--border);
+    }
 
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 14px;
-            width: 14px;
-            left: 3px;
-            bottom: 3px;
-            background: white;
-            transition: .3s;
-            border-radius: 50%;
-        }
+    .tab-list {
+      gap: 4px;
+    }
 
-        input:checked+.slider {
-            background: var(--primary);
-        }
+    .tab-btn {
+      flex: 1;
+      height: 34px;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 700;
+      transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+    }
 
-        input:checked+.slider:before {
-            transform: translateX(16px);
-        }
+    .tab-btn.active {
+      color: var(--primary);
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(28, 32, 44, 0.08);
+    }
 
-        .security-note {
-            margin-top: 12px;
-            padding: 9px;
-            background: #eef2ff;
-            border-radius: 6px;
-            font-size: 11px;
-            color: #4a5568;
-            display: flex;
-            align-items: flex-start;
-            gap: 8px;
-            line-height: 1.4;
-        }
+    .tab-panel {
+      display: none;
+    }
 
-        .security-note svg {
-            color: #634798;
-            flex-shrink: 0;
-            margin-top: 2px;
-        }
+    .tab-panel.active {
+      display: block;
+    }
 
-        .github-btn {
-            margin-top: 12px;
-            background: #24292e;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 10px;
-        }
+    .card {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 1px 2px rgba(23, 30, 47, 0.04);
+    }
 
-        .github-btn:hover {
-            background: #333;
-        }
+    .section-head {
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
 
-        .github-btn svg {
-            fill: white;
-        }
+    .section-title {
+      font-size: 13px;
+      font-weight: 750;
+      color: var(--text);
+    }
 
-        /* ===== 选课助手专属 ===== */
-        .grab-label {
-            font-size: 12px;
-            color: #555;
-            margin-bottom: 4px;
-            font-weight: 600;
-        }
-        textarea#courseNames {
-            width: 100%;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            padding: 8px 10px;
-            font-size: 12px;
-            resize: vertical;
-            min-height: 60px;
-            box-sizing: border-box;
-            font-family: inherit;
-            transition: border 0.3s;
-        }
-        textarea#courseNames:focus {
-            border-color: var(--primary);
-            outline: none;
-            box-shadow: 0 0 0 2px rgba(99,71,152,0.1);
-        }
-        .grab-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            margin-top: 8px;
-        }
-        .grab-interval {
-            flex: 1;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            padding: 8px;
-            font-size: 12px;
-            box-sizing: border-box;
-        }
-        .grab-interval:focus { border-color: var(--primary); outline: none; }
-        #grabBtn { flex: 2; padding: 8px; font-size: 13px; }
-        #grabBtn.running { background: #d9534f; }
-        #grabBtn.running:hover { background: #c9302c; }
-        #grabStatus {
-            margin-top: 10px;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            border-radius: 8px;
-            padding: 8px 10px;
-            font-size: 11px;
-            line-height: 1.65;
-            max-height: 165px;
-            overflow-y: auto;
-            font-family: 'Consolas', monospace;
-        }
-        #grabStatus .log-line { margin: 1px 0; word-break: break-all; }
-        #grabStatus .log-line.success { color: #6fcf97; }
-        #grabStatus .log-line.warn    { color: #f2c94c; }
-        #grabStatus .log-line.error   { color: #eb5757; }
-        .grab-info {
-            font-size: 11px;
-            color: #888;
-            margin-top: 6px;
-            line-height: 1.5;
-        }
-        .grab-info a { color: var(--primary); text-decoration: none; }
-        .status-badge {
-            display: inline-block;
-            font-size: 11px;
-            padding: 2px 7px;
-            border-radius: 10px;
-            font-weight: 600;
-            background: #eee;
-            color: #555;
-            margin-left: 6px;
-        }
-        .status-badge.on  { background: #d4edda; color: #155724; }
-        .status-badge.off { background: #f8d7da; color: #721c24; }
-    </style>
+    .section-note {
+      margin-top: -3px;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 21px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .badge.success {
+      color: var(--success);
+      background: var(--success-soft);
+    }
+
+    .badge.warning {
+      color: var(--warning);
+      background: var(--warning-soft);
+    }
+
+    .badge.danger {
+      color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .badge.info {
+      color: var(--info);
+      background: var(--info-soft);
+    }
+
+    .field {
+      margin-top: 10px;
+    }
+
+    .field:first-child {
+      margin-top: 0;
+    }
+
+    .field-head {
+      justify-content: space-between;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .input-wrap {
+      position: relative;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-muted);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      height: 38px;
+      padding: 0 10px;
+    }
+
+    input.with-action {
+      padding-right: 55px;
+    }
+
+    textarea {
+      min-height: 92px;
+      max-height: 150px;
+      resize: vertical;
+      padding: 9px 10px;
+      line-height: 1.5;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: rgba(99, 71, 152, 0.65);
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(99, 71, 152, 0.12);
+    }
+
+    .ghost-input-btn {
+      position: absolute;
+      right: 5px;
+      top: 5px;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 6px;
+      color: var(--primary);
+      background: transparent;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .ghost-input-btn:hover {
+      background: var(--primary-soft);
+    }
+
+    .primary-btn,
+    .secondary-btn,
+    .danger-btn {
+      height: 36px;
+      border-radius: 7px;
+      padding: 0 12px;
+      font-size: 13px;
+      font-weight: 750;
+      transition: transform 0.12s ease, background 0.16s ease, border-color 0.16s ease;
+    }
+
+    .primary-btn:active,
+    .secondary-btn:active,
+    .danger-btn:active {
+      transform: translateY(1px);
+    }
+
+    .primary-btn {
+      color: #fff;
+      background: var(--primary);
+    }
+
+    .primary-btn:hover:not(:disabled) {
+      background: var(--primary-strong);
+    }
+
+    .secondary-btn {
+      color: var(--primary);
+      background: #fff;
+      border: 1px solid rgba(99, 71, 152, 0.22);
+    }
+
+    .secondary-btn:hover:not(:disabled) {
+      background: var(--primary-soft);
+      border-color: rgba(99, 71, 152, 0.35);
+    }
+
+    .danger-btn {
+      color: #fff;
+      background: var(--danger);
+    }
+
+    .danger-btn:hover:not(:disabled) {
+      background: #941b12;
+    }
+
+    .action-row {
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .action-row button {
+      flex: 1;
+    }
+
+    .setting-row {
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 42px;
+      padding: 9px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .setting-row:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .setting-title {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .setting-desc {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .switch {
+      position: relative;
+      flex: 0 0 auto;
+      width: 38px;
+      height: 22px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #c5cad6;
+      transition: background 0.18s ease;
+    }
+
+    .slider::before {
+      content: "";
+      position: absolute;
+      left: 3px;
+      top: 3px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.24);
+      transition: transform 0.18s ease;
+    }
+
+    .switch input:checked + .slider {
+      background: var(--primary);
+    }
+
+    .switch input:checked + .slider::before {
+      transform: translateX(16px);
+    }
+
+    .course-meta {
+      justify-content: space-between;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .interval-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .interval-option {
+      height: 31px;
+      border-radius: 7px;
+      color: var(--muted);
+      background: var(--surface-muted);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .interval-option.active {
+      color: var(--primary);
+      border-color: rgba(99, 71, 152, 0.42);
+      background: var(--primary-soft);
+    }
+
+    .hidden-select {
+      display: none;
+    }
+
+    .grab-summary {
+      justify-content: space-between;
+      gap: 8px;
+      padding: 9px 10px;
+      border-radius: 7px;
+      background: var(--surface-muted);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .summary-main {
+      color: var(--text);
+      font-weight: 750;
+    }
+
+    .summary-sub {
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .log-card {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .log-head {
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: #fff;
+    }
+
+    .log-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .tiny-btn {
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface-muted);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .tiny-btn:hover {
+      color: var(--primary);
+      background: var(--primary-soft);
+      border-color: rgba(99, 71, 152, 0.24);
+    }
+
+    #grabStatus {
+      min-height: 130px;
+      max-height: 190px;
+      overflow-y: auto;
+      padding: 10px 12px;
+      background: #121624;
+      color: #dce2f0;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .log-line {
+      margin: 0 0 5px;
+      word-break: break-word;
+    }
+
+    .log-line.success {
+      color: #7de0a6;
+    }
+
+    .log-line.warn {
+      color: #f7d774;
+    }
+
+    .log-line.error {
+      color: #ff8b86;
+    }
+
+    .empty-log {
+      color: #778195;
+    }
+
+    .footer-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .footer-actions button {
+      flex: 1;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 12px;
+      z-index: 10;
+      min-width: 150px;
+      max-width: 300px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      color: #fff;
+      background: rgba(28, 32, 44, 0.94);
+      box-shadow: var(--shadow);
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+      opacity: 0;
+      transform: translate(-50%, 10px);
+      pointer-events: none;
+      transition: opacity 0.16s ease, transform 0.16s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+  </style>
 </head>
 
 <body>
-    <div class="header">
-        NJU 助手
-        <span class="version-badge" id="versionBadge">v...</span>
+  <div class="topbar">
+    <div class="brand-row">
+      <div>
+        <div class="brand-title">NJU Login Pro</div>
+        <div class="brand-subtitle">本地 OCR 自动登录 · 选课监控</div>
+      </div>
+      <span class="version-badge" id="versionBadge">v...</span>
+    </div>
+    <div class="status-grid">
+      <span class="pill" id="loginStatePill"><span class="dot"></span><span>读取设置中</span></span>
+      <span class="pill" id="templateStatePill"><span class="dot"></span><span>模板增强</span></span>
+      <span class="pill" id="grabStatePill"><span class="dot"></span><span>选课未运行</span></span>
+    </div>
+  </div>
+
+  <div class="shell">
+    <div class="tabs-card">
+      <div class="tab-list" role="tablist">
+        <button class="tab-btn active" data-tab="login" role="tab" aria-selected="true">登录</button>
+        <button class="tab-btn" data-tab="grab" role="tab" aria-selected="false">选课</button>
+      </div>
     </div>
 
-    <!-- Tab 导航 -->
-    <div class="tabs">
-        <button class="tab-btn active" data-tab="login">&#x1F510; 登录助手</button>
-        <button class="tab-btn" data-tab="grab">&#x1F4DA; 选课助手</button>
-    </div>
-
-    <!-- ===== 登录助手 Tab ===== -->
-    <div class="tab-panel active" id="tab-login">
-        <div class="container">
-            <div class="card">
-                <div class="row">
-                    <span>自动登录总开关</span>
-                    <label class="switch"><input type="checkbox" id="isEnabled"><span class="slider"></span></label>
-                </div>
-                <div class="row">
-                    <span>强制填充账号</span>
-                    <label class="switch"><input type="checkbox" id="forceFill"><span class="slider"></span></label>
-                </div>
-                <div class="row">
-                    <span>识别后自动登录</span>
-                    <label class="switch"><input type="checkbox" id="autoClick"><span class="slider"></span></label>
-                </div>
-                <div class="row">
-                    <span>模板 OCR 增强</span>
-                    <label class="switch"><input type="checkbox" id="templateRerank"><span class="slider"></span></label>
-                </div>
-            </div>
-
-            <div class="card">
-                <input type="text" id="username" placeholder="学号 / 工号">
-                <input type="password" id="password" placeholder="密码">
-                <button id="saveBtn">保存</button>
-            </div>
-
-            <div class="hint">开启"强制填充"：即使浏览器记住了密码，插件也会覆盖填入。</div>
-            <div class="security-note">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-                    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" />
-                </svg>
-                数据仅加密存储在您的浏览器本地，不上传服务器。
-            </div>
-            <button id="githubBtn" class="github-btn">
-                <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
-                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2.0-.21.15-.46.55-.38C13.71 14.53 16 11.53 16 8c0-4.42-3.58-8-8-8z" />
-                </svg>
-                在 GitHub 上查看
-            </button>
+    <div class="tab-panel active" id="tab-login" role="tabpanel">
+      <div class="card">
+        <div class="section-head">
+          <div class="section-title">账号配置</div>
+          <span class="badge warning" id="credentialBadge">未配置</span>
         </div>
-    </div>
-
-    <!-- ===== 选课助手 Tab ===== -->
-    <div class="tab-panel" id="tab-grab">
-        <div class="container">
-            <div class="card">
-                <div class="row" style="margin-bottom:6px;">
-                    <span style="font-weight:600;font-size:14px;">&#x1F3AF; 自动抢课</span>
-                    <span class="status-badge off" id="grabBadge">未运行</span>
-                </div>
-                <div class="grab-label">目标课程名称（每行一个，支持模糊匹配）</div>
-                <textarea id="courseNames" placeholder="例如：&#10;仙林游泳初级&#10;仙林足球初级"></textarea>
-                <div class="grab-row">
-                    <select class="grab-interval" id="grabInterval">
-                        <option value="1000">间隔 1秒</option>
-                        <option value="2000">间隔 2秒</option>
-                        <option value="3000" selected>间隔 3秒</option>
-                        <option value="5000">间隔 5秒</option>
-                        <option value="10000">间隔 10秒</option>
-                        <option value="15000">间隔 15秒</option>
-                        <option value="30000">间隔 30秒</option>
-                    </select>
-                    <button id="grabBtn">&#x25B6; 开始监控</button>
-                </div>
-                <div class="grab-info">
-                    请先在浏览器中打开
-                    <a href="https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do" target="_blank">选课页面</a>，再点击开始。
-                </div>
-            </div>
-            <div id="grabStatus">
-                <div class="log-line" style="color:#888;">等待启动...</div>
-            </div>
+        <div class="field">
+          <div class="field-head">
+            <span>学号 / 工号</span>
+          </div>
+          <input type="text" id="username" autocomplete="username" placeholder="请输入学号或工号">
         </div>
+        <div class="field">
+          <div class="field-head">
+            <span>密码</span>
+          </div>
+          <div class="input-wrap">
+            <input class="with-action" type="password" id="password" autocomplete="current-password" placeholder="仅保存在浏览器本地">
+            <button class="ghost-input-btn" id="togglePassword" type="button">显示</button>
+          </div>
+        </div>
+        <div class="action-row">
+          <button class="primary-btn" id="saveBtn" disabled>已保存</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-head">
+          <div class="section-title">登录行为</div>
+          <span class="badge info" id="loginModeBadge">自动登录</span>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">自动登录总开关</div>
+            <div class="setting-desc">关闭后只保留配置，不在认证页自动执行。</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="isEnabled"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">识别后自动提交</div>
+            <div class="setting-desc">验证码识别完成后自动点击登录按钮。</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="autoClick"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">模板 OCR 增强</div>
+            <div class="setting-desc">用本地模板模型辅助重排 OCR 候选。</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="templateRerank"><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-title">强制填充账号</div>
+            <div class="setting-desc">浏览器或页面脚本干扰时主动刷新表单值。</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="forceFill"><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="footer-actions">
+        <button class="secondary-btn" id="authPageBtn" type="button">打开认证页</button>
+        <button class="secondary-btn" id="githubBtn" type="button">GitHub</button>
+      </div>
     </div>
 
-    <script src="popup.js"></script>
+    <div class="tab-panel" id="tab-grab" role="tabpanel">
+      <div class="card">
+        <div class="section-head">
+          <div class="section-title">选课监控</div>
+          <span class="badge warning" id="grabBadge">未连接</span>
+        </div>
+        <div class="grab-summary">
+          <div>
+            <div class="summary-main" id="grabSummaryTitle">等待连接选课页面</div>
+            <div class="summary-sub" id="grabSummarySub">打开选课系统后可同步监控状态。</div>
+          </div>
+          <span class="badge info" id="grabRoundBadge">0 轮</span>
+        </div>
+        <div class="field">
+          <div class="field-head">
+            <span>目标课程名称</span>
+            <span id="courseCount">0 门</span>
+          </div>
+          <textarea id="courseNames" placeholder="每行一个课程名，支持模糊匹配"></textarea>
+          <div class="course-meta">
+            <span>建议填写能唯一定位课程的关键词。</span>
+            <button class="tiny-btn" id="openGrabPageBtn" type="button">打开选课页</button>
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-head">
+            <span>刷新间隔</span>
+            <span id="intervalLabel">3s</span>
+          </div>
+          <select class="hidden-select" id="grabInterval" aria-label="刷新间隔">
+            <option value="3000" selected>3s</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+            <option value="30000">30s</option>
+          </select>
+          <div class="interval-grid" id="intervalGrid">
+            <button class="interval-option active" data-value="3000" type="button">3s</button>
+            <button class="interval-option" data-value="5000" type="button">5s</button>
+            <button class="interval-option" data-value="10000" type="button">10s</button>
+            <button class="interval-option" data-value="30000" type="button">30s</button>
+          </div>
+        </div>
+        <div class="action-row">
+          <button class="primary-btn" id="grabBtn" disabled>开始监控</button>
+        </div>
+      </div>
+
+      <div class="card log-card">
+        <div class="log-head">
+          <div class="section-title">运行日志</div>
+          <div class="log-actions">
+            <button class="tiny-btn" id="copyLogBtn" type="button">复制</button>
+            <button class="tiny-btn" id="clearLogBtn" type="button">清空</button>
+          </div>
+        </div>
+        <div id="grabStatus">
+          <div class="empty-log">等待启动...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="popup.js"></script>
 </body>
 
 </html>

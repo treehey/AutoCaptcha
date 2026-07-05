@@ -1,200 +1,476 @@
-const versionBadge = document.getElementById('versionBadge');
-if (versionBadge && chrome.runtime && chrome.runtime.getManifest) {
-  versionBadge.textContent = `v${chrome.runtime.getManifest().version}`;
+const AUTH_URL = 'https://authserver.nju.edu.cn/';
+const GRAB_URL = 'https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do';
+
+const storageKeys = [
+  'nju_user',
+  'nju_pass',
+  'nju_enabled',
+  'nju_force',
+  'nju_auto_click',
+  'nju_template_rerank',
+  'nju_grab_courses',
+  'nju_grab_interval'
+];
+
+const els = {
+  versionBadge: document.getElementById('versionBadge'),
+  loginStatePill: document.getElementById('loginStatePill'),
+  templateStatePill: document.getElementById('templateStatePill'),
+  grabStatePill: document.getElementById('grabStatePill'),
+  credentialBadge: document.getElementById('credentialBadge'),
+  loginModeBadge: document.getElementById('loginModeBadge'),
+  username: document.getElementById('username'),
+  password: document.getElementById('password'),
+  togglePassword: document.getElementById('togglePassword'),
+  saveBtn: document.getElementById('saveBtn'),
+  isEnabled: document.getElementById('isEnabled'),
+  forceFill: document.getElementById('forceFill'),
+  autoClick: document.getElementById('autoClick'),
+  templateRerank: document.getElementById('templateRerank'),
+  githubBtn: document.getElementById('githubBtn'),
+  authPageBtn: document.getElementById('authPageBtn'),
+  grabBadge: document.getElementById('grabBadge'),
+  grabSummaryTitle: document.getElementById('grabSummaryTitle'),
+  grabSummarySub: document.getElementById('grabSummarySub'),
+  grabRoundBadge: document.getElementById('grabRoundBadge'),
+  courseNames: document.getElementById('courseNames'),
+  courseCount: document.getElementById('courseCount'),
+  grabInterval: document.getElementById('grabInterval'),
+  intervalLabel: document.getElementById('intervalLabel'),
+  intervalGrid: document.getElementById('intervalGrid'),
+  grabBtn: document.getElementById('grabBtn'),
+  openGrabPageBtn: document.getElementById('openGrabPageBtn'),
+  grabStatus: document.getElementById('grabStatus'),
+  copyLogBtn: document.getElementById('copyLogBtn'),
+  clearLogBtn: document.getElementById('clearLogBtn'),
+  toast: document.getElementById('toast')
+};
+
+const switchKeyMap = {
+  isEnabled: 'nju_enabled',
+  forceFill: 'nju_force',
+  autoClick: 'nju_auto_click',
+  templateRerank: 'nju_template_rerank'
+};
+
+let initialCredentials = { user: '', pass: '' };
+let grabRunning = false;
+let grabConnected = false;
+let grabState = null;
+let toastTimer = null;
+let syncingGrab = false;
+
+function setVersion() {
+  if (els.versionBadge && chrome.runtime && chrome.runtime.getManifest) {
+    els.versionBadge.textContent = `v${chrome.runtime.getManifest().version}`;
+  }
 }
 
-// ============ Tab 切换 ============
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-  });
-});
+function showToast(message) {
+  clearTimeout(toastTimer);
+  els.toast.textContent = message;
+  els.toast.classList.add('show');
+  toastTimer = setTimeout(() => {
+    els.toast.classList.remove('show');
+  }, 1400);
+}
 
-// ============ 保存账号密码 ============
-document.getElementById('saveBtn').addEventListener('click', () => {
-  const settings = {
-    nju_user: document.getElementById('username').value,
-    nju_pass: document.getElementById('password').value,
-  };
+function setBadge(el, text, tone) {
+  if (!el) return;
+  el.textContent = text;
+  el.className = `badge ${tone || 'info'}`;
+}
 
-  chrome.storage.local.set(settings, () => {
-    const btn = document.getElementById('saveBtn');
-    btn.textContent = '已保存 ✓';
-    btn.style.background = '#28a745';
-    setTimeout(() => {
-      btn.textContent = '保存';
-      btn.style.background = '#634798';
-    }, 1500);
-  });
-});
+function setPill(el, text) {
+  if (!el) return;
+  const label = el.querySelector('span:last-child');
+  if (label) label.textContent = text;
+}
 
-// 绑定元素
-const switches = ['isEnabled', 'forceFill', 'autoClick', 'templateRerank'];
-const saveBtn = document.getElementById('saveBtn');
+function getCourseNames() {
+  return els.courseNames.value
+    .split('\n')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
 
-// 1. 初始化加载
-chrome.storage.local.get(['nju_user', 'nju_pass', 'nju_enabled', 'nju_force', 'nju_auto_click', 'nju_template_rerank'], (data) => {
-  document.getElementById('username').value = data.nju_user || '';
-  document.getElementById('password').value = data.nju_pass || '';
-  
-  // 开关状态加载
-  document.getElementById('isEnabled').checked = data.nju_enabled !== false;
-  document.getElementById('forceFill').checked = !!data.nju_force;
-  document.getElementById('autoClick').checked = data.nju_auto_click !== false;
-  document.getElementById('templateRerank').checked = data.nju_template_rerank !== false;
-});
+function updateCourseCount() {
+  const count = getCourseNames().length;
+  els.courseCount.textContent = `${count} 门`;
+  renderGrabControls();
+  chrome.storage.local.set({ nju_grab_courses: els.courseNames.value });
+}
 
-// 2. 为开关绑定自动保存事件
-switches.forEach(id => {
-  document.getElementById(id).addEventListener('change', (e) => {
-    const keyMap = {
-      'isEnabled': 'nju_enabled',
-      'forceFill': 'nju_force',
-      'autoClick': 'nju_auto_click',
-      'templateRerank': 'nju_template_rerank'
-    };
-    chrome.storage.local.set({ [keyMap[id]]: e.target.checked });
-  });
-});
+function credentialsDirty() {
+  return els.username.value !== initialCredentials.user || els.password.value !== initialCredentials.pass;
+}
 
-// 打开 GitHub 仓库
-document.getElementById('githubBtn').addEventListener('click', () => {
-  window.open('https://github.com/treehey/AutoCaptcha', '_blank');
-});
+function renderCredentialState() {
+  const hasUser = Boolean(els.username.value.trim());
+  const hasPass = Boolean(els.password.value);
+  const configured = hasUser && hasPass;
 
-// ============ 选课助手 ============
-let grabRunning = false;
-
-const grabBtn = document.getElementById('grabBtn');
-const grabBadge = document.getElementById('grabBadge');
-const grabStatusEl = document.getElementById('grabStatus');
-
-function setGrabRunning(running) {
-  grabRunning = running;
-  if (running) {
-    grabBtn.textContent = '⏹ 停止监控';
-    grabBtn.classList.add('running');
-    grabBadge.textContent = '监控中';
-    grabBadge.className = 'status-badge on';
+  if (configured) {
+    setBadge(els.credentialBadge, credentialsDirty() ? '有未保存更改' : '已配置', credentialsDirty() ? 'warning' : 'success');
   } else {
-    grabBtn.textContent = '▶ 开始监控';
-    grabBtn.classList.remove('running');
-    grabBadge.textContent = '未运行';
-    grabBadge.className = 'status-badge off';
+    setBadge(els.credentialBadge, '未配置', 'warning');
   }
+
+  els.saveBtn.disabled = !credentialsDirty();
+  els.saveBtn.textContent = credentialsDirty() ? '保存更改' : '已保存';
+  renderLoginState();
+}
+
+function renderLoginState() {
+  const enabled = els.isEnabled.checked;
+  const autoClick = els.autoClick.checked;
+  const template = els.templateRerank.checked;
+  const configured = Boolean(els.username.value.trim() && els.password.value);
+
+  if (!configured) {
+    setPill(els.loginStatePill, '账号未配置');
+  } else if (!enabled) {
+    setPill(els.loginStatePill, '自动登录关闭');
+  } else {
+    setPill(els.loginStatePill, autoClick ? '自动登录已启用' : '仅自动填充');
+  }
+
+  setPill(els.templateStatePill, template ? '模板增强开启' : '模板增强关闭');
+  setBadge(els.loginModeBadge, enabled ? (autoClick ? '自动登录' : '自动填充') : '已暂停', enabled ? 'info' : 'warning');
+}
+
+function renderGrabState() {
+  const round = grabState?.round || 0;
+  const successCount = grabState?.successCourses?.length || 0;
+  const targetCount = grabState?.courseNames?.length || getCourseNames().length;
+  const interval = grabState?.interval || Number(els.grabInterval.value || 3000);
+
+  els.grabRoundBadge.textContent = `${round} 轮`;
+
+  if (!grabConnected) {
+    setBadge(els.grabBadge, '未连接', 'warning');
+    setPill(els.grabStatePill, '选课页未连接');
+    els.grabSummaryTitle.textContent = '等待连接选课页面';
+    els.grabSummarySub.textContent = '打开选课系统后可同步监控状态。';
+  } else if (grabRunning) {
+    setBadge(els.grabBadge, '监控中', 'success');
+    setPill(els.grabStatePill, `监控中 · ${round} 轮`);
+    els.grabSummaryTitle.textContent = `监控中，已完成 ${round} 轮`;
+    els.grabSummarySub.textContent = `已抢到 ${successCount}/${targetCount || 0}，间隔 ${Math.round(interval / 1000)}s`;
+  } else {
+    setBadge(els.grabBadge, '已连接', 'info');
+    setPill(els.grabStatePill, '选课已连接');
+    els.grabSummaryTitle.textContent = successCount > 0 ? `已抢到 ${successCount} 门课程` : '选课页面已连接';
+    els.grabSummarySub.textContent = '填写目标课程后即可开始监控。';
+  }
+
+  renderGrabControls();
+}
+
+function renderGrabControls() {
+  const courseCount = getCourseNames().length;
+
+  if (grabRunning) {
+    els.grabBtn.textContent = '停止监控';
+    els.grabBtn.className = 'danger-btn';
+    els.grabBtn.disabled = false;
+    return;
+  }
+
+  els.grabBtn.className = 'primary-btn';
+
+  if (!grabConnected) {
+    els.grabBtn.textContent = '打开选课页面';
+    els.grabBtn.disabled = false;
+    return;
+  }
+
+  els.grabBtn.textContent = '开始监控';
+  els.grabBtn.disabled = courseCount === 0;
+}
+
+function setIntervalValue(value) {
+  const normalized = String(value || '3000');
+  els.grabInterval.value = normalized;
+  els.intervalLabel.textContent = `${Number(normalized) / 1000}s`;
+  document.querySelectorAll('.interval-option').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.value === normalized);
+  });
+  chrome.storage.local.set({ nju_grab_interval: normalized });
 }
 
 function appendLog(message) {
-  // 清除初始占位
-  const placeholder = grabStatusEl.querySelector('[style*="color:#888"]');
-  if (placeholder && placeholder.textContent === '等待启动...') placeholder.remove();
+  const empty = els.grabStatus.querySelector('.empty-log');
+  if (empty) empty.remove();
 
   const line = document.createElement('div');
   line.className = 'log-line';
-  // 根据消息内容给予颜色类
-  if (message.includes('成功') || message.includes('🎉') || message.includes('✅') || message.includes('🎊')) {
+  if (/成功|已抢到|已在选课|🎉|✅|🎊/.test(message)) {
     line.classList.add('success');
-  } else if (message.includes('⚠️') || message.includes('未找到') || message.includes('已满') || message.includes('未运行')) {
+  } else if (/警告|未找到|已满|未运行|继续|⚠️|⏳|🔍/.test(message)) {
     line.classList.add('warn');
-  } else if (message.includes('❌') || message.includes('出错')) {
+  } else if (/失败|出错|无法|❌/.test(message)) {
     line.classList.add('error');
   }
   line.textContent = message;
-  grabStatusEl.appendChild(line);
-  grabStatusEl.scrollTop = grabStatusEl.scrollHeight;
+  els.grabStatus.appendChild(line);
+  els.grabStatus.scrollTop = els.grabStatus.scrollHeight;
 
-  // 保持最多50条
-  while (grabStatusEl.children.length > 50) {
-    grabStatusEl.removeChild(grabStatusEl.firstChild);
+  while (els.grabStatus.children.length > 30) {
+    els.grabStatus.removeChild(els.grabStatus.firstChild);
   }
 }
 
 function renderLogs(logs) {
-  grabStatusEl.innerHTML = '';
-  (logs || []).forEach(appendLog);
+  els.grabStatus.innerHTML = '';
+  if (!logs || logs.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-log';
+    empty.textContent = '等待启动...';
+    els.grabStatus.appendChild(empty);
+    return;
+  }
+  logs.forEach(appendLog);
 }
 
-// 获取当前选课页面 tab
 async function getGrabTab() {
-  return new Promise((resolve) => {
-    chrome.tabs.query({ url: 'https://xk.nju.edu.cn/*' }, (tabs) => {
-      if (tabs && tabs.length > 0) resolve(tabs[0]);
-      else resolve(null);
+  return new Promise(resolve => {
+    chrome.tabs.query({ url: 'https://xk.nju.edu.cn/*' }, tabs => {
+      resolve(tabs && tabs.length > 0 ? tabs[0] : null);
     });
   });
 }
 
-grabBtn.addEventListener('click', async () => {
-  if (grabRunning) {
-    // 停止
-    const tab = await getGrabTab();
-    if (tab) {
-      chrome.tabs.sendMessage(tab.id, { action: 'stopGrab' }, (resp) => {
-        if (chrome.runtime.lastError) {
-          appendLog('❌ 无法连接选课页面，请刷新选课页面后重试');
-          return;
-        }
-        setGrabRunning(false);
-        if (resp && resp.state) renderLogs(resp.state.log);
-      });
-    } else {
-      setGrabRunning(false);
-      appendLog('⚠️ 未找到打开的 xk.nju.edu.cn 页面');
-    }
-    return;
-  }
-
-  // 开始
-  const rawText = document.getElementById('courseNames').value.trim();
-  if (!rawText) {
-    appendLog('⚠️ 请先输入目标课程名称');
-    return;
-  }
-  const courseNames = rawText.split('\n').map(s => s.trim()).filter(Boolean);
-  const interval = parseInt(document.getElementById('grabInterval').value, 10) || 5000;
-
+async function sendGrabMessage(message) {
   const tab = await getGrabTab();
-  if (!tab) {
-    appendLog('❌ 未找到打开的选课页面（xk.nju.edu.cn），请先打开选课页面');
-    return;
-  }
+  if (!tab) return { connected: false, response: null };
 
-  chrome.tabs.sendMessage(tab.id, { action: 'startGrab', courseNames, interval }, (resp) => {
-    if (chrome.runtime.lastError) {
-      appendLog('❌ 无法连接页面脚本，请刷新选课页面后重试（F5）');
+  return new Promise(resolve => {
+    chrome.tabs.sendMessage(tab.id, message, response => {
+      if (chrome.runtime.lastError || !response) {
+        resolve({ connected: false, response: null });
+        return;
+      }
+      resolve({ connected: true, response });
+    });
+  });
+}
+
+function applyGrabSnapshot(state) {
+  grabState = state || null;
+  grabRunning = Boolean(state?.running);
+  if (state?.courseNames?.length) {
+    els.courseNames.value = state.courseNames.join('\n');
+    updateCourseCount();
+  }
+  if (state?.interval) {
+    setIntervalValue(state.interval);
+  }
+  renderGrabState();
+  if (state?.log && state.log.length > 0) {
+    renderLogs(state.log);
+  }
+}
+
+async function syncGrabStatus() {
+  if (syncingGrab) return;
+  syncingGrab = true;
+  const result = await sendGrabMessage({ action: 'getGrabStatus' });
+  grabConnected = result.connected;
+  if (result.connected && result.response?.state) {
+    applyGrabSnapshot(result.response.state);
+  } else {
+    grabRunning = false;
+    grabState = null;
+    renderGrabState();
+  }
+  syncingGrab = false;
+}
+
+async function saveCredentials() {
+  const settings = {
+    nju_user: els.username.value,
+    nju_pass: els.password.value
+  };
+
+  els.saveBtn.disabled = true;
+  els.saveBtn.textContent = '保存中...';
+  chrome.storage.local.set(settings, () => {
+    initialCredentials = { user: settings.nju_user, pass: settings.nju_pass };
+    renderCredentialState();
+    showToast('账号配置已保存');
+  });
+}
+
+function initTabs() {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(item => {
+        item.classList.remove('active');
+        item.setAttribute('aria-selected', 'false');
+      });
+      document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
+      document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+      if (btn.dataset.tab === 'grab') syncGrabStatus();
+    });
+  });
+}
+
+function initSettings() {
+  chrome.storage.local.get(storageKeys, data => {
+    els.username.value = data.nju_user || '';
+    els.password.value = data.nju_pass || '';
+    initialCredentials = { user: els.username.value, pass: els.password.value };
+
+    els.isEnabled.checked = data.nju_enabled !== false;
+    els.forceFill.checked = Boolean(data.nju_force);
+    els.autoClick.checked = data.nju_auto_click !== false;
+    els.templateRerank.checked = data.nju_template_rerank !== false;
+    els.courseNames.value = data.nju_grab_courses || '';
+    setIntervalValue(data.nju_grab_interval || '3000');
+
+    renderCredentialState();
+    updateCourseCount();
+    renderLoginState();
+    syncGrabStatus();
+  });
+}
+
+function initLoginEvents() {
+  els.username.addEventListener('input', renderCredentialState);
+  els.password.addEventListener('input', renderCredentialState);
+  els.saveBtn.addEventListener('click', saveCredentials);
+
+  els.togglePassword.addEventListener('click', () => {
+    const hidden = els.password.type === 'password';
+    els.password.type = hidden ? 'text' : 'password';
+    els.togglePassword.textContent = hidden ? '隐藏' : '显示';
+  });
+
+  Object.keys(switchKeyMap).forEach(id => {
+    const el = els[id];
+    el.addEventListener('change', event => {
+      chrome.storage.local.set({ [switchKeyMap[id]]: event.target.checked }, () => {
+        renderLoginState();
+        showToast('设置已更新');
+      });
+    });
+  });
+
+  els.githubBtn.addEventListener('click', () => {
+    window.open('https://github.com/treehey/AutoCaptcha', '_blank');
+  });
+
+  els.authPageBtn.addEventListener('click', () => {
+    window.open(AUTH_URL, '_blank');
+  });
+}
+
+function initGrabEvents() {
+  els.courseNames.addEventListener('input', updateCourseCount);
+
+  els.intervalGrid.addEventListener('click', event => {
+    const btn = event.target.closest('.interval-option');
+    if (!btn) return;
+    setIntervalValue(btn.dataset.value);
+  });
+
+  els.openGrabPageBtn.addEventListener('click', () => {
+    window.open(GRAB_URL, '_blank');
+  });
+
+  els.grabBtn.addEventListener('click', async () => {
+    if (!grabConnected && !grabRunning) {
+      window.open(GRAB_URL, '_blank');
+      showToast('已打开选课页面');
       return;
     }
-    setGrabRunning(true);
-    grabStatusEl.innerHTML = '';
-    appendLog('🚀 已连接到选课页面，监控已启动');
-  });
-});
 
-// 接收来自 content-grab.js 的实时日志
-chrome.runtime.onMessage.addListener((msg) => {
+    if (grabRunning) {
+      const result = await sendGrabMessage({ action: 'stopGrab' });
+      if (!result.connected) {
+        grabConnected = false;
+        grabRunning = false;
+        appendLog('无法连接选课页面，请刷新页面后重试');
+        renderGrabState();
+        return;
+      }
+      grabConnected = true;
+      applyGrabSnapshot(result.response.state);
+      showToast('监控已停止');
+      return;
+    }
+
+    const courseNames = getCourseNames();
+    if (courseNames.length === 0) {
+      showToast('请先输入课程名称');
+      return;
+    }
+
+    const interval = Number(els.grabInterval.value) || 3000;
+    const result = await sendGrabMessage({ action: 'startGrab', courseNames, interval });
+    if (!result.connected) {
+      grabConnected = false;
+      appendLog('无法连接页面脚本，请刷新选课页面后重试');
+      renderGrabState();
+      return;
+    }
+
+    grabConnected = true;
+    applyGrabSnapshot(result.response.state);
+    renderLogs([]);
+    appendLog(`已连接到选课页面，监控 ${courseNames.length} 门课程`);
+    showToast('监控已启动');
+  });
+
+  els.clearLogBtn.addEventListener('click', () => {
+    renderLogs([]);
+    showToast('日志已清空');
+  });
+
+  els.copyLogBtn.addEventListener('click', async () => {
+    const text = Array.from(els.grabStatus.querySelectorAll('.log-line'))
+      .map(line => line.textContent)
+      .join('\n');
+    if (!text) {
+      showToast('暂无日志可复制');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('日志已复制');
+    } catch (err) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+      showToast('日志已复制');
+    }
+  });
+}
+
+chrome.runtime.onMessage.addListener(msg => {
   if (msg.action === 'grabLog' && msg.message) {
     appendLog(msg.message);
     if (msg.state) {
-      setGrabRunning(msg.state.running);
+      grabConnected = true;
+      applyGrabSnapshot(msg.state);
     }
   } else if (msg.action === 'grabStopped') {
-    setGrabRunning(false);
-    if (msg.state && msg.state.log) renderLogs(msg.state.log);
+    grabConnected = true;
+    applyGrabSnapshot(msg.state);
   }
 });
 
-// popup 打开时同步状态
-(async () => {
-  const tab = await getGrabTab();
-  if (!tab) return;
-  chrome.tabs.sendMessage(tab.id, { action: 'getGrabStatus' }, (resp) => {
-    if (chrome.runtime.lastError || !resp) return;
-    if (resp.state) {
-      setGrabRunning(resp.state.running);
-      if (resp.state.log && resp.state.log.length > 0) renderLogs(resp.state.log);
-    }
-  });
-})();
+setVersion();
+initTabs();
+initSettings();
+initLoginEvents();
+initGrabEvents();

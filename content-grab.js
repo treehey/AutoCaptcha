@@ -26,6 +26,8 @@ function pushLog(msg) {
 function getStateSnapshot() {
   return {
     running: grabState.running,
+    courseNames: grabState.courseNames.slice(),
+    interval: grabState.interval,
     round: grabState.round,
     successCourses: grabState.successCourses,
     log: grabState.log.slice(-20)
