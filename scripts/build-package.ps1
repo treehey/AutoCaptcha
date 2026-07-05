@@ -24,7 +24,8 @@ $files = @(
   'tesseract.min.js',
   'icon16.png',
   'icon48.png',
-  'icon128.png'
+  'icon128.png',
+  'assets/captcha-template-model.json'
 )
 
 $dirs = @(
@@ -33,7 +34,13 @@ $dirs = @(
 )
 
 foreach ($file in $files) {
-  Copy-Item -LiteralPath (Join-Path $root $file) -Destination (Join-Path $staging $file)
+  $source = Join-Path $root $file
+  $destination = Join-Path $staging $file
+  $destinationDir = Split-Path -Parent $destination
+  if (-not (Test-Path -LiteralPath $destinationDir)) {
+    New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+  }
+  Copy-Item -LiteralPath $source -Destination $destination
 }
 
 foreach ($dir in $dirs) {
@@ -45,6 +52,10 @@ Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipPath -Force
 Expand-Archive -Path $zipPath -DestinationPath $verify -Force
 if (-not (Test-Path (Join-Path $verify 'manifest.json'))) {
   throw 'Package verification failed: manifest.json is not at the zip root.'
+}
+
+if (-not (Test-Path (Join-Path $verify 'assets/captcha-template-model.json'))) {
+  throw 'Package verification failed: captcha template model is missing.'
 }
 
 Remove-Item -LiteralPath $staging -Recurse -Force
