@@ -27,6 +27,11 @@ const els = {
   forceFill: document.getElementById('forceFill'),
   autoClick: document.getElementById('autoClick'),
   templateRerank: document.getElementById('templateRerank'),
+  ocrPageBadge: document.getElementById('ocrPageBadge'),
+  recognizeAgainBtn: document.getElementById('recognizeAgainBtn'),
+  ocrPreviewCode: document.getElementById('ocrPreviewCode'),
+  ocrPreviewMeta: document.getElementById('ocrPreviewMeta'),
+  ocrPreviewDetails: document.getElementById('ocrPreviewDetails'),
   githubBtn: document.getElementById('githubBtn'),
   authPageBtn: document.getElementById('authPageBtn'),
   grabBadge: document.getElementById('grabBadge'),
@@ -59,6 +64,7 @@ let grabConnected = false;
 let grabState = null;
 let toastTimer = null;
 let syncingGrab = false;
+let previewRunning = false;
 
 function setVersion() {
   if (els.versionBadge && chrome.runtime && chrome.runtime.getManifest) {
@@ -256,6 +262,65 @@ async function sendGrabMessage(message) {
   });
 }
 
+async function sendActiveTabMessage(message) {
+  const tab = await new Promise(resolve => {
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+      resolve(tabs && tabs.length > 0 ? tabs[0] : null);
+    });
+  });
+  if (!tab || !tab.id) return { connected: false, response: null };
+
+  return new Promise(resolve => {
+    chrome.tabs.sendMessage(tab.id, message, response => {
+      if (chrome.runtime.lastError || !response) {
+        resolve({ connected: false, response: null });
+        return;
+      }
+      resolve({ connected: true, response });
+    });
+  });
+}
+
+function setPreviewConnection(connected, ready = false) {
+  if (!connected) {
+    setBadge(els.ocrPageBadge, '未连接', 'warning');
+    els.recognizeAgainBtn.disabled = true;
+    return;
+  }
+
+  setBadge(els.ocrPageBadge, ready ? '验证码就绪' : '认证页已连接', ready ? 'success' : 'info');
+  els.recognizeAgainBtn.disabled = !ready || previewRunning;
+}
+
+function renderOcrPreview(response) {
+  const code = response.code || '';
+  els.ocrPreviewCode.textContent = code || '未得到四位结果';
+  els.ocrPreviewCode.classList.toggle('empty', !code);
+
+  const mode = response.templateEnabled ? '模板增强开启' : '模板增强关闭';
+  const elapsed = Number.isFinite(response.elapsedMs) ? ` · ${Math.round(response.elapsedMs)}ms` : '';
+  els.ocrPreviewMeta.textContent = `${mode}${elapsed}`;
+
+  const candidates = (response.candidates || [])
+    .map(item => `${item.variant}=${item.code || '空'}(${Math.round(item.confidence || 0)})`)
+    .join(' | ');
+  const rerank = response.templateRerank
+    ? `模板：${response.templateRerank.selectedBefore || '空'}=>${response.templateRerank.selectedAfter || '空'} ${response.templateRerank.reason || ''}`
+    : '';
+  const details = [candidates, rerank].filter(Boolean).join('\n');
+  els.ocrPreviewDetails.textContent = details;
+  els.ocrPreviewDetails.classList.toggle('has-content', Boolean(details));
+}
+
+async function syncOcrPreviewStatus() {
+  const result = await sendActiveTabMessage({ action: 'getCaptchaPreviewStatus' });
+  if (!result.connected) {
+    setPreviewConnection(false);
+    return;
+  }
+  setPreviewConnection(true, Boolean(result.response?.ready));
+}
+
 function applyGrabSnapshot(state) {
   grabState = state || null;
   grabRunning = Boolean(state?.running);
@@ -357,6 +422,38 @@ function initLoginEvents() {
         showToast('设置已更新');
       });
     });
+  });
+
+  els.recognizeAgainBtn.addEventListener('click', async () => {
+    if (previewRunning) return;
+
+    previewRunning = true;
+    els.recognizeAgainBtn.disabled = true;
+    els.recognizeAgainBtn.textContent = '识别中...';
+
+    const result = await sendActiveTabMessage({
+      action: 'recognizeCaptchaPreview',
+      templateRerank: els.templateRerank.checked
+    });
+
+    previewRunning = false;
+    els.recognizeAgainBtn.textContent = '重新识别';
+
+    if (!result.connected) {
+      setPreviewConnection(false);
+      showToast('请切换到统一认证页后重试');
+      return;
+    }
+
+    const response = result.response || {};
+    setPreviewConnection(true, Boolean(response.ready));
+    if (!response.ok) {
+      showToast(response.error || '验证码尚未加载完成');
+      return;
+    }
+
+    renderOcrPreview(response);
+    showToast(response.code ? `识别结果：${response.code}` : '未得到四位结果');
   });
 
   els.githubBtn.addEventListener('click', () => {
@@ -474,3 +571,4 @@ initTabs();
 initSettings();
 initLoginEvents();
 initGrabEvents();
+syncOcrPreviewStatus();

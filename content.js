@@ -4237,7 +4237,7 @@ function shouldRunFallbackVariants(results, selectedCode) {
     return maxConfidence < 65;
 }
 
-async function recognizeCaptchaCode(imgElement) {
+async function recognizeCaptchaCode(imgElement, options = {}) {
     const base = await readCaptchaBitmap(imgElement);
     const engine = await getCaptchaWorker();
     let results = [];
@@ -4252,7 +4252,22 @@ async function recognizeCaptchaCode(imgElement) {
         }
 
         let code = selectedCode ? correctVisualConfusions(selectedCode, base, results) : '';
-        const templateRerankConfig = await getCaptchaTemplateRuntimeConfig();
+        let templateRerankConfig = await getCaptchaTemplateRuntimeConfig();
+        if (typeof options.templateRerank === 'boolean') {
+            if (options.templateRerank && !templateRerankConfig.model) {
+                const model = await getCaptchaTemplateModel();
+                templateRerankConfig = getTemplateRerankConfig({
+                    ...(model?.recommended || {}),
+                    enabled: Boolean(model),
+                    model
+                });
+            } else {
+                templateRerankConfig = getTemplateRerankConfig({
+                    ...templateRerankConfig,
+                    enabled: options.templateRerank
+                });
+            }
+        }
         const templateRerank = rerankCaptchaCodeWithTemplate(base, results, code, templateRerankConfig);
         if (templateRerank.overridden) {
             code = templateRerank.selectedAfter;
@@ -4267,6 +4282,19 @@ async function recognizeCaptchaCode(imgElement) {
             "=>",
             code || '无有效结果'
         );
+        if (options.includeDetails) {
+            return {
+                code,
+                selectedCode,
+                templateEnabled: templateRerank.enabled,
+                templateRerank,
+                candidates: results.map(result => ({
+                    variant: result.variant,
+                    code: result.code || '',
+                    confidence: result.confidence || 0
+                }))
+            };
+        }
         return code;
     } catch (err) {
         await resetCaptchaWorker();
@@ -4362,6 +4390,46 @@ let isSolving = false; // 互斥锁，防止并发重复执行
 let retryTimer = null; // 统一管理重试定时器，防止多个定时器堆积
 let autoRefreshCount = 0; // 自动刷新次数计数，防止无限循环
 let isProgrammaticRefresh = false; // 标记是否为程序触发的图片刷新
+
+async function previewCaptchaRecognition(templateRerank) {
+    if (isSolving) {
+        return { ok: false, ready: true, error: '当前自动识别正在进行中' };
+    }
+
+    const imgElement = document.querySelector(IMG_SELECTOR);
+    const inputElement = document.querySelector(INPUT_SELECTOR);
+    if (!imgElement || !inputElement || imgElement.naturalWidth === 0) {
+        return { ok: false, ready: false, error: '验证码尚未加载完成' };
+    }
+
+    if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+    }
+    isSolving = true;
+    try {
+        const started = performance.now();
+        const result = await recognizeCaptchaCode(imgElement, {
+            includeDetails: true,
+            templateRerank: typeof templateRerank === 'boolean' ? templateRerank : undefined
+        });
+        if (result.code && result.code.length === 4) {
+            inputElement.value = result.code;
+            inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        return {
+            ok: true,
+            ready: true,
+            elapsedMs: performance.now() - started,
+            ...result
+        };
+    } catch (err) {
+        console.error('NJU 助手：手动重新识别失败:', err);
+        return { ok: false, ready: true, error: '识别失败，请刷新验证码后重试' };
+    } finally {
+        isSolving = false;
+    }
+}
 
 async function solveCaptcha() {
     if (isSolving) {
@@ -4521,3 +4589,20 @@ document.addEventListener('load', (e) => {
         scheduleRetry(250); // 用 scheduleRetry 取代旧定时器，防止与保底重试叠加
     }
 }, true);
+
+if (chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.action === 'getCaptchaPreviewStatus') {
+            const image = document.querySelector(IMG_SELECTOR);
+            sendResponse({
+                ok: true,
+                ready: Boolean(image && image.naturalWidth > 0)
+            });
+        } else if (message.action === 'recognizeCaptchaPreview') {
+            previewCaptchaRecognition(message.templateRerank).then(sendResponse);
+        } else {
+            return false;
+        }
+        return true;
+    });
+}

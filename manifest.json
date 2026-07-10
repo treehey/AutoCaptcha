@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "NJU 自动登录助手",
   "description": "南大统一身份认证本地模板增强 OCR 自动登录助手，内置选课系统登录后的课程监控与自动抢课，无需大模型 API。",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "default_locale": "zh_CN",
   "icons": {
     "16": "icon16.png",

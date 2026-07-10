@@ -380,6 +380,59 @@
       padding-top: 0;
     }
 
+    .ocr-preview {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 64px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-muted);
+    }
+
+    .ocr-preview-code {
+      color: var(--text);
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 20px;
+      font-weight: 750;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .ocr-preview-code.empty {
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .ocr-preview-meta,
+    .ocr-preview-details {
+      overflow-wrap: anywhere;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .ocr-preview-meta {
+      margin-top: 4px;
+    }
+
+    .ocr-preview-details {
+      display: none;
+      grid-column: 1 / -1;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 10px;
+    }
+
+    .ocr-preview-details.has-content {
+      display: block;
+    }
+
     .setting-title {
       color: var(--text);
       font-weight: 700;
@@ -678,6 +731,21 @@
             <div class="setting-desc">浏览器或页面脚本干扰时主动刷新表单值。</div>
           </div>
           <label class="switch"><input type="checkbox" id="forceFill"><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-head">
+          <div class="section-title">验证码测试</div>
+          <span class="badge warning" id="ocrPageBadge">未连接</span>
+        </div>
+        <div class="ocr-preview">
+          <div>
+            <div class="ocr-preview-code empty" id="ocrPreviewCode">等待重新识别</div>
+            <div class="ocr-preview-meta" id="ocrPreviewMeta">请在统一认证页打开面板。</div>
+          </div>
+          <button class="secondary-btn" id="recognizeAgainBtn" type="button">重新识别</button>
+          <div class="ocr-preview-details" id="ocrPreviewDetails"></div>
         </div>
       </div>
 
