@@ -1,5 +1,6 @@
 dist/
-data/captcha-samples/
+data/captcha-samples/**/cookies.txt
+data/captcha-samples/**/login.html
 data/regression-results/
 data/recovered-captcha-answers-*/
 data/segmentation-experiments/
