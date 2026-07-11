@@ -17,6 +17,7 @@ New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
 $files = @(
   'manifest.json',
+  'captcha-cnn.js',
   'content.js',
   'content-grab.js',
   'popup.html',
@@ -25,7 +26,9 @@ $files = @(
   'icon16.png',
   'icon48.png',
   'icon128.png',
-  'assets/captcha-template-model.json'
+  'assets/captcha-template-model.json',
+  'assets/captcha-cnn-model.json',
+  'assets/captcha-cnn-model.bin'
 )
 
 $dirs = @(
@@ -56,6 +59,12 @@ if (-not (Test-Path (Join-Path $verify 'manifest.json'))) {
 
 if (-not (Test-Path (Join-Path $verify 'assets/captcha-template-model.json'))) {
   throw 'Package verification failed: captcha template model is missing.'
+}
+
+if ((-not (Test-Path (Join-Path $verify 'captcha-cnn.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'assets/captcha-cnn-model.json'))) -or
+    (-not (Test-Path (Join-Path $verify 'assets/captcha-cnn-model.bin')))) {
+  throw 'Package verification failed: captcha CNN runtime or model is missing.'
 }
 
 Remove-Item -LiteralPath $staging -Recurse -Force

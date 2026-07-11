@@ -141,7 +141,7 @@ function renderLoginState() {
     setPill(els.loginStatePill, autoClick ? '自动登录已启用' : '仅自动填充');
   }
 
-  setPill(els.templateStatePill, template ? '模板增强开启' : '模板增强关闭');
+  setPill(els.templateStatePill, template ? 'CNN 增强开启' : 'CNN 增强关闭');
   setBadge(els.loginModeBadge, enabled ? (autoClick ? '自动登录' : '自动填充') : '已暂停', enabled ? 'info' : 'warning');
 }
 
@@ -297,14 +297,16 @@ function renderOcrPreview(response) {
   els.ocrPreviewCode.textContent = code || '未得到四位结果';
   els.ocrPreviewCode.classList.toggle('empty', !code);
 
-  const mode = response.templateEnabled ? '模板增强开启' : '模板增强关闭';
+  const mode = response.cnnEnabled ? 'CNN 增强开启' : 'CNN 增强关闭';
   const elapsed = Number.isFinite(response.elapsedMs) ? ` · ${Math.round(response.elapsedMs)}ms` : '';
   els.ocrPreviewMeta.textContent = `${mode}${elapsed}`;
 
   const candidates = (response.candidates || [])
     .map(item => `${item.variant}=${item.code || '空'}(${Math.round(item.confidence || 0)})`)
     .join(' | ');
-  const rerank = response.templateRerank
+  const rerank = response.cnnFusion?.fallbacks?.length
+    ? `CNN 回退：${response.cnnFusion.fallbacks.map(item => `第${item.position + 1}位 ${item.reason}`).join('，')}`
+    : response.templateRerank
     ? `模板：${response.templateRerank.selectedBefore || '空'}=>${response.templateRerank.selectedAfter || '空'} ${response.templateRerank.reason || ''}`
     : '';
   const details = [candidates, rerank].filter(Boolean).join('\n');
