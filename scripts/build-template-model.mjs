@@ -14,8 +14,12 @@ const repoRoot = path.resolve(__dirname, '..');
 const args = process.argv.slice(2);
 
 const roundsArg = args.find(arg => arg.startsWith('--rounds='))?.slice('--rounds='.length) || '010,011,012,013,014,015';
-const mode = args.find(arg => arg.startsWith('--mode='))?.slice('--mode='.length) || 'thin';
+const legacyMode = args.find(arg => arg.startsWith('--mode='))?.slice('--mode='.length);
+const modesArg = args.find(arg => arg.startsWith('--modes='))?.slice('--modes='.length) || legacyMode || 'thin';
+const modes = modesArg.split(',').map(item => item.trim()).filter(Boolean);
+const primaryMode = modes.includes('thin') ? 'thin' : modes[0];
 const outPath = path.resolve(repoRoot, args.find(arg => arg.startsWith('--out='))?.slice('--out='.length) || 'assets/captcha-template-model.json');
+const appendModel = args.includes('--append');
 
 function parseRoundList(value) {
   return value.split(',').filter(Boolean).map(round => `round-${round.padStart(3, '0')}`);
@@ -89,7 +93,7 @@ function normalizeFeature(feature) {
 }
 
 const trainRounds = parseRoundList(roundsArg);
-console.log(`[template-model] rounds=${trainRounds.join(', ')} mode=${mode}`);
+console.log(`[template-model] rounds=${trainRounds.join(', ')} modes=${modes.join(', ')}`);
 console.log(`[template-model] out=${outPath}`);
 
 const { server, origin } = await startServer();
@@ -138,49 +142,77 @@ try {
     console.log(`[template-model] ${round}: ${answers.length} labeled samples`);
     for (const sample of answers) {
       const imageUrl = `${origin}/${path.relative(repoRoot, path.join(sampleDir, sample.file)).replaceAll(path.sep, '/')}`;
-      const features = await page.evaluate(async ({ imageUrl, mode }) => {
+      const featuresByMode = await page.evaluate(async ({ imageUrl, modes }) => {
         const img = new Image();
         img.src = imageUrl;
         await img.decode();
         const base = await window.readCaptchaBitmap(img);
-        return window.extractCaptchaTemplateFeatures(base, mode);
-      }, { imageUrl, mode });
+        const output = {};
+        for (const mode of modes) {
+          output[mode] = window.extractCaptchaTemplateFeatures(base, mode);
+        }
+        return output;
+      }, { imageUrl, modes });
 
-      for (let pos = 0; pos < 4; pos++) {
-        samples.push({
-          label: normalizeTemplateLabel(sample.answer[pos]),
-          mode,
-          round,
-          id: sample.id,
-          pos,
-          ...normalizeFeature(features.chars[pos]),
-        });
+      for (const mode of modes) {
+        const features = featuresByMode[mode];
+        for (let pos = 0; pos < 4; pos++) {
+          samples.push({
+            label: normalizeTemplateLabel(sample.answer[pos]),
+            mode,
+            round,
+            id: sample.id,
+            pos,
+            ...normalizeFeature(features.chars[pos]),
+          });
+        }
       }
     }
   }
 
+  const existingModel = appendModel && existsSync(outPath)
+    ? JSON.parse(await readFile(outPath, 'utf8'))
+    : {};
+  const retainedSamples = (existingModel.samples || []).filter(item => {
+    return !(modes.includes(item.mode) && trainRounds.includes(item.round));
+  });
+  const combinedSamples = [...retainedSamples, ...samples];
   const model = {
-    version: 1,
+    ...existingModel,
+    version: modes.length > 1 || retainedSamples.length ? 2 : 1,
     generatedAt: new Date().toISOString(),
     featureSize: { width: 24, height: 32 },
-    mode,
+    mode: primaryMode,
     recommended: {
+      ...(existingModel.recommended || {}),
       enabled: true,
-      mode,
+      mode: primaryMode,
       k: 3,
       margin: 10,
       ocrWeight: 0,
       supportWeight: 0,
       protectWeakSingleVariant: true,
       weakSingleVariantMargin: 30,
+      ...(modes.includes('aggressive') ? {
+        beam: {
+          enabled: true,
+          mode: 'aggressive',
+          k: 1,
+          margin: 18,
+          templateCharMargin: 5,
+          maxLabels: 3,
+          maxChangedPositions: 1,
+          maxTemplateOnlyChanges: 1,
+        },
+      } : {}),
     },
-    trainRounds,
-    samples,
+    trainRounds: [...new Set([...(existingModel.trainRounds || []), ...trainRounds])].sort(),
+    samples: combinedSamples,
   };
 
   await mkdir(path.dirname(outPath), { recursive: true });
   await writeFile(outPath, JSON.stringify(model), 'utf8');
-  console.log(`[template-model] wrote ${samples.length} character templates`);
+  console.log(`[template-model] wrote ${combinedSamples.length} character templates (${samples.length} generated)`);
 } finally {
   await browser.close();
   server.close();

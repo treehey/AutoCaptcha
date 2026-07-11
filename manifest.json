@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "NJU 自动登录助手",
-  "description": "南大统一身份认证本地模板增强 OCR 自动登录助手，内置选课系统登录后的课程监控与自动抢课，无需大模型 API。",
-  "version": "4.2.0",
+  "description": "南大统一身份认证本地轻量 CNN 增强自动登录助手，内置选课系统登录后的课程监控与自动抢课，无需大模型 API。",
+  "version": "5.0.0",
   "default_locale": "zh_CN",
   "icons": {
     "16": "icon16.png",
@@ -22,7 +22,7 @@
   "content_scripts": [
     {
       "matches": ["https://authserver.nju.edu.cn/*"],
-      "js": ["tesseract.min.js", "content.js"],
+      "js": ["captcha-cnn.js", "tesseract.min.js", "content.js"],
       "run_at": "document_idle"
     },
     {
@@ -38,6 +38,8 @@
         "langs/worker.min.js",
         "langs/tesseract-core.wasm.js",
         "assets/captcha-template-model.json",
+        "assets/captcha-cnn-model.json",
+        "assets/captcha-cnn-model.bin",
         "icon48.png"
       ],
       "matches": ["<all_urls>"]

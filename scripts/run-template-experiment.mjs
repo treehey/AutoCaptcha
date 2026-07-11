@@ -22,6 +22,10 @@ const regressionArg = args.find(arg => arg.startsWith('--regression='))?.slice('
 const trainRounds = trainArg ? trainArg.split(',').map(round => `round-${round}`) : null;
 const testRounds = testArg ? testArg.split(',').map(round => `round-${round}`) : null;
 const useShiftDistance = args.includes('--shift');
+const quickBeam = args.includes('--quick-beam');
+const experimentModes = quickBeam ? ['aggressive'] : ['thin', 'aggressive', 'color'];
+const experimentClassifiers = quickBeam ? ['knn1'] : ['knn1', 'knn5', 'centroid'];
+const positionAware = args.includes('--position-aware');
 
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '');
 const outDir = path.join(repoRoot, 'data', 'segmentation-experiments', `template-${stamp}`);
@@ -39,6 +43,10 @@ function parseCsv(text) {
 
 function normalizeChar(char) {
   return /[a-z]/i.test(char) ? char.toLowerCase() : char;
+}
+
+function normalizeCode(code) {
+  return [...(code || '')].map(normalizeChar).join('');
 }
 
 function sameChar(actual, expected) {
@@ -203,6 +211,135 @@ function codeScoreFromLabelScores(code, labelScores) {
   return score;
 }
 
+const OCR_VARIANT_PRIORITIES = {
+  'strict-color': 2,
+  'balanced-color': 4,
+  'loose-color': 3,
+  'thin-line-clean': 3,
+  'aggressive-line-clean': 2,
+  'simple-threshold': 2,
+  'legacy-fallback': 1,
+  'color-cluster': 2,
+};
+
+const TEMPLATE_CONFUSION_GROUPS = [
+  ['3', '5', '8', 's'],
+  ['i', 'j', 'l', '4', 'w'],
+  ['a', 'b', 'd', '4'],
+  ['q', 'g'],
+  ['u', 'v', 'y'],
+  ['n', 'm', 'w'],
+  ['c', 'e', 'f', 'l', 't'],
+  ['g', 'p', 'r'],
+];
+
+function getOcrPositionLabels(reg, maxLabels = 3) {
+  const positions = Array.from({ length: 4 }, () => new Map());
+  const add = (position, char, score, source) => {
+    const label = normalizeChar(char || '');
+    if (!label) return;
+    const current = positions[position].get(label) || { label, score: 0, sources: new Set() };
+    current.score += score;
+    current.sources.add(source);
+    positions[position].set(label, current);
+  };
+
+  for (const candidate of reg.candidates || []) {
+    if (!candidate.code || candidate.code.length !== 4) continue;
+    const priority = OCR_VARIANT_PRIORITIES[candidate.variant] || 1;
+    const weight = priority + Math.min(3, Math.max(0, candidate.confidence || 0) / 25);
+    for (let i = 0; i < 4; i++) add(i, candidate.code[i], weight, candidate.variant);
+  }
+
+  if (reg.current && reg.current.length === 4) {
+    for (let i = 0; i < 4; i++) add(i, reg.current[i], 0.01, 'current');
+  }
+
+  return positions.map((position, index) => {
+    const ranked = [...position.values()]
+      .sort((a, b) => b.score - a.score || b.sources.size - a.sources.size);
+    const selected = ranked.slice(0, maxLabels);
+    const currentLabel = normalizeChar(reg.current?.[index] || '');
+    const currentItem = position.get(currentLabel);
+    if (currentItem && !selected.some(item => item.label === currentLabel)) {
+      selected[selected.length - 1] = currentItem;
+    }
+    return selected;
+  });
+}
+
+function getConfusionAlternatives(char) {
+  const label = normalizeChar(char || '');
+  const alternatives = new Set();
+  for (const group of TEMPLATE_CONFUSION_GROUPS) {
+    if (!group.includes(label)) continue;
+    for (const item of group) {
+      if (item !== label) alternatives.add(item);
+    }
+  }
+  return [...alternatives];
+}
+
+function buildBeamCodes(reg, labelScores, options = {}) {
+  const maxLabels = options.maxLabels || 3;
+  const positions = getOcrPositionLabels(reg, maxLabels);
+  const templateCharMargin = Number(options.templateCharMargin ?? Infinity);
+
+  if (Number.isFinite(templateCharMargin) && reg.current?.length === 4) {
+    for (let i = 0; i < 4; i++) {
+      const current = normalizeChar(reg.current[i]);
+      const currentScore = labelScores[i].get(current) ?? -8;
+      const existing = new Set(positions[i].map(item => item.label));
+      const alternatives = getConfusionAlternatives(current)
+        .filter(label => !existing.has(label))
+        .map(label => ({ label, templateScore: labelScores[i].get(label) ?? -8 }))
+        .filter(item => item.templateScore > -8)
+        .filter(item => item.templateScore >= currentScore + templateCharMargin)
+        .sort((a, b) => b.templateScore - a.templateScore)
+        .slice(0, 1);
+
+      for (const item of alternatives) {
+        positions[i].push({
+          label: item.label,
+          score: 0,
+          sources: new Set(['template-confusion']),
+        });
+      }
+    }
+  }
+
+  if (positions.some(position => position.length === 0)) return [];
+
+  let beam = [{ code: '', ocrScore: 0, changedPositions: 0, templateOnlyChanges: 0, maxEvidenceDeficit: 0 }];
+  for (let i = 0; i < 4; i++) {
+    const next = [];
+    const currentLabel = normalizeChar(reg.current?.[i] || '');
+    const currentEvidence = positions[i].find(item => item.label === currentLabel)?.score || 0;
+    for (const prefix of beam) {
+      for (const item of positions[i]) {
+        next.push({
+          code: prefix.code + item.label,
+          ocrScore: prefix.ocrScore + item.score,
+          changedPositions: prefix.changedPositions + (item.label === currentLabel ? 0 : 1),
+          templateOnlyChanges: prefix.templateOnlyChanges + (item.sources.has('template-confusion') ? 1 : 0),
+          maxEvidenceDeficit: Math.max(
+            prefix.maxEvidenceDeficit,
+            item.label === currentLabel ? 0 : Math.max(0, currentEvidence - item.score)
+          ),
+        });
+      }
+    }
+    beam = next
+      .sort((a, b) => b.ocrScore - a.ocrScore)
+      .slice(0, options.beamWidth || 81);
+  }
+
+  return beam
+    .filter(item => item.changedPositions <= (options.maxChangedPositions ?? 4))
+    .filter(item => item.templateOnlyChanges <= (options.maxTemplateOnlyChanges ?? 1))
+    .filter(item => item.maxEvidenceDeficit <= (options.maxEvidenceDeficit ?? Infinity));
+}
+
 function findLatestRegressionReport() {
   const dir = path.join(repoRoot, 'data', 'regression-results');
   if (!existsSync(dir)) return '';
@@ -245,7 +382,7 @@ try {
   await page.addScriptTag({ url: `${origin}/content.js` });
   await page.waitForFunction(() => typeof window.readCaptchaBitmap === 'function');
 
-  await page.evaluate(({ featureW, featureH }) => {
+  await page.evaluate(({ featureW, featureH, modes }) => {
     function getVariant(mode) {
       if (mode === 'aggressive') {
         return {
@@ -420,7 +557,7 @@ try {
       const base = await readCaptchaBitmap(img);
       const output = {};
 
-      for (const mode of ['thin', 'aggressive', 'color']) {
+      for (const mode of modes) {
         const mask = buildExperimentMask(base, mode);
         const segmentation = segmentMask(mask, base.width, base.height);
         output[mode] = {
@@ -433,7 +570,7 @@ try {
 
       return output;
     };
-  }, { featureW: FEATURE_W, featureH: FEATURE_H });
+  }, { featureW: FEATURE_W, featureH: FEATURE_H, modes: experimentModes });
 
   console.log(`Extracting template features: ${rounds.join(', ')}`);
   for (const round of rounds) {
@@ -529,8 +666,8 @@ if (trainRounds && testRounds) {
 
 const evaluations = [];
 for (const split of splits) {
-  for (const mode of ['thin', 'aggressive', 'color']) {
-    for (const classifier of ['knn1', 'knn5', 'centroid']) {
+  for (const mode of experimentModes) {
+    for (const classifier of experimentClassifiers) {
       evaluations.push(evaluateSplit(split.name, split.train, split.test, mode, classifier));
     }
   }
@@ -539,33 +676,53 @@ for (const split of splits) {
 evaluations.sort((a, b) => b.accuracy - a.accuracy || b.charAccuracy - a.charAccuracy);
 
 const rerankEvaluations = [];
-const regressionPath = regressionArg
-  ? path.resolve(repoRoot, regressionArg)
-  : findLatestRegressionReport();
+const regressionPaths = regressionArg
+  ? regressionArg.split(';').filter(Boolean).map(item => path.resolve(repoRoot, item))
+  : [findLatestRegressionReport()].filter(Boolean);
+const existingRegressionPaths = regressionPaths.filter(item => existsSync(item));
+const regressionLabel = existingRegressionPaths
+  .map(item => path.relative(repoRoot, item))
+  .join(', ');
 
-if (regressionPath && existsSync(regressionPath)) {
-  const regression = JSON.parse(await readFile(regressionPath, 'utf8'));
+if (existingRegressionPaths.length) {
   const regressionSamples = new Map();
-  for (const roundResult of regression.roundResults || []) {
-    for (const sample of roundResult.samples || []) {
-      regressionSamples.set(`${roundResult.round}#${sample.id}`, {
-        round: roundResult.round,
-        id: sample.id,
-        expected: sample.expected,
-        current: sample.actual || '',
-        candidates: sample.candidates || [],
-      });
+  for (const regressionPath of existingRegressionPaths) {
+    const regression = JSON.parse(await readFile(regressionPath, 'utf8'));
+    for (const roundResult of regression.roundResults || []) {
+      for (const sample of roundResult.samples || []) {
+        regressionSamples.set(`${roundResult.round}#${sample.id}`, {
+          round: roundResult.round,
+          id: sample.id,
+          expected: sample.expected,
+          current: sample.actual || '',
+          candidates: sample.candidates || [],
+        });
+      }
     }
   }
 
   for (const split of splits) {
-    for (const mode of ['thin', 'aggressive']) {
-      for (const classifier of ['knn1', 'knn5', 'centroid']) {
+    for (const mode of experimentModes.filter(item => item !== 'color')) {
+      for (const classifier of experimentClassifiers) {
         const training = charSamples.filter(item => item.mode === mode && split.train.includes(item.round));
         const centroids = classifier === 'centroid' ? buildCentroids(training) : null;
         const testingImages = imageSamples.filter(item => split.test.includes(item.round));
 
-        for (const margin of [0, 2, 5, 10, 18]) {
+        for (const candidateMode of ['whole', 'ocr-beam', 'confusion-beam']) {
+          const templateCharMargins = candidateMode === 'confusion-beam'
+            ? (quickBeam ? [0, 5] : [0, 2, 5])
+            : [Infinity];
+          for (const templateCharMargin of templateCharMargins) {
+          const beamOcrWeights = candidateMode === 'whole' ? [0] : (quickBeam ? [0] : [0, 1]);
+          for (const beamOcrWeight of beamOcrWeights) {
+          const maxEvidenceDeficits = candidateMode === 'ocr-beam' && quickBeam
+            ? [2, 4, 6, 8, Infinity]
+            : [Infinity];
+          for (const maxEvidenceDeficit of maxEvidenceDeficits) {
+          const margins = quickBeam
+            ? (candidateMode === 'whole' ? [10] : candidateMode === 'ocr-beam' ? [10, 18] : [18])
+            : [0, 2, 5, 10, 18];
+          for (const margin of margins) {
           let correct = 0;
           let total = 0;
           let overrides = 0;
@@ -575,27 +732,59 @@ if (regressionPath && existsSync(regressionPath)) {
             const reg = regressionSamples.get(`${image.round}#${image.id}`);
             if (!reg) continue;
 
-            const labelScores = image.features[mode].chars.map(feature => {
+            const labelScores = image.features[mode].chars.map((feature, position) => {
+              const scopedTraining = positionAware
+                ? training.filter(item => item.pos === position)
+                : training;
               return classifier === 'centroid'
                 ? scoreLabelsCentroid(feature, centroids)
-                : scoreLabelsKnn(feature, training, classifier === 'knn1' ? 1 : 5);
+                : scoreLabelsKnn(feature, scopedTraining, classifier === 'knn1' ? 1 : 5);
             });
 
             const codes = new Map();
-            if (reg.current) codes.set(reg.current, { code: reg.current, source: 'current' });
-            for (const candidate of reg.candidates) {
-              if (candidate.code && candidate.code.length === 4) {
-                const key = candidate.code;
+            if (reg.current) codes.set(normalizeCode(reg.current), { code: reg.current, source: 'current' });
+            if (candidateMode === 'whole') {
+              for (const candidate of reg.candidates) {
+                if (!candidate.code || candidate.code.length !== 4) continue;
+                const key = normalizeCode(candidate.code);
                 const existing = codes.get(key) || { code: key, source: candidate.variant };
                 existing.confidence = Math.max(existing.confidence || 0, candidate.confidence || 0);
                 codes.set(key, existing);
               }
             }
 
-            const currentScore = codeScoreFromLabelScores(reg.current, labelScores);
+            if (candidateMode !== 'whole') {
+              const beamCodes = buildBeamCodes(reg, labelScores, {
+                maxLabels: 3,
+                beamWidth: 81,
+                templateCharMargin,
+                maxChangedPositions: candidateMode === 'confusion-beam' ? 1 : 4,
+                maxTemplateOnlyChanges: 1,
+                maxEvidenceDeficit,
+              });
+              for (const item of beamCodes) {
+                const key = normalizeCode(item.code);
+                if (codes.has(key)) {
+                  const existing = codes.get(key);
+                  existing.beamOcrScore = Math.max(existing.beamOcrScore || 0, item.ocrScore);
+                } else {
+                  codes.set(key, {
+                    code: item.code,
+                    source: item.templateOnlyChanges ? 'confusion-beam' : 'ocr-beam',
+                    beamOcrScore: item.ocrScore,
+                    templateOnlyChanges: item.templateOnlyChanges,
+                  });
+                }
+              }
+            }
+
+            const currentItem = codes.get(normalizeCode(reg.current));
+            const currentTemplateScore = codeScoreFromLabelScores(reg.current, labelScores);
+            const currentScore = currentTemplateScore + (currentItem?.beamOcrScore || 0) * beamOcrWeight;
             let best = { code: reg.current, score: currentScore, source: 'current' };
             for (const item of codes.values()) {
-              const score = codeScoreFromLabelScores(item.code, labelScores);
+              const score = codeScoreFromLabelScores(item.code, labelScores)
+                + (item.beamOcrScore || 0) * beamOcrWeight;
               if (score > best.score) best = { ...item, score };
             }
 
@@ -621,6 +810,11 @@ if (regressionPath && existsSync(regressionPath)) {
             name: split.name,
             mode,
             classifier,
+            candidateMode,
+            positionAware,
+            templateCharMargin,
+            beamOcrWeight,
+            maxEvidenceDeficit,
             margin,
             trainRounds: split.train,
             testRounds: split.test,
@@ -630,6 +824,10 @@ if (regressionPath && existsSync(regressionPath)) {
             overrides,
             predictions,
           });
+          }
+          }
+          }
+          }
         }
       }
     }
@@ -644,7 +842,7 @@ const report = {
   featureSize: { width: FEATURE_W, height: FEATURE_H },
   samples: imageSamples.length,
   charSamples: charSamples.length,
-  regressionPath,
+  regressionPaths: existingRegressionPaths,
   evaluations,
   rerankEvaluations,
 };
@@ -659,9 +857,9 @@ for (const item of evaluations.slice(0, 20)) {
 }
 if (rerankEvaluations.length) {
   lines.push('');
-  lines.push(`Candidate rerank results from ${path.relative(repoRoot, regressionPath)}:`);
+  lines.push(`Candidate rerank results from ${regressionLabel}:`);
   for (const item of rerankEvaluations.slice(0, 20)) {
-    lines.push(`${item.name} ${item.mode}/${item.classifier} margin=${item.margin}: ${item.correct}/${item.total} (${(item.accuracy * 100).toFixed(1)}%), overrides=${item.overrides}`);
+    lines.push(`${item.name} ${item.mode}/${item.classifier} ${item.candidateMode} positionAware=${item.positionAware} charMargin=${Number.isFinite(item.templateCharMargin) ? item.templateCharMargin : '-'} ocrWeight=${item.beamOcrWeight} evidenceDeficit=${Number.isFinite(item.maxEvidenceDeficit) ? item.maxEvidenceDeficit : '-'} margin=${item.margin}: ${item.correct}/${item.total} (${(item.accuracy * 100).toFixed(1)}%), overrides=${item.overrides}`);
   }
 }
 await writeFile(path.join(outDir, 'summary.txt'), lines.join('\n') + '\n', 'utf8');

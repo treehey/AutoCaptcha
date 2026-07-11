@@ -171,28 +171,14 @@ try {
         const img = new Image();
         img.src = imageUrl;
         await img.decode();
-
-        const base = await window.readCaptchaBitmap(img);
-        const engine = await window.getCaptchaWorker();
-        let candidates = await window.recognizeCaptchaVariants(engine, base, window.getFastCaptchaVariants());
-        let selected = window.selectCaptchaCode(candidates);
-        let usedFallback = false;
-
-        if (window.shouldRunFallbackVariants(candidates, selected)) {
-          const fallback = await window.recognizeCaptchaVariants(engine, base, window.getFallbackCaptchaVariants());
-          candidates = candidates.concat(fallback);
-          selected = window.selectCaptchaCode(candidates);
-          usedFallback = true;
-        }
-
-        const code = selected ? window.correctVisualConfusions(selected, base, candidates) : '';
+        const details = await window.recognizeCaptchaCode(img, { includeDetails: true });
         return {
-          code,
-          confidence: candidates
-            .filter(c => c.code === (selected || ''))
+          code: details.code,
+          confidence: details.candidates
+            .filter(c => c.code === (details.selectedCode || ''))
             .reduce((max, c) => Math.max(max, c.confidence || 0), 0),
-          fallback: usedFallback,
-          candidates: candidates.map(c => ({
+          fallback: details.candidates.some(c => ['color-cluster', 'balanced-color', 'aggressive-line-clean'].includes(c.variant)),
+          candidates: details.candidates.map(c => ({
             variant: c.variant,
             code: c.code || '',
             confidence: Math.round(c.confidence || 0),

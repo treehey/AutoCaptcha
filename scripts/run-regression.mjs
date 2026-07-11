@@ -14,6 +14,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const verbose = process.argv.includes('--verbose') || process.env.OCR_REGRESSION_VERBOSE === '1';
 const args = process.argv.slice(2).filter(arg => arg !== '--verbose');
 const pluginFlow = args.includes('--plugin-flow');
+const cnnOnly = args.includes('--cnn-only');
 const templateRerankEnabled = args.includes('--template-rerank');
 const templateTrainArg = args.find(arg => arg.startsWith('--template-train='))?.slice('--template-train='.length) || '';
 const templateMode = args.find(arg => arg.startsWith('--template-mode='))?.slice('--template-mode='.length) || 'thin';
@@ -25,6 +26,7 @@ const templateProtectHighConfidence = args.includes('--template-protect-high-con
 const templateAllLabels = !args.includes('--template-candidate-labels-only');
 const templateProtectWeakSingleVariant = !args.includes('--template-no-weak-single-protect');
 const templateWeakSingleVariantMargin = Number(args.find(arg => arg.startsWith('--template-weak-single-margin='))?.slice('--template-weak-single-margin='.length) || 30);
+const pageSegMode = args.find(arg => arg.startsWith('--psm='))?.slice('--psm='.length) || '13';
 
 function parseRoundList(value) {
   if (!value) return [];
@@ -230,7 +232,8 @@ try {
   });
 
   await page.goto(`${origin}/benchmark.html`);
-  await page.evaluate(({ pluginFlow }) => {
+  await page.evaluate(({ pluginFlow, pageSegMode }) => {
+    window.NJU_OCR_PSM = pageSegMode;
     window.chrome = {
       runtime: {
         getManifest: () => ({ version: 'regression' }),
@@ -246,8 +249,9 @@ try {
         },
       },
     };
-  }, { pluginFlow });
+  }, { pluginFlow, pageSegMode });
   await page.addScriptTag({ url: `${origin}/tesseract.min.js` });
+  await page.addScriptTag({ url: `${origin}/captcha-cnn.js` });
   await page.addScriptTag({ url: `${origin}/content.js` });
   await page.waitForFunction(() => typeof window.recognizeCaptchaCode === 'function');
   await page.waitForFunction(() => typeof window.extractCaptchaTemplateFeatures === 'function');
@@ -305,21 +309,40 @@ try {
 
     for (const sample of answers) {
       const imageUrl = `${origin}/${path.relative(repoRoot, path.join(sampleDir, sample.file)).replaceAll(path.sep, '/')}`;
-      const result = await page.evaluate(async ({ imageUrl, pluginFlow }) => {
+      const result = await page.evaluate(async ({ imageUrl, pluginFlow, cnnOnly }) => {
         const img = new Image();
         img.src = imageUrl;
         await img.decode();
 
         const started = performance.now();
-        if (pluginFlow) {
-          const code = await window.recognizeCaptchaCode(img);
+        if (cnnOnly) {
+          const details = await window.NjuCaptchaCnn.recognize(img);
           return {
-            code,
-            selected: '',
+            code: details.code,
+            selected: details.code,
             elapsedMs: performance.now() - started,
-            usedFallback: null,
+            usedFallback: false,
             templateRerank: null,
-            candidates: [],
+            templateBeam: null,
+            candidates: [{
+              variant: 'raw-cnn',
+              code: details.code,
+              confidence: Math.min(...details.chars.map(item => item.confidence)) * 100,
+            }],
+          };
+        }
+        if (pluginFlow) {
+          const details = await window.recognizeCaptchaCode(img, { includeDetails: true });
+          return {
+            code: details.code,
+            selected: details.selectedCode || '',
+            elapsedMs: performance.now() - started,
+            usedFallback: details.candidates.some(candidate => {
+              return ['color-cluster', 'balanced-color', 'aggressive-line-clean'].includes(candidate.variant);
+            }),
+            templateRerank: details.templateRerank || null,
+            templateBeam: details.templateBeam || null,
+            candidates: details.candidates,
           };
         }
 
@@ -347,13 +370,14 @@ try {
           elapsedMs: performance.now() - started,
           usedFallback,
           templateRerank,
+          templateBeam: null,
           candidates: candidates.map(c => ({
             variant: c.variant,
             code: c.code || '',
             confidence: Math.round(c.confidence || 0),
           })),
         };
-      }, { imageUrl, pluginFlow });
+      }, { imageUrl, pluginFlow, cnnOnly });
 
       const ok = sameCaptchaAnswer(result.code, sample.answer);
       const diffs = ok ? [] : charDiff(result.code, sample.answer);
@@ -401,6 +425,7 @@ try {
         elapsedMs: r.elapsedMs,
         usedFallback: r.usedFallback,
         templateRerank: r.templateRerank || null,
+        templateBeam: r.templateBeam || null,
         candidates: r.candidates,
       })),
       errors: errors.map(e => ({
@@ -409,6 +434,7 @@ try {
         actual: e.code || '',
         selected: e.selected || '',
         templateRerank: e.templateRerank || null,
+        templateBeam: e.templateBeam || null,
         diffs: e.diffs,
         confusions: e.confusions,
         candidates: e.candidates,

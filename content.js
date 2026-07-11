@@ -32,6 +32,7 @@ const CAPTCHA_TEMPLATE_RERANK_DEFAULTS = {
 let captchaTemplateModelPromise = null;
 let captchaTemplateRuntimeConfigPromise = null;
 let captchaTemplateModelWarned = false;
+let captchaCnnEnabledPromise = null;
 const CAPTCHA_OCR_VARIANTS = [
     {
         name: 'color-cluster',
@@ -4083,6 +4084,9 @@ function selectCaptchaCode(results) {
 }
 
 async function createCaptchaWorker() {
+    const pageSegMode = typeof window !== 'undefined' && window.NJU_OCR_PSM
+        ? String(window.NJU_OCR_PSM)
+        : '13';
     const worker = await Tesseract.createWorker('eng', 1, {
         workerPath: chrome.runtime.getURL('langs/worker.min.js'),
         corePath: chrome.runtime.getURL('langs/tesseract-core.wasm.js'),
@@ -4094,7 +4098,7 @@ async function createCaptchaWorker() {
 
     await worker.setParameters({
         tessedit_char_whitelist: CAPTCHA_CHAR_WHITELIST,
-        tessedit_pageseg_mode: '13',
+        tessedit_pageseg_mode: pageSegMode,
         user_defined_dpi: '300'
     });
 
@@ -4207,6 +4211,58 @@ async function recognizeCaptchaVariants(engine, base, variants = CAPTCHA_OCR_VAR
     return results;
 }
 
+async function isCaptchaCnnEnabled(options = {}) {
+    if (typeof options.templateRerank === 'boolean') {
+        return options.templateRerank;
+    }
+    if (captchaCnnEnabledPromise) return await captchaCnnEnabledPromise;
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return true;
+    captchaCnnEnabledPromise = chrome.storage.local.get(['nju_template_rerank'])
+        .then(settings => settings.nju_template_rerank !== false)
+        .catch(() => true);
+    return await captchaCnnEnabledPromise;
+}
+
+function shouldRunLegacyOcrForCnn(cnnResult) {
+    if (!cnnResult || !cnnResult.code || cnnResult.code.length !== 4) return true;
+    if (cnnResult.code[0] === 'c' || cnnResult.code[0] === 'e') return true;
+    return cnnResult.chars.some(item => (item.confidence || 0) < 0.5);
+}
+
+function fuseCaptchaCnnWithOcr(cnnResult, ocrCode) {
+    if (!cnnResult || !cnnResult.code || cnnResult.code.length !== 4) {
+        return { code: ocrCode || '', fallbacks: [] };
+    }
+    if (!ocrCode || ocrCode.length !== 4) {
+        return { code: cnnResult.code, fallbacks: [] };
+    }
+
+    const output = [...cnnResult.code];
+    const candidates = [];
+    const cnnFirst = output[0].toLowerCase();
+    const ocrFirst = ocrCode[0].toLowerCase();
+    const protectFirstCE = cnnFirst !== ocrFirst
+        && [cnnFirst, ocrFirst].every(char => char === 'c' || char === 'e');
+    if (protectFirstCE) {
+        candidates.push({ position: 0, reason: 'first-ce', confidence: cnnResult.chars[0].confidence || 0 });
+    }
+    for (let position = 0; position < 4; position++) {
+        if (output[position].toLowerCase() === ocrCode[position].toLowerCase()) continue;
+        const confidence = cnnResult.chars[position].confidence || 0;
+        if (confidence < 0.5) {
+            candidates.push({ position, reason: 'low-confidence', confidence });
+        }
+    }
+    candidates.sort((left, right) => {
+        if (left.reason !== right.reason) return left.reason === 'first-ce' ? -1 : 1;
+        return left.confidence - right.confidence;
+    });
+
+    const selected = candidates.slice(0, 1);
+    for (const item of selected) output[item.position] = ocrCode[item.position];
+    return { code: output.join(''), fallbacks: selected };
+}
+
 function getFastCaptchaVariants() {
     return CAPTCHA_OCR_VARIANTS.filter(variant => !variant.fallbackOnly);
 }
@@ -4238,6 +4294,43 @@ function shouldRunFallbackVariants(results, selectedCode) {
 }
 
 async function recognizeCaptchaCode(imgElement, options = {}) {
+    const cnnEnabled = await isCaptchaCnnEnabled(options);
+    let cnnResult = null;
+    if (cnnEnabled && typeof window !== 'undefined' && window.NjuCaptchaCnn) {
+        try {
+            cnnResult = await window.NjuCaptchaCnn.recognize(imgElement);
+            if (!shouldRunLegacyOcrForCnn(cnnResult)) {
+                const cnnCandidate = {
+                    variant: 'raw-cnn',
+                    code: cnnResult.code,
+                    confidence: Math.min(...cnnResult.chars.map(item => item.confidence || 0)) * 100
+                };
+                console.log(
+                    'NJU 助手：CNN识别：',
+                    cnnResult.code,
+                    `(${Math.round(cnnCandidate.confidence)})`,
+                    '=>',
+                    cnnResult.code
+                );
+                if (options.includeDetails) {
+                    return {
+                        code: cnnResult.code,
+                        selectedCode: cnnResult.code,
+                        templateEnabled: true,
+                        cnnEnabled: true,
+                        cnnResult,
+                        cnnFusion: { code: cnnResult.code, fallbacks: [] },
+                        templateRerank: null,
+                        candidates: [cnnCandidate]
+                    };
+                }
+                return cnnResult.code;
+            }
+        } catch (err) {
+            console.warn('NJU 助手：CNN 识别失败，已回退 Tesseract OCR:', err);
+        }
+    }
+
     const base = await readCaptchaBitmap(imgElement);
     const engine = await getCaptchaWorker();
     let results = [];
@@ -4273,11 +4366,25 @@ async function recognizeCaptchaCode(imgElement, options = {}) {
             code = templateRerank.selectedAfter;
         }
         const templateRerankEnabled = templateRerank.enabled;
+        const cnnFusion = cnnEnabled && cnnResult
+            ? fuseCaptchaCnnWithOcr(cnnResult, code)
+            : null;
+        if (cnnFusion) code = cnnFusion.code;
+        const outputResults = cnnResult
+            ? [{
+                variant: 'raw-cnn',
+                code: cnnResult.code,
+                confidence: Math.min(...cnnResult.chars.map(item => item.confidence || 0)) * 100
+            }, ...results]
+            : results;
         console.log(
             "NJU 助手：OCR候选：",
-            results.map(r => `${r.variant}${r.variant === 'balanced-color' ? '*' : ''}=${r.code || '空'}(${Math.round(r.confidence)})`).join(' | '),
+            outputResults.map(r => `${r.variant}${r.variant === 'balanced-color' ? '*' : ''}=${r.code || '空'}(${Math.round(r.confidence)})`).join(' | '),
             templateRerankEnabled
                 ? `| 模板重排：${templateRerank.selectedBefore || '空'}=>${templateRerank.selectedAfter || '空'} ${templateRerank.reason}`
+                : '',
+            cnnFusion && cnnFusion.fallbacks.length
+                ? `| CNN回退：${cnnFusion.fallbacks.map(item => `${item.position + 1}:${item.reason}`).join(',')}`
                 : '',
             "=>",
             code || '无有效结果'
@@ -4286,9 +4393,12 @@ async function recognizeCaptchaCode(imgElement, options = {}) {
             return {
                 code,
                 selectedCode,
-                templateEnabled: templateRerank.enabled,
+                templateEnabled: cnnEnabled || templateRerank.enabled,
+                cnnEnabled,
+                cnnResult,
+                cnnFusion,
                 templateRerank,
-                candidates: results.map(result => ({
+                candidates: outputResults.map(result => ({
                     variant: result.variant,
                     code: result.code || '',
                     confidence: result.confidence || 0
@@ -4302,9 +4412,14 @@ async function recognizeCaptchaCode(imgElement, options = {}) {
     }
 }
 
-chrome.storage.local.get(['nju_enabled']).then(settings => {
+chrome.storage.local.get(['nju_enabled', 'nju_template_rerank']).then(settings => {
     if (settings.nju_enabled !== false) {
-        getCaptchaWorker().catch(err => console.warn("NJU 助手：预热 OCR worker 失败:", err));
+        if (settings.nju_template_rerank !== false && window.NjuCaptchaCnn) {
+            window.NjuCaptchaCnn.loadModel()
+                .catch(err => console.warn('NJU 助手：预热 CNN 模型失败:', err));
+        } else {
+            getCaptchaWorker().catch(err => console.warn("NJU 助手：预热 OCR worker 失败:", err));
+        }
     }
 });
 
@@ -4313,6 +4428,7 @@ if (chrome.storage && chrome.storage.onChanged) {
         if (area !== 'local') return;
         if (changes.nju_template_rerank || changes.nju_template_debug) {
             captchaTemplateRuntimeConfigPromise = null;
+            captchaCnnEnabledPromise = null;
         }
     });
 }
