@@ -144,6 +144,7 @@ try {
     };
   });
   await page.addScriptTag({ url: `${origin}/tesseract.min.js` });
+  await page.addScriptTag({ url: `${origin}/captcha-cnn.js` });
   await page.addScriptTag({ url: `${origin}/content.js` });
   await page.waitForFunction(() => typeof window.recognizeCaptchaCode === 'function');
 
