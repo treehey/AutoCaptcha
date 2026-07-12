@@ -4437,69 +4437,96 @@ window.addEventListener('beforeunload', () => {
     resetCaptchaWorker();
 });
 
-function createLoadingAnimation() {
-    let animationDiv = document.getElementById('nju-loading-animation');
-    if (animationDiv) return animationDiv; // 如果已存在则直接返回
+let captchaStatusTimer = null;
 
-    animationDiv = document.createElement('div');
-    animationDiv.id = 'nju-loading-animation';
-    animationDiv.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 15px 25px;
-        border-radius: 10px;
-        z-index: 99999;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-size: 14px;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-    `;
+function getCaptchaStatusNotice() {
+    let notice = document.getElementById('nju-captcha-status-notice');
+    if (notice) return notice;
 
-    const spinner = document.createElement('div');
-    spinner.style.cssText = `
-        border: 4px solid rgba(255, 255, 255, 0.3);
-        border-top: 4px solid white;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        animation: spin 1s linear infinite;
-    `;
+    notice = document.createElement('div');
+    notice.id = 'nju-captcha-status-notice';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+    notice.style.cssText = [
+        'position:fixed',
+        'top:16px',
+        'right:16px',
+        'z-index:2147483647',
+        'display:none',
+        'align-items:center',
+        'gap:10px',
+        'max-width:min(340px,calc(100vw - 32px))',
+        'padding:11px 14px',
+        'border:1px solid rgba(99,71,152,.24)',
+        'border-radius:8px',
+        'background:#ffffff',
+        'color:#252033',
+        'font:600 13px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif',
+        'box-shadow:0 12px 28px rgba(36,28,55,.20)',
+        'opacity:0',
+        'transform:translateY(-8px)',
+        'transition:opacity .18s ease,transform .18s ease'
+    ].join(';');
+
+    const indicator = document.createElement('span');
+    indicator.dataset.njuCaptchaStatusIcon = 'true';
+    indicator.style.cssText = 'flex:0 0 auto;width:18px;height:18px;border:2px solid #c8bedc;border-top-color:#634798;border-radius:50%;animation:njuCaptchaStatusSpin .75s linear infinite';
 
     const text = document.createElement('span');
-    text.textContent = '正在识别验证码...';
+    text.dataset.njuCaptchaStatusText = 'true';
+    notice.append(indicator, text);
+    document.body.appendChild(notice);
 
-    animationDiv.appendChild(spinner);
-    animationDiv.appendChild(text);
-    document.body.appendChild(animationDiv);
-
-    // 添加 CSS 关键帧动画 (直接注入到页面，无需修改 manifest)
     const style = document.createElement('style');
-    style.innerHTML = `
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    `;
+    style.textContent = '@keyframes njuCaptchaStatusSpin{to{transform:rotate(360deg)}}';
     document.head.appendChild(style);
-
-    return animationDiv;
+    return notice;
 }
 
-function showLoadingAnimation() {
-    const animation = createLoadingAnimation();
-    animation.style.display = 'flex'; // 显示
-}
-
-function hideLoadingAnimation() {
-    const animation = document.getElementById('nju-loading-animation');
-    if (animation) {
-        animation.style.display = 'none'; // 隐藏
+function showCaptchaStatus(message, state = 'loading', autoHideMs = 0) {
+    if (captchaStatusTimer) {
+        clearTimeout(captchaStatusTimer);
+        captchaStatusTimer = null;
     }
+
+    const notice = getCaptchaStatusNotice();
+    const indicator = notice.querySelector('[data-nju-captcha-status-icon]');
+    const text = notice.querySelector('[data-nju-captcha-status-text]');
+    const colors = {
+        loading: '#634798',
+        success: '#14804a',
+        warning: '#9a6700',
+        error: '#b42318'
+    };
+
+    text.textContent = message;
+    if (state === 'loading') {
+        indicator.textContent = '';
+        indicator.style.cssText = 'flex:0 0 auto;width:18px;height:18px;border:2px solid #c8bedc;border-top-color:#634798;border-radius:50%;animation:njuCaptchaStatusSpin .75s linear infinite';
+    } else {
+        indicator.textContent = state === 'success' ? '\u2713' : state === 'warning' ? '!' : '\u00d7';
+        indicator.style.cssText = `display:grid;place-items:center;flex:0 0 auto;width:18px;height:18px;border-radius:50%;background:${colors[state]};color:#fff;font:700 12px/18px system-ui`;
+    }
+
+    notice.style.display = 'flex';
+    requestAnimationFrame(() => {
+        notice.style.opacity = '1';
+        notice.style.transform = 'translateY(0)';
+    });
+
+    if (autoHideMs > 0) {
+        captchaStatusTimer = setTimeout(hideCaptchaStatus, autoHideMs);
+    }
+}
+
+function hideCaptchaStatus() {
+    const notice = document.getElementById('nju-captcha-status-notice');
+    if (!notice) return;
+    notice.style.opacity = '0';
+    notice.style.transform = 'translateY(-8px)';
+    captchaStatusTimer = setTimeout(() => {
+        notice.style.display = 'none';
+    }, 180);
 }
 
 let isSolving = false; // 互斥锁，防止并发重复执行
@@ -4524,6 +4551,7 @@ async function previewCaptchaRecognition(templateRerank) {
     }
     isSolving = true;
     try {
+        showCaptchaStatus('正在重新识别验证码...', 'loading');
         const started = performance.now();
         const result = await recognizeCaptchaCode(imgElement, {
             includeDetails: true,
@@ -4532,6 +4560,7 @@ async function previewCaptchaRecognition(templateRerank) {
         if (result.code && result.code.length === 4) {
             inputElement.value = result.code;
             inputElement.dispatchEvent(new Event('input', { bubbles: true }));
+            showCaptchaStatus('验证码已重新识别并填入', 'success', 2600);
         }
         return {
             ok: true,
@@ -4603,9 +4632,7 @@ async function _solveCaptchaImpl() {
         return;
     }
 
-    // --- 在识别开始时显示动画 ---
-    showLoadingAnimation();
-    // ----------------------------
+    showCaptchaStatus('正在识别验证码...', 'loading');
 
     try {
         const code = await recognizeCaptchaCode(imgElement);
@@ -4630,13 +4657,10 @@ async function _solveCaptchaImpl() {
                 console.log("NJU助手：检测到浏览器已自动填充或未开启强制填充，跳过账号填入");
             }
 
-            // --- 在识别结束后隐藏动画 ---
-            hideLoadingAnimation();
-            // ---------------------------
-
             // 3. 自动登录
             if (settings.nju_auto_click !== false) {
                 console.log("NJU助手：自动登录开关已开启，准备点击登录...");
+                showCaptchaStatus('验证码已填入，正在登录...', 'success');
                 setTimeout(() => {
                     const loginBtn = document.querySelector("#login_submit") || document.querySelector(".auth_login_btn");
                     if (loginBtn) {
@@ -4647,13 +4671,14 @@ async function _solveCaptchaImpl() {
                 }, 350);
             } else {
                 console.log("NJU助手：自动登录开关关闭，请手动检查后点击。");
+                showCaptchaStatus('验证码已识别并填入，请确认后登录', 'success', 3600);
             }
         } else {
             const MAX_AUTO_REFRESHES = 5;
             if (autoRefreshCount < MAX_AUTO_REFRESHES) {
                 autoRefreshCount++;
                 console.log(`NJU 助手：识别结果不完整，自动刷新重试 (${autoRefreshCount}/${MAX_AUTO_REFRESHES})...`);
-                hideLoadingAnimation();
+                showCaptchaStatus(`识别不完整，正在刷新重试（${autoRefreshCount}/${MAX_AUTO_REFRESHES}）`, 'warning');
                 isProgrammaticRefresh = true;
                 // 点击页面自带的"刷新"链接，触发 reloadCaptcha(true)，正确刷新验证码图片
                 const refreshBtn = document.querySelector('.captcha-refresh');
@@ -4668,14 +4693,14 @@ async function _solveCaptchaImpl() {
                 scheduleRetry(1200); // 保底：如果 load 事件未触发，1.2秒后直接重试
             } else {
                 console.warn("NJU 助手：连续多次识别失败，已停止自动刷新，请手动点击\"刷新\"后重试。");
-                hideLoadingAnimation();
+                showCaptchaStatus('识别未完成，请刷新验证码后重试', 'error', 5000);
                 autoRefreshCount = 0;
                 isProgrammaticRefresh = false; // 重置，防止状态卡住导致手动刷新不生效
             }
         }
     } catch (err) {
         console.error("识别出错:", err);
-        hideLoadingAnimation();
+        showCaptchaStatus('识别暂时失败，正在重试...', 'error', 2600);
         scheduleRetry(2000); // 出错后也保底重试
     }
 }
