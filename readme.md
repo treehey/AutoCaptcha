@@ -65,21 +65,17 @@
 
 ## 🛠️ 安装指南
 
-本插件已发布到 Microsoft Edge Add-ons，也可以以“开发者模式”从源码安装。
+本插件已发布到 Microsoft Edge Add-ons。Chrome 或需要手动安装时，请使用 GitHub Release 提供的精简安装包，无需下载整个源码仓库。
 
 ### 从 Edge 商店安装
 
 访问 [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/hebfkinlcalfnmeeeaciaghoialpmnfp) 并点击获取。
 
-### 从源码安装
+### 从 GitHub 发布版安装（Chrome / 开发者模式）
 
-1.  **下载仓库**：将本 GitHub 仓库克隆或下载到本地：
-    ```bash
-    git clone [https://github.com/你的用户名/你的仓库名.git](https://github.com/你的用户名/你的仓库名.git)
-    ```
-    或直接点击 `Code` -> `Download ZIP` 下载。
+1.  **下载发布包**：打开 [GitHub Releases](https://github.com/treehey/AutoCaptcha/releases/latest)，在 `Assets` 中下载 `NJU-Login-Pro-v*.zip`。不要下载 `Source code`，它是完整仓库源码，不能作为安装包使用。
 
-2.  **解压文件**：如果下载的是 ZIP 文件，请将其解压到一个你容易找到的文件夹。
+2.  **解压发布包**：将下载的 ZIP 解压到一个固定文件夹；解压后的文件夹根目录应直接包含 `manifest.json`。
 
 3.  **打开 Chrome 扩展程序页面**：
     * 在 Chrome 浏览器中，访问 `chrome://extensions`。
@@ -90,7 +86,7 @@
 
 5.  **加载已解压的扩展程序**：
     * 点击左上角的 `加载已解压的扩展程序` 按钮。
-    * 选择你之前解压的插件文件夹 (`NJU-Login-Pro-main` 或你克隆的仓库文件夹)。
+    * 选择刚才解压的发布包文件夹。
 
 6.  **固定插件**：
     * 安装成功后，插件会出现在浏览器工具栏的拼图图标中。点击拼图图标，然后点击 `NJU Login Pro` 旁边的**图钉**图标，将其固定在工具栏上，方便快速访问。
