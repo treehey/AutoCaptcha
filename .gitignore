@@ -4,4 +4,5 @@ data/captcha-samples/**/login.html
 data/regression-results/
 data/recovered-captcha-answers-*/
 data/segmentation-experiments/
+data/click-captcha-experiments/
 scripts/__pycache__/

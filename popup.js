@@ -1,5 +1,6 @@
 const AUTH_URL = 'https://authserver.nju.edu.cn/';
 const GRAB_URL = 'https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do';
+const CLICK_CAPTCHA_SAMPLE_STORAGE_KEY = 'nju_click_captcha_samples_v1';
 
 const storageKeys = [
   'nju_user',
@@ -45,6 +46,13 @@ const els = {
   intervalGrid: document.getElementById('intervalGrid'),
   grabBtn: document.getElementById('grabBtn'),
   openGrabPageBtn: document.getElementById('openGrabPageBtn'),
+  clickCaptchaCaptureBadge: document.getElementById('clickCaptchaCaptureBadge'),
+  clickCaptchaCaptureTitle: document.getElementById('clickCaptchaCaptureTitle'),
+  clickCaptchaCaptureSub: document.getElementById('clickCaptchaCaptureSub'),
+  clickCaptchaSampleCount: document.getElementById('clickCaptchaSampleCount'),
+  clickCaptchaCaptureBtn: document.getElementById('clickCaptchaCaptureBtn'),
+  exportClickCaptchaBtn: document.getElementById('exportClickCaptchaBtn'),
+  discardClickCaptchaBtn: document.getElementById('discardClickCaptchaBtn'),
   grabStatus: document.getElementById('grabStatus'),
   copyLogBtn: document.getElementById('copyLogBtn'),
   clearLogBtn: document.getElementById('clearLogBtn'),
@@ -62,8 +70,11 @@ let initialCredentials = { user: '', pass: '' };
 let grabRunning = false;
 let grabConnected = false;
 let grabState = null;
+let clickCaptchaCaptureState = null;
+let clickCaptchaCaptureConnected = false;
 let toastTimer = null;
 let syncingGrab = false;
+let syncingClickCaptchaCapture = false;
 let previewRunning = false;
 
 function setVersion() {
@@ -193,6 +204,56 @@ function renderGrabControls() {
 
   els.grabBtn.textContent = '开始监控';
   els.grabBtn.disabled = courseCount === 0;
+}
+
+function renderClickCaptchaCaptureState() {
+  const state = clickCaptchaCaptureState;
+  const count = Number(state?.sampleCount || 0);
+  const max = Number(state?.maxSampleCount || 30);
+  const active = Boolean(state?.enabled);
+  const refreshing = Boolean(state?.refreshing);
+  const ready = Boolean(state?.ready);
+
+  els.clickCaptchaSampleCount.textContent = `${count} 条`;
+  els.exportClickCaptchaBtn.disabled = count === 0;
+  els.discardClickCaptchaBtn.disabled = count === 0;
+
+  if (!clickCaptchaCaptureConnected) {
+    setBadge(els.clickCaptchaCaptureBadge, '未连接', 'warning');
+    els.clickCaptchaCaptureTitle.textContent = '等待连接选课页面';
+    els.clickCaptchaCaptureSub.textContent = '打开选课页后可启用本地采样。';
+    els.clickCaptchaCaptureBtn.textContent = '开始采样';
+    els.clickCaptchaCaptureBtn.className = 'primary-btn';
+    els.clickCaptchaCaptureBtn.disabled = true;
+    return;
+  }
+
+  if (refreshing) {
+    setBadge(els.clickCaptchaCaptureBadge, '刷新中', 'info');
+    els.clickCaptchaCaptureTitle.textContent = '正在准备下一张验证码';
+    els.clickCaptchaCaptureSub.textContent = state.status || '等待页面刷新完成。';
+    els.clickCaptchaCaptureBtn.textContent = '刷新中...';
+    els.clickCaptchaCaptureBtn.className = 'secondary-btn';
+    els.clickCaptchaCaptureBtn.disabled = true;
+    return;
+  }
+
+  if (active) {
+    setBadge(els.clickCaptchaCaptureBadge, '采样中', 'success');
+    els.clickCaptchaCaptureTitle.textContent = `正在记录手动点击 ${state.pendingClicks || 0}/${state.expectedClicks || 4}`;
+    els.clickCaptchaCaptureSub.textContent = state.status || '请在紫色虚线框内正常完成验证码。';
+    els.clickCaptchaCaptureBtn.textContent = '停止采样';
+    els.clickCaptchaCaptureBtn.className = 'danger-btn';
+    els.clickCaptchaCaptureBtn.disabled = false;
+    return;
+  }
+
+  setBadge(els.clickCaptchaCaptureBadge, ready ? '就绪' : '待验证码', ready ? 'info' : 'warning');
+  els.clickCaptchaCaptureTitle.textContent = count >= max ? '请先导出当前样本' : '仅记录手动点击';
+  els.clickCaptchaCaptureSub.textContent = state?.status || '完成 4 次点击后自动保存并停止采样。';
+  els.clickCaptchaCaptureBtn.textContent = '开始采样';
+  els.clickCaptchaCaptureBtn.className = 'primary-btn';
+  els.clickCaptchaCaptureBtn.disabled = count >= max;
 }
 
 function setIntervalValue(value) {
@@ -354,6 +415,45 @@ async function syncGrabStatus() {
   syncingGrab = false;
 }
 
+async function syncClickCaptchaCaptureStatus() {
+  if (syncingClickCaptchaCapture) return;
+  syncingClickCaptchaCapture = true;
+  const result = await sendGrabMessage({ action: 'getClickCaptchaCaptureStatus' });
+  clickCaptchaCaptureConnected = result.connected;
+  clickCaptchaCaptureState = result.connected ? result.response?.state || null : null;
+  renderClickCaptchaCaptureState();
+  syncingClickCaptchaCapture = false;
+}
+
+function exportClickCaptchaSamples() {
+  chrome.storage.local.get([CLICK_CAPTCHA_SAMPLE_STORAGE_KEY], data => {
+    const samples = Array.isArray(data[CLICK_CAPTCHA_SAMPLE_STORAGE_KEY]) ? data[CLICK_CAPTCHA_SAMPLE_STORAGE_KEY] : [];
+    if (samples.length === 0) {
+      showToast('暂无可导出的样本');
+      return;
+    }
+
+    const payload = {
+      format: 'nju-click-captcha-samples/v1',
+      exportedAt: new Date().toISOString(),
+      expectedClicks: 4,
+      samples
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    anchor.href = url;
+    anchor.download = `nju-click-captcha-samples-${stamp}.json`;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`已导出 ${samples.length} 条样本`);
+  });
+}
+
 async function saveCredentials() {
   const settings = {
     nju_user: els.username.value,
@@ -380,7 +480,10 @@ function initTabs() {
       btn.classList.add('active');
       btn.setAttribute('aria-selected', 'true');
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-      if (btn.dataset.tab === 'grab') syncGrabStatus();
+      if (btn.dataset.tab === 'grab') {
+        syncGrabStatus();
+        syncClickCaptchaCaptureStatus();
+      }
     });
   });
 }
@@ -524,6 +627,36 @@ function initGrabEvents() {
     showToast('监控已启动');
   });
 
+  els.clickCaptchaCaptureBtn.addEventListener('click', async () => {
+    const enable = !clickCaptchaCaptureState?.enabled;
+    const result = await sendGrabMessage({ action: 'setClickCaptchaCaptureEnabled', enabled: enable });
+    if (!result.connected) {
+      clickCaptchaCaptureConnected = false;
+      clickCaptchaCaptureState = null;
+      renderClickCaptchaCaptureState();
+      showToast('请先打开选课页面');
+      return;
+    }
+    clickCaptchaCaptureConnected = true;
+    clickCaptchaCaptureState = result.response?.state || null;
+    renderClickCaptchaCaptureState();
+    showToast(enable ? (clickCaptchaCaptureState?.ready ? '采样已开启' : '未找到验证码图片') : '采样已停止');
+  });
+
+  els.exportClickCaptchaBtn.addEventListener('click', exportClickCaptchaSamples);
+
+  els.discardClickCaptchaBtn.addEventListener('click', async () => {
+    const result = await sendGrabMessage({ action: 'discardLastClickCaptchaSample' });
+    if (!result.connected) {
+      showToast('请先连接选课页面后操作');
+      return;
+    }
+    clickCaptchaCaptureConnected = true;
+    clickCaptchaCaptureState = result.response?.state || null;
+    renderClickCaptchaCaptureState();
+    showToast('已删除最近一条样本');
+  });
+
   els.clearLogBtn.addEventListener('click', () => {
     renderLogs([]);
     showToast('日志已清空');
@@ -565,6 +698,10 @@ chrome.runtime.onMessage.addListener(msg => {
   } else if (msg.action === 'grabStopped') {
     grabConnected = true;
     applyGrabSnapshot(msg.state);
+  } else if ((msg.action === 'clickCaptchaCaptureUpdate' || msg.action === 'clickCaptchaSampleSaved') && msg.state) {
+    clickCaptchaCaptureConnected = true;
+    clickCaptchaCaptureState = msg.state;
+    renderClickCaptchaCaptureState();
   }
 });
 
@@ -574,3 +711,4 @@ initSettings();
 initLoginEvents();
 initGrabEvents();
 syncOcrPreviewStatus();
+syncClickCaptchaCaptureStatus();

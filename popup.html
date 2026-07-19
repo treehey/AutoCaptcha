@@ -806,6 +806,29 @@
         </div>
       </div>
 
+      <div class="card">
+        <div class="section-head">
+          <div class="section-title">点击验证码采样</div>
+          <span class="badge warning" id="clickCaptchaCaptureBadge">未连接</span>
+        </div>
+        <div class="grab-summary">
+          <div>
+            <div class="summary-main" id="clickCaptchaCaptureTitle">仅记录手动点击</div>
+            <div class="summary-sub" id="clickCaptchaCaptureSub">完成 4 次点击后自动保存并停止采样。</div>
+          </div>
+          <span class="badge info" id="clickCaptchaSampleCount">0 条</span>
+        </div>
+        <div class="section-note">采样只保存在当前浏览器，导出后可离线导入项目；不会自动点击或上传图片。</div>
+        <div class="action-row">
+          <button class="primary-btn" id="clickCaptchaCaptureBtn" type="button" disabled>开始采样</button>
+          <button class="secondary-btn" id="exportClickCaptchaBtn" type="button" disabled>导出</button>
+        </div>
+        <div class="course-meta">
+          <span>验证码失败时可删除最近一条。</span>
+          <button class="tiny-btn" id="discardClickCaptchaBtn" type="button" disabled>删除最近</button>
+        </div>
+      </div>
+
       <div class="card log-card">
         <div class="log-head">
           <div class="section-title">运行日志</div>
