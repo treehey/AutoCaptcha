@@ -14,7 +14,7 @@ if (start < 0 || end < 0) {
 }
 
 const completionFlow = source.slice(start, end);
-if (!/await storageSet\(\{ \[CLICK_CAPTCHA_SAMPLE_STORAGE_KEY\]: samples \}\);[\s\S]*?clickCaptchaCapture\.enabled = false;[\s\S]*?refreshClickCaptchaAndResume\(id\)/.test(completionFlow)) {
+if (!/await storageSet\(\{[\s\S]*?CLICK_CAPTCHA_SAMPLE_COUNT_KEY[\s\S]*?\}\);[\s\S]*?clickCaptchaCapture\.enabled = false;[\s\S]*?refreshClickCaptchaAndResume\(id\)/.test(completionFlow)) {
   throw new Error('Saved samples must pause capture before refreshing and rearm only through the refresh flow.');
 }
 

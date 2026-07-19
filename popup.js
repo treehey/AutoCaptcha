@@ -1,6 +1,7 @@
 const AUTH_URL = 'https://authserver.nju.edu.cn/';
 const GRAB_URL = 'https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do';
-const CLICK_CAPTCHA_SAMPLE_STORAGE_KEY = 'nju_click_captcha_samples_v1';
+const CLICK_CAPTCHA_SAMPLE_COUNT_KEY = 'nju_click_captcha_v1_count';
+const CLICK_CAPTCHA_SAMPLE_KEY_PREFIX = 'nju_click_captcha_v1_';
 
 const storageKeys = [
   'nju_user',
@@ -53,6 +54,7 @@ const els = {
   clickCaptchaCaptureBtn: document.getElementById('clickCaptchaCaptureBtn'),
   exportClickCaptchaBtn: document.getElementById('exportClickCaptchaBtn'),
   discardClickCaptchaBtn: document.getElementById('discardClickCaptchaBtn'),
+  resetClickCaptchaBtn: document.getElementById('resetClickCaptchaBtn'),
   grabStatus: document.getElementById('grabStatus'),
   copyLogBtn: document.getElementById('copyLogBtn'),
   clearLogBtn: document.getElementById('clearLogBtn'),
@@ -217,6 +219,7 @@ function renderClickCaptchaCaptureState() {
   els.clickCaptchaSampleCount.textContent = `${count} 条`;
   els.exportClickCaptchaBtn.disabled = count === 0;
   els.discardClickCaptchaBtn.disabled = count === 0;
+  els.resetClickCaptchaBtn.disabled = count === 0;
 
   if (!clickCaptchaCaptureConnected) {
     setBadge(els.clickCaptchaCaptureBadge, '未连接', 'warning');
@@ -426,31 +429,47 @@ async function syncClickCaptchaCaptureStatus() {
 }
 
 function exportClickCaptchaSamples() {
-  chrome.storage.local.get([CLICK_CAPTCHA_SAMPLE_STORAGE_KEY], data => {
-    const samples = Array.isArray(data[CLICK_CAPTCHA_SAMPLE_STORAGE_KEY]) ? data[CLICK_CAPTCHA_SAMPLE_STORAGE_KEY] : [];
-    if (samples.length === 0) {
+  chrome.storage.local.get([CLICK_CAPTCHA_SAMPLE_COUNT_KEY], data => {
+    const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
+    if (count === 0) {
       showToast('暂无可导出的样本');
       return;
     }
 
-    const payload = {
-      format: 'nju-click-captcha-samples/v1',
-      exportedAt: new Date().toISOString(),
-      expectedClicks: 4,
-      samples
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    anchor.href = url;
-    anchor.download = `nju-click-captcha-samples-${stamp}.json`;
-    anchor.style.display = 'none';
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast(`已导出 ${samples.length} 条样本`);
+    const keys = Array.from({ length: count }, (_, i) =>
+      CLICK_CAPTCHA_SAMPLE_KEY_PREFIX + String(i + 1).padStart(4, '0'));
+    chrome.storage.local.get(keys, data => {
+      const samples = keys.map(k => data[k]).filter(Boolean);
+      if (samples.length === 0) {
+        showToast('暂无可导出的样本');
+        return;
+      }
+
+      const payload = {
+        format: 'nju-click-captcha-samples/v1',
+        exportedAt: new Date().toISOString(),
+        expectedClicks: 4,
+        samples
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      anchor.href = url;
+      anchor.download = `nju-click-captcha-samples-${stamp}.json`;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+      // 清除所有独立 key + 计数器
+      const allKeys = [...keys, CLICK_CAPTCHA_SAMPLE_COUNT_KEY];
+      chrome.storage.local.remove(allKeys, () => {
+        showToast(`已导出 ${samples.length} 条样本，计数已重置`);
+        syncClickCaptchaCaptureStatus();
+      });
+    });
   });
 }
 
@@ -655,6 +674,21 @@ function initGrabEvents() {
     clickCaptchaCaptureState = result.response?.state || null;
     renderClickCaptchaCaptureState();
     showToast('已删除最近一条样本');
+  });
+
+  els.resetClickCaptchaBtn.addEventListener('click', async () => {
+    // 先获取当前计数，构造所有要清除的 key
+    chrome.storage.local.get([CLICK_CAPTCHA_SAMPLE_COUNT_KEY], data => {
+      const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
+      const keys = Array.from({ length: count }, (_, i) =>
+        CLICK_CAPTCHA_SAMPLE_KEY_PREFIX + String(i + 1).padStart(4, '0'));
+      // 同时清除新格式 keys + 计数器 + 旧格式残留 key
+      const allKeys = [...keys, CLICK_CAPTCHA_SAMPLE_COUNT_KEY, 'nju_click_captcha_samples_v1'];
+      chrome.storage.local.remove(allKeys, () => {
+        showToast('采样数据已全部清除');
+        syncClickCaptchaCaptureStatus();
+      });
+    });
   });
 
   els.clearLogBtn.addEventListener('click', () => {

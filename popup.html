@@ -825,7 +825,10 @@
         </div>
         <div class="course-meta">
           <span>验证码失败时可删除最近一条。</span>
-          <button class="tiny-btn" id="discardClickCaptchaBtn" type="button" disabled>删除最近</button>
+          <div style="display:flex;gap:6px">
+            <button class="tiny-btn" id="discardClickCaptchaBtn" type="button" disabled>删除最近</button>
+            <button class="tiny-btn" id="resetClickCaptchaBtn" type="button" style="color:var(--danger);border-color:rgba(180,35,24,.22)">重置全部</button>
+          </div>
         </div>
       </div>
 

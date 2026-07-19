@@ -346,7 +346,8 @@ function stopGrab() {
 
 // ============ 点击式验证码离线采样 ============
 // 采样默认关闭。开启后仅旁路记录验证码原图和用户的手动点击，不会阻止、修改或代替页面点击。
-const CLICK_CAPTCHA_SAMPLE_STORAGE_KEY = 'nju_click_captcha_samples_v1';
+const CLICK_CAPTCHA_SAMPLE_COUNT_KEY = 'nju_click_captcha_v1_count';
+const CLICK_CAPTCHA_SAMPLE_KEY_PREFIX = 'nju_click_captcha_v1_';
 const CLICK_CAPTCHA_SAMPLE_MAX_COUNT = 30;
 const CLICK_CAPTCHA_EXPECTED_CLICKS = 4;
 const CLICK_CAPTCHA_REFRESH_SETTLE_MS = 450;
@@ -621,20 +622,38 @@ function storageSet(values) {
   });
 }
 
+function storageRemove(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.remove(keys, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 async function getClickCaptchaSamples() {
-  const data = await storageGet([CLICK_CAPTCHA_SAMPLE_STORAGE_KEY]);
-  return Array.isArray(data[CLICK_CAPTCHA_SAMPLE_STORAGE_KEY]) ? data[CLICK_CAPTCHA_SAMPLE_STORAGE_KEY] : [];
+  const data = await storageGet([CLICK_CAPTCHA_SAMPLE_COUNT_KEY]);
+  const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
+  if (count === 0) return [];
+  const keys = Array.from({ length: count }, (_, i) =>
+    CLICK_CAPTCHA_SAMPLE_KEY_PREFIX + String(i + 1).padStart(4, '0'));
+  const result = await storageGet(keys);
+  return keys.map(k => result[k]).filter(Boolean);
 }
 
 async function getClickCaptchaCaptureState() {
-  const samples = await getClickCaptchaSamples();
+  const data = await storageGet([CLICK_CAPTCHA_SAMPLE_COUNT_KEY]);
+  const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
   return {
     enabled: clickCaptchaCapture.enabled,
     refreshing: clickCaptchaCapture.refreshing,
     ready: Boolean(clickCaptchaCapture.target && document.contains(clickCaptchaCapture.target)),
     pendingClicks: clickCaptchaCapture.current?.clicks.length || 0,
     expectedClicks: CLICK_CAPTCHA_EXPECTED_CLICKS,
-    sampleCount: samples.length,
+    sampleCount: count,
     maxSampleCount: CLICK_CAPTCHA_SAMPLE_MAX_COUNT,
     status: clickCaptchaCapture.status,
     target: clickCaptchaCapture.target ? describeCaptureElement(clickCaptchaCapture.target) : null
@@ -651,8 +670,9 @@ async function saveClickCaptchaSample() {
   const current = clickCaptchaCapture.current;
   if (!current || current.clicks.length !== CLICK_CAPTCHA_EXPECTED_CLICKS) return;
 
-  const samples = await getClickCaptchaSamples();
-  if (samples.length >= CLICK_CAPTCHA_SAMPLE_MAX_COUNT) {
+  const data = await storageGet([CLICK_CAPTCHA_SAMPLE_COUNT_KEY]);
+  const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
+  if (count >= CLICK_CAPTCHA_SAMPLE_MAX_COUNT) {
     clickCaptchaCapture.status = `已达到 ${CLICK_CAPTCHA_SAMPLE_MAX_COUNT} 条上限，请先导出`;
     clickCaptchaCapture.current = null;
     clickCaptchaCapture.enabled = false;
@@ -661,15 +681,18 @@ async function saveClickCaptchaSample() {
     return;
   }
 
-  const id = String(samples.length + 1).padStart(4, '0');
-  samples.push({
-    id,
-    createdAt: new Date().toISOString(),
-    imageDataUrl: current.imageDataUrl,
-    image: current.image,
-    clicks: current.clicks
+  const id = String(count + 1).padStart(4, '0');
+  const key = CLICK_CAPTCHA_SAMPLE_KEY_PREFIX + id;
+  await storageSet({
+    [CLICK_CAPTCHA_SAMPLE_COUNT_KEY]: count + 1,
+    [key]: {
+      id,
+      createdAt: new Date().toISOString(),
+      imageDataUrl: current.imageDataUrl,
+      image: current.image,
+      clicks: current.clicks
+    }
   });
-  await storageSet({ [CLICK_CAPTCHA_SAMPLE_STORAGE_KEY]: samples });
   clickCaptchaCapture.current = null;
   clickCaptchaCapture.enabled = false;
   clickCaptchaCapture.refreshing = true;
@@ -717,10 +740,12 @@ async function setClickCaptchaCaptureEnabled(enabled) {
 }
 
 async function discardLastClickCaptchaSample() {
-  const samples = await getClickCaptchaSamples();
-  if (samples.length === 0) return await getClickCaptchaCaptureState();
-  samples.pop();
-  await storageSet({ [CLICK_CAPTCHA_SAMPLE_STORAGE_KEY]: samples });
+  const data = await storageGet([CLICK_CAPTCHA_SAMPLE_COUNT_KEY]);
+  const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
+  if (count === 0) return await getClickCaptchaCaptureState();
+  const key = CLICK_CAPTCHA_SAMPLE_KEY_PREFIX + String(count).padStart(4, '0');
+  await storageRemove([key]);
+  await storageSet({ [CLICK_CAPTCHA_SAMPLE_COUNT_KEY]: count - 1 });
   clickCaptchaCapture.status = '已删除最近一条样本';
   return await getClickCaptchaCaptureState();
 }
@@ -822,3 +847,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   return true; // 保持消息通道以支持异步sendResponse
 });
+
+// 迁移：清除旧版单 key 数组格式的残留数据（v5.0 之前的格式）
+storageRemove(['nju_click_captcha_samples_v1']).catch(() => {});
