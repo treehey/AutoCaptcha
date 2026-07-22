@@ -65,18 +65,48 @@ def candidate_zone(x):
     return 3
 
 
-def load_round(round_dir):
+def load_corrections(path):
+    if not path.exists():
+        return {}
+    corrections = json.loads(path.read_text(encoding="utf-8"))
+    if corrections.get("format") != "nju-click-captcha-corrections/v1":
+        raise ValueError(f"Unsupported corrections format: {path}")
+    return corrections.get("samples", {})
+
+
+def corrected_clicks(row, correction, sample_key):
+    recorded_clicks = row["clicks"]
+    if not correction:
+        return recorded_clicks, int(row.get("targetCount", len(recorded_clicks)))
+
+    selected_indexes = correction.get("selectedClickIndexes")
+    target_count = int(correction["targetCount"])
+    recorded_click_count = correction.get("recordedClickCount")
+    if recorded_click_count is not None and int(recorded_click_count) != len(recorded_clicks):
+        raise ValueError(f"{sample_key}: correction does not match the original recorded click count")
+    if not isinstance(selected_indexes, list) or len(selected_indexes) != target_count:
+        raise ValueError(f"{sample_key}: correction must select one click for each target")
+    if len(set(selected_indexes)) != len(selected_indexes):
+        raise ValueError(f"{sample_key}: correction selects a click more than once")
+    if any(not isinstance(index, int) or index < 0 or index >= len(recorded_clicks) for index in selected_indexes):
+        raise ValueError(f"{sample_key}: correction refers to an invalid recorded click")
+    return [recorded_clicks[index] for index in selected_indexes], target_count
+
+
+def load_round(round_dir, corrections):
     metadata = json.loads((round_dir / "metadata.json").read_text(encoding="utf-8"))
     samples = []
     for row in metadata["samples"]:
         image = np.asarray(Image.open(round_dir / row["image"]).convert("RGB"))
-        order = tuple(candidate_zone(click["x"]) for click in row["clicks"])
+        sample_key = f"{round_dir.name}/{row['id']}"
+        clicks, target_count = corrected_clicks(row, corrections.get(sample_key), sample_key)
+        order = tuple(candidate_zone(click["x"]) for click in clicks)
         declared_target_count = row.get("targetCount")
-        if declared_target_count is not None and int(declared_target_count) != len(order):
+        if declared_target_count is not None and not corrections.get(sample_key) and int(declared_target_count) != len(order):
             raise ValueError(
                 f"{round_dir.name}/{row['id']}: targetCount does not match recorded clicks"
             )
-        if len(order) not in TARGET_COUNTS or len(set(order)) != len(order):
+        if target_count != len(order) or len(order) not in TARGET_COUNTS or len(set(order)) != len(order):
             raise ValueError(
                 f"{round_dir.name}/{row['id']}: expected 3 or 4 non-repeating candidate clicks"
             )
@@ -537,6 +567,11 @@ def seed_everything(seed):
 def main():
     parser = argparse.ArgumentParser(description="Train a small click-captcha permutation student.")
     parser.add_argument("--data-dir", default="data/click-captcha-samples")
+    parser.add_argument(
+        "--corrections",
+        default="",
+        help="Optional correction manifest for legacy samples with extra captured clicks.",
+    )
     parser.add_argument("--train-rounds", default="001-006")
     parser.add_argument("--validation-rounds", default="007-008")
     parser.add_argument("--test-rounds", default="009-010")
@@ -590,7 +625,9 @@ def main():
     if len(set(all_rounds)) != len(all_rounds):
         raise ValueError("train, validation, and test rounds must not overlap")
     data_dir = Path(args.data_dir)
-    loaded = {round_name: load_round(data_dir / round_name) for round_name in all_rounds}
+    corrections_path = Path(args.corrections) if args.corrections else data_dir / "corrections.json"
+    corrections = load_corrections(corrections_path)
+    loaded = {round_name: load_round(data_dir / round_name, corrections) for round_name in all_rounds}
     splits = {
         "train": [sample for round_name in train_rounds for sample in loaded[round_name]],
         "validation": [sample for round_name in validation_rounds for sample in loaded[round_name]],
@@ -657,6 +694,7 @@ def main():
         "parameterCount": parameter_count,
         "bestEpoch": best_epoch,
         "splits": {"trainRounds": train_rounds, "validationRounds": validation_rounds, "testRounds": test_rounds},
+        "corrections": str(corrections_path) if corrections else None,
         "preprocess": {
             "candidateBackground": "train-median-top-region",
             "target": "inverted-grayscale",

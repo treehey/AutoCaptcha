@@ -1,0 +1,18 @@
+{
+  "format": "nju-click-captcha-corrections/v1",
+  "description": "Training-label corrections for samples captured before variable target counts were supported. Original metadata clicks remain unchanged.",
+  "samples": {
+    "round-007/0011": {
+      "targetCount": 3,
+      "recordedClickCount": 4,
+      "selectedClickIndexes": [0, 1, 2],
+      "note": "The final click was an extra click on a duplicate candidate caused by the legacy four-click sampler."
+    },
+    "round-008/0004": {
+      "targetCount": 3,
+      "recordedClickCount": 4,
+      "selectedClickIndexes": [0, 2, 3],
+      "note": "The second click was an extra click on a duplicate candidate caused by the legacy four-click sampler."
+    }
+  }
+}

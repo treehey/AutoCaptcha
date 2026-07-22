@@ -353,7 +353,9 @@ const CLICK_CAPTCHA_MIN_TARGET_COUNT = 3;
 const CLICK_CAPTCHA_MAX_TARGET_COUNT = 4;
 const CLICK_CAPTCHA_REFERENCE_WIDTH = 250;
 const CLICK_CAPTCHA_REFERENCE_HEIGHT = 120;
-const CLICK_CAPTCHA_TARGET_SLOTS = [[120, 134], [143, 157], [166, 180], [189, 203]];
+const CLICK_CAPTCHA_FOUR_TARGET_RIGHT_BRACKET = [211, 222];
+const CLICK_CAPTCHA_TARGET_TEXT_TOP = 101;
+const CLICK_CAPTCHA_TARGET_TEXT_BOTTOM = 119;
 const CLICK_CAPTCHA_REFRESH_SETTLE_MS = 450;
 const CLICK_CAPTCHA_REFRESH_TIMEOUT_MS = 4000;
 
@@ -579,23 +581,19 @@ function inferClickCaptchaTargetCountFromCanvas(canvas) {
   const context = canvas.getContext('2d', { willReadFrequently: true });
   const xScale = canvas.width / CLICK_CAPTCHA_REFERENCE_WIDTH;
   const yScale = canvas.height / CLICK_CAPTCHA_REFERENCE_HEIGHT;
-  const top = Math.floor(101 * yScale);
-  const bottom = Math.ceil(119 * yScale);
-  const visible = CLICK_CAPTCHA_TARGET_SLOTS.map(([left, right]) => {
-    const x0 = Math.floor(left * xScale);
-    const x1 = Math.ceil(right * xScale);
-    const pixels = context.getImageData(x0, top, Math.max(1, x1 - x0), Math.max(1, bottom - top)).data;
-    let brightPixels = 0;
-    for (let index = 0; index < pixels.length; index += 4) {
-      if (pixels[index] + pixels[index + 1] + pixels[index + 2] >= 480) brightPixels += 1;
-    }
-    return brightPixels >= 8;
-  });
-  const count = visible.filter(Boolean).length;
-  const contiguous = visible.every((isVisible, index) => isVisible === (index < count));
-  return contiguous && count >= CLICK_CAPTCHA_MIN_TARGET_COUNT && count <= CLICK_CAPTCHA_MAX_TARGET_COUNT
-    ? count
-    : CLICK_CAPTCHA_MAX_TARGET_COUNT;
+  const left = Math.floor(CLICK_CAPTCHA_FOUR_TARGET_RIGHT_BRACKET[0] * xScale);
+  const right = Math.ceil(CLICK_CAPTCHA_FOUR_TARGET_RIGHT_BRACKET[1] * xScale);
+  const top = Math.floor(CLICK_CAPTCHA_TARGET_TEXT_TOP * yScale);
+  const bottom = Math.ceil(CLICK_CAPTCHA_TARGET_TEXT_BOTTOM * yScale);
+  const pixels = context.getImageData(left, top, Math.max(1, right - left), Math.max(1, bottom - top)).data;
+  let brightPixels = 0;
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (pixels[index] + pixels[index + 1] + pixels[index + 2] >= 480) brightPixels += 1;
+  }
+
+  // The closing bracket sits at x≈213 for four targets and moves left for three.
+  // Counting glyph slots is unreliable because that moved bracket overlaps slot four.
+  return brightPixels >= 32 ? CLICK_CAPTCHA_MAX_TARGET_COUNT : CLICK_CAPTCHA_MIN_TARGET_COUNT;
 }
 
 function inferClickCaptchaTargetCount(element) {
