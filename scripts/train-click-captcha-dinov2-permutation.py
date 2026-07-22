@@ -346,12 +346,15 @@ def train(model, train_values, validation_values, validation_samples, args):
         generator=torch.Generator().manual_seed(args.seed),
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    fixed_epochs = args.fixed_epochs
+    if not fixed_epochs and validation_values is None:
+        raise ValueError("Validation data is required unless --fixed-epochs is set.")
     best_state = None
     best_key = None
-    best_epoch = 0
+    best_epoch = fixed_epochs
     wait = 0
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(1, fixed_epochs or args.epochs + 1):
         model.train()
         for targets, candidates, orders, labels, target_counts in loader:
             if args.feature_noise:
@@ -364,6 +367,11 @@ def train(model, train_values, validation_values, validation_samples, args):
             )
             loss.backward()
             optimizer.step()
+
+        if fixed_epochs:
+            if epoch == 1 or epoch % 10 == 0 or epoch == fixed_epochs:
+                print(f"  epoch {epoch:03d}: fixed-epoch training", flush=True)
+            continue
 
         validation = evaluate(model, validation_values, validation_samples, args.loss, args.hybrid_weight)
         key = (validation["exact"], -validation["loss"])
@@ -384,7 +392,8 @@ def train(model, train_values, validation_values, validation_samples, args):
             print(f"  early stop at epoch {epoch}; best validation epoch was {best_epoch}", flush=True)
             break
 
-    model.load_state_dict(best_state)
+    if best_state is not None:
+        model.load_state_dict(best_state)
     return best_epoch
 
 
@@ -397,7 +406,11 @@ def main():
         help="Optional correction manifest for legacy samples with extra captured clicks.",
     )
     parser.add_argument("--train-rounds", default="001-006")
-    parser.add_argument("--validation-rounds", default="007-008")
+    parser.add_argument(
+        "--validation-rounds",
+        default="007-008",
+        help="Validation rounds, or an empty string with --fixed-epochs for final refitting.",
+    )
     parser.add_argument("--test-rounds", default="009-010")
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--feature-batch-size", type=int, default=8)
@@ -414,6 +427,12 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--epochs", type=int, default=80)
+    parser.add_argument(
+        "--fixed-epochs",
+        type=int,
+        default=0,
+        help="Train exactly this many epochs without validation-based checkpoint selection.",
+    )
     parser.add_argument("--min-epochs", type=int, default=20)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--loss", choices=("bce", "permutation", "hybrid"), default="permutation")
@@ -439,8 +458,10 @@ def main():
     torch.set_num_interop_threads(args.threads)
     seed_everything(args.seed)
     train_rounds = parse_rounds(args.train_rounds)
-    validation_rounds = parse_rounds(args.validation_rounds)
+    validation_rounds = parse_rounds(args.validation_rounds) if args.validation_rounds.strip() else []
     test_rounds = parse_rounds(args.test_rounds)
+    if not validation_rounds and not args.fixed_epochs:
+        raise ValueError("--validation-rounds is required unless --fixed-epochs is set.")
     all_rounds = train_rounds + validation_rounds + test_rounds
     if len(set(all_rounds)) != len(all_rounds):
         raise ValueError("train, validation, and test rounds must not overlap")
@@ -451,9 +472,12 @@ def main():
     loaded = {round_name: load_round(data_dir / round_name, corrections) for round_name in all_rounds}
     splits = {
         "train": [sample for round_name in train_rounds for sample in loaded[round_name]],
-        "validation": [sample for round_name in validation_rounds for sample in loaded[round_name]],
         "test": [sample for round_name in test_rounds for sample in loaded[round_name]],
     }
+    if validation_rounds:
+        splits["validation"] = [
+            sample for round_name in validation_rounds for sample in loaded[round_name]
+        ]
     if args.max_samples_per_split:
         splits = {name: samples[:args.max_samples_per_split] for name, samples in splits.items()}
     background = make_background(splits["train"])
@@ -484,15 +508,22 @@ def main():
 
     model = PermutationMatcher(feature_dim, args.hidden, args.dropout)
     print(f"Training {sum(parameter.numel() for parameter in model.parameters())} head parameters ({args.loss} loss)...", flush=True)
-    best_epoch = train(model, values["train"], values["validation"], splits["validation"], args)
+    best_epoch = train(
+        model,
+        values["train"],
+        values.get("validation"),
+        splits.get("validation"),
+        args,
+    )
     metrics = {
         name: evaluate(model, values[name], samples, args.loss, args.hybrid_weight)
         for name, samples in splits.items()
     }
     print(
-        f"Final: train={metrics['train']['exact']}/{metrics['train']['total']} "
-        f"val={metrics['validation']['exact']}/{metrics['validation']['total']} "
-        f"test={metrics['test']['exact']}/{metrics['test']['total']}",
+        "Final: " + " ".join(
+            f"{name}={metrics[name]['exact']}/{metrics[name]['total']}"
+            for name in ("train", "validation", "test") if name in metrics
+        ),
         flush=True,
     )
 
@@ -534,6 +565,7 @@ def main():
             "weightDecay": args.weight_decay,
             "loss": args.loss,
             "hybridWeight": args.hybrid_weight,
+            "fixedEpochs": args.fixed_epochs or None,
         },
         "metrics": metrics,
     }

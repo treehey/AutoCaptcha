@@ -6,20 +6,23 @@ re-running DINOv2 feature extraction or changing the source samples.
 """
 
 import argparse
-import itertools
 import json
 from pathlib import Path
 
 import numpy as np
 
-
-PERMUTATIONS = tuple(itertools.permutations(range(4)))
+from click_captcha_dataset import assignments_for
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("reports", nargs="+", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--ensemble-output",
+        type=Path,
+        help="Optional DINO-compatible mean-matrix report for downstream fusion.",
+    )
     return parser.parse_args()
 
 
@@ -29,11 +32,11 @@ def softmax(values):
     return exponential / exponential.sum()
 
 
-def permutation_scores(matrix):
+def permutation_scores(matrix, target_count):
     return np.asarray([
         sum(matrix[target_index, candidate_index]
-            for target_index, candidate_index in enumerate(permutation))
-        for permutation in PERMUTATIONS
+            for target_index, candidate_index in enumerate(assignment))
+        for assignment in assignments_for(target_count)
     ])
 
 
@@ -49,6 +52,7 @@ def parse_rows(path):
                 matrix = [[float(value) for value in line.split()] for line in matrix]
             rows[key] = {
                 "expected": tuple(row["expected"]),
+                "targetCount": int(row.get("targetCount", len(row["expected"]))),
                 "matrix": np.asarray(matrix, dtype=np.float64),
             }
         splits[split_name] = rows
@@ -61,27 +65,36 @@ def summarize(rows_by_report, split_name, method):
     for key in sorted(shared):
         matrices = [rows[split_name][key]["matrix"] for rows in rows_by_report]
         expected = rows_by_report[0][split_name][key]["expected"]
-        per_model_scores = np.stack([permutation_scores(matrix) for matrix in matrices])
+        target_count = rows_by_report[0][split_name][key]["targetCount"]
+        if any(rows[split_name][key]["targetCount"] != target_count for rows in rows_by_report[1:]):
+            raise ValueError(f"Target count mismatch across reports for {key}")
+        per_model_scores = np.stack([
+            permutation_scores(matrix, target_count) for matrix in matrices
+        ])
         if method == "mean-matrix":
-            scores = permutation_scores(np.mean(matrices, axis=0))
+            matrix = np.mean(matrices, axis=0)
+            scores = permutation_scores(matrix, target_count)
             probabilities = softmax(scores)
         elif method == "mean-probability":
             probabilities = np.mean([softmax(scores) for scores in per_model_scores], axis=0)
             scores = probabilities
+            matrix = None
         else:
             raise ValueError(f"Unsupported method: {method}")
         ranking = np.argsort(scores)[::-1]
-        permutation = PERMUTATIONS[int(ranking[0])]
+        permutation = assignments_for(target_count)[int(ranking[0])]
         character_correct = sum(a == b for a, b in zip(permutation, expected))
         outcomes.append({
             "round": key[0],
             "id": key[1],
+            "targetCount": target_count,
             "expected": list(expected),
             "predicted": list(permutation),
             "correct": permutation == expected,
             "characterCorrect": character_correct,
             "topProbability": float(probabilities[ranking[0]]),
             "probabilityMargin": float(probabilities[ranking[0]] - probabilities[ranking[1]]),
+            "matrix": matrix.tolist() if matrix is not None else None,
         })
     total = len(outcomes)
     return {
@@ -89,8 +102,9 @@ def summarize(rows_by_report, split_name, method):
         "total": total,
         "exactAccuracy": sum(row["correct"] for row in outcomes) / total,
         "characterCorrect": sum(row["characterCorrect"] for row in outcomes),
-        "characterTotal": total * 4,
-        "characterAccuracy": sum(row["characterCorrect"] for row in outcomes) / (total * 4),
+        "characterTotal": sum(row["targetCount"] for row in outcomes),
+        "characterAccuracy": sum(row["characterCorrect"] for row in outcomes)
+        / sum(row["targetCount"] for row in outcomes),
         "rows": outcomes,
     }
 
@@ -150,6 +164,18 @@ def main():
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"Saved ensemble report to {args.output}")
+    if args.ensemble_output:
+        selected = methods["mean-matrix"]
+        payload = {
+            "format": "nju-click-captcha-dinov2-permutation-ensemble-report/v1",
+            "warning": "Development-only seed ensemble; not a final generalization claim.",
+            "metrics": selected,
+        }
+        args.ensemble_output.parent.mkdir(parents=True, exist_ok=True)
+        args.ensemble_output.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"Saved fusion-compatible ensemble report to {args.ensemble_output}")
 
 
 if __name__ == "__main__":

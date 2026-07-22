@@ -19,6 +19,11 @@ def parse_args():
     parser.add_argument("--ppocr-dir", type=Path, required=True)
     parser.add_argument("--ppocr-pattern", default="round-*-ppocr-residual-rot45.json")
     parser.add_argument("--weights", default="0,0.1,0.2,0.3,0.5,0.75,1,1.5,2")
+    parser.add_argument(
+        "--fixed-weight",
+        type=float,
+        help="Use a preselected auxiliary weight without performing validation selection.",
+    )
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -38,10 +43,28 @@ def standardize(scores):
     return (scores - scores.mean()) / spread
 
 
+def softmax(scores):
+    shifted = scores - np.max(scores)
+    values = np.exp(shifted)
+    return values / values.sum()
+
+
+def subset_metrics(rows):
+    total = len(rows)
+    exact = sum(row["correct"] for row in rows)
+    return {
+        "exact": exact,
+        "total": total,
+        "exactAccuracy": exact / total if total else None,
+    }
+
+
 def dino_rows(path):
     report = json.loads(path.read_text(encoding="utf-8"))
     rows = {}
     for split in ("validation", "test"):
+        if split not in report["metrics"]:
+            continue
         for row in report["metrics"][split]["rows"]:
             matrix = row["matrix"]
             if matrix and isinstance(matrix[0], str):
@@ -79,7 +102,9 @@ def evaluate(rows, ppo_rows, weight):
         assignments = assignments_for(target_count)
         dino_prediction = assignments[int(np.argmax(dino))]
         scores = standardize(dino) + weight * standardize(ppo)
-        prediction = assignments[int(np.argmax(scores))]
+        ranking = np.argsort(scores)[::-1]
+        probabilities = softmax(scores)
+        prediction = assignments[int(ranking[0])]
         output.append({
             "round": key[0],
             "id": key[1],
@@ -89,6 +114,9 @@ def evaluate(rows, ppo_rows, weight):
             "predicted": list(prediction),
             "dinoCorrect": dino_prediction == row["expected"],
             "correct": prediction == row["expected"],
+            "fusionTopProbability": float(probabilities[ranking[0]]),
+            "fusionProbabilityMargin": float(probabilities[ranking[0]] - probabilities[ranking[1]]),
+            "fusionScoreMargin": float(scores[ranking[0]] - scores[ranking[1]]),
         })
     exact = sum(row["correct"] for row in output)
     return {
@@ -97,6 +125,12 @@ def evaluate(rows, ppo_rows, weight):
         "exactAccuracy": exact / len(output),
         "changedCorrect": sum(not row["dinoCorrect"] and row["correct"] for row in output),
         "changedWrong": sum(row["dinoCorrect"] and not row["correct"] for row in output),
+        "byTargetCount": {
+            str(target_count): subset_metrics([
+                row for row in output if row["targetCount"] == target_count
+            ])
+            for target_count in sorted({row["targetCount"] for row in output})
+        },
         "rows": output,
     }
 
@@ -115,10 +149,18 @@ def main():
     missing = set(dino).difference(ppo)
     if missing:
         raise ValueError(f"Missing PP-OCR rows for {len(missing)} DINO rows, e.g. {sorted(missing)[:3]}")
+    split_names = tuple(split for split in ("validation", "test") if any(
+        row["split"] == split for row in dino.values()
+    ))
+    if not split_names:
+        raise ValueError("The DINO report has no validation or test rows.")
+    if args.fixed_weight is None and "validation" not in split_names:
+        raise ValueError("A validation split is required unless --fixed-weight is set.")
     splits = {
         split: {key: row for key, row in dino.items() if row["split"] == split}
-        for split in ("validation", "test")
+        for split in split_names
     }
+    weights = (args.fixed_weight,) if args.fixed_weight is not None else weights
     grid = {
         str(weight): {
             split: evaluate(rows, ppo, weight)
@@ -126,7 +168,7 @@ def main():
         }
         for weight in weights
     }
-    best_weight = max(
+    best_weight = args.fixed_weight if args.fixed_weight is not None else max(
         weights,
         key=lambda weight: (
             grid[str(weight)]["validation"]["exactAccuracy"],
@@ -137,11 +179,11 @@ def main():
         "format": "nju-click-captcha-fusion-report/v1",
         "dinoReport": str(args.dino_report),
         "ppocrPattern": args.ppocr_pattern,
-        "selectionSplit": "validation",
+        "selectionSplit": "fixed" if args.fixed_weight is not None else "validation",
         "selectedWeight": best_weight,
         "selected": {
             split: grid[str(best_weight)][split]
-            for split in ("validation", "test")
+            for split in split_names
         },
         "grid": {
             weight: {
