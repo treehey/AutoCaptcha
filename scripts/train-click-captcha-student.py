@@ -20,6 +20,12 @@ import torch.nn as nn
 import torch.nn.functional as functional
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
+from torchvision.models import (
+    EfficientNet_B0_Weights,
+    MobileNet_V3_Small_Weights,
+    efficientnet_b0,
+    mobilenet_v3_small,
+)
 
 from click_captcha_dataset import (
     ASSIGNMENTS_BY_TARGET_COUNT,
@@ -325,6 +331,175 @@ class LocalStudentPermutationMatcher(nn.Module):
         return self.pair_head(values).squeeze(-1).max(dim=3).values
 
 
+class MobileGlyphEncoder(nn.Module):
+    def __init__(self, pretrained=True):
+        super().__init__()
+        weights = MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
+        network = mobilenet_v3_small(weights=weights)
+        self.backbone = network.features
+        self.register_buffer("image_mean", torch.tensor((0.485, 0.456, 0.406))[None, :, None, None])
+        self.register_buffer("image_std", torch.tensor((0.229, 0.224, 0.225))[None, :, None, None])
+
+    def forward(self, values):
+        values = values.repeat(1, 3, 1, 1)
+        values = (values - self.image_mean) / self.image_std
+        values = self.backbone(values)
+        return functional.adaptive_avg_pool2d(values, 1).flatten(1)
+
+
+class MobileFeaturePermutationMatcher(nn.Module):
+    def __init__(self, embedding_dim=96, pair_hidden=128):
+        super().__init__()
+        self.projection = nn.Linear(576, embedding_dim)
+        self.pair_head = nn.Sequential(
+            nn.Linear(embedding_dim * 4, pair_hidden),
+            nn.LayerNorm(pair_hidden),
+            nn.SiLU(),
+            nn.Linear(pair_hidden, 1),
+        )
+
+    def forward(self, targets, candidates):
+        target_values = functional.normalize(self.projection(targets), dim=-1)
+        candidate_values = functional.normalize(self.projection(candidates), dim=-1)
+        rotation_count = candidate_values.shape[2]
+        target_pairs = target_values[:, :, None, None, :].expand(-1, -1, 4, rotation_count, -1)
+        candidate_pairs = candidate_values[:, None, :, :, :].expand(-1, 4, -1, -1, -1)
+        values = torch.cat((
+            target_pairs,
+            candidate_pairs,
+            torch.abs(target_pairs - candidate_pairs),
+            target_pairs * candidate_pairs,
+        ), dim=4)
+        return self.pair_head(values).squeeze(4).max(dim=3).values
+
+
+class MobileStudentPermutationMatcher(nn.Module):
+    """Use a pretrained mobile backbone while keeping the pair head category-agnostic."""
+
+    def __init__(self, embedding_dim=96, pair_hidden=128, pretrained=True):
+        super().__init__()
+        self.encoder = MobileGlyphEncoder(pretrained=pretrained)
+        self.matcher = MobileFeaturePermutationMatcher(embedding_dim, pair_hidden)
+
+    def forward(self, targets, candidates):
+        batch_size, target_count = targets.shape[:2]
+        rotation_count = candidates.shape[2]
+        target_values = self.encoder(targets.reshape(-1, *targets.shape[2:]))
+        target_values = target_values.reshape(batch_size, target_count, -1)
+        candidate_values = self.encoder(candidates.reshape(-1, *candidates.shape[3:]))
+        candidate_values = candidate_values.reshape(batch_size, 4, rotation_count, -1)
+        return self.matcher(target_values, candidate_values)
+
+
+class MobilePrefixEncoder(nn.Module):
+    def __init__(self, prefix):
+        super().__init__()
+        self.prefix = prefix
+        self.register_buffer("image_mean", torch.tensor((0.485, 0.456, 0.406))[None, :, None, None])
+        self.register_buffer("image_std", torch.tensor((0.229, 0.224, 0.225))[None, :, None, None])
+
+    def forward(self, values):
+        values = values.repeat(1, 3, 1, 1)
+        values = (values - self.image_mean) / self.image_std
+        return self.prefix(values)
+
+
+class MobileTailPermutationMatcher(nn.Module):
+    def __init__(self, tail, embedding_dim=96, pair_hidden=128):
+        super().__init__()
+        self.tail = tail
+        self.matcher = MobileFeaturePermutationMatcher(embedding_dim, pair_hidden)
+
+    def encode(self, values):
+        values = self.tail(values)
+        return functional.adaptive_avg_pool2d(values, 1).flatten(1)
+
+    def forward(self, targets, candidates):
+        batch_size, target_count = targets.shape[:2]
+        rotation_count = candidates.shape[2]
+        target_values = self.encode(targets.reshape(-1, *targets.shape[2:]))
+        target_values = target_values.reshape(batch_size, target_count, -1)
+        candidate_values = self.encode(candidates.reshape(-1, *candidates.shape[3:]))
+        candidate_values = candidate_values.reshape(batch_size, 4, rotation_count, -1)
+        return self.matcher(target_values, candidate_values)
+
+
+class MobileLocalFeaturePermutationMatcher(nn.Module):
+    """Compare mid-level mobile features without discarding their stroke layout."""
+
+    def __init__(self, input_channels, embedding_dim=64, pair_hidden=64):
+        super().__init__()
+        self.target_projection = nn.Conv2d(input_channels, embedding_dim, 1)
+        self.candidate_projection = nn.Conv2d(input_channels, embedding_dim, 1)
+        self.pair_head = nn.Sequential(
+            nn.Linear(4, pair_hidden),
+            nn.LayerNorm(pair_hidden),
+            nn.SiLU(),
+            nn.Linear(pair_hidden, 1),
+        )
+
+    def forward(self, targets, candidates):
+        batch_size, target_count = targets.shape[:2]
+        rotation_count = candidates.shape[2]
+        target_values = self.target_projection(targets.reshape(-1, *targets.shape[2:]))
+        candidate_values = self.candidate_projection(candidates.reshape(-1, *candidates.shape[3:]))
+        channels, height, width = target_values.shape[1:]
+        token_count = height * width
+        target_values = functional.normalize(target_values, dim=1)
+        candidate_values = functional.normalize(candidate_values, dim=1)
+        target_tokens = target_values.reshape(batch_size, target_count, channels, token_count)
+        target_tokens = target_tokens.permute(0, 1, 3, 2)
+        candidate_tokens = candidate_values.reshape(batch_size, 4, rotation_count, channels, token_count)
+        candidate_tokens = candidate_tokens.permute(0, 1, 2, 4, 3)
+        similarities = torch.einsum("btpc,bkrqc->btkrpq", target_tokens, candidate_tokens)
+        target_score = similarities.max(dim=-1).values.mean(dim=-1)
+        candidate_score = similarities.max(dim=-2).values.mean(dim=-1)
+        aligned_score = similarities.diagonal(dim1=-2, dim2=-1).mean(dim=-1)
+        target_global = functional.normalize(target_tokens.mean(dim=2), dim=-1)
+        candidate_global = functional.normalize(candidate_tokens.mean(dim=3), dim=-1)
+        global_score = torch.einsum("btc,bkrc->btkr", target_global, candidate_global)
+        values = torch.stack((target_score, candidate_score, aligned_score, global_score), dim=-1)
+        return self.pair_head(values).squeeze(-1).max(dim=3).values
+
+
+@torch.no_grad()
+def encode_mobile_values(encoder, values, batch_size):
+    targets, candidates, *remaining = values
+
+    def encode(glyphs, leading_shape):
+        flat = glyphs.reshape(-1, *glyphs.shape[-3:])
+        encoded = torch.cat([
+            encoder(flat[start:start + batch_size])
+            for start in range(0, len(flat), batch_size)
+        ])
+        return encoded.reshape(*leading_shape, encoded.shape[-1])
+
+    encoder.eval()
+    target_features = encode(targets, targets.shape[:2])
+    candidate_features = encode(candidates, candidates.shape[:3])
+    return (target_features, candidate_features, *remaining)
+
+
+@torch.no_grad()
+def encode_mobile_prefix_values(encoder, values, batch_size):
+    targets, candidates, *remaining = values
+
+    def encode(glyphs, leading_shape):
+        flat = glyphs.reshape(-1, *glyphs.shape[-3:])
+        encoded = torch.cat([
+            encoder(flat[start:start + batch_size])
+            for start in range(0, len(flat), batch_size)
+        ])
+        return encoded.reshape(*leading_shape, *encoded.shape[1:])
+
+    encoder.eval()
+    return (
+        encode(targets, targets.shape[:2]),
+        encode(candidates, candidates.shape[:3]),
+        *remaining,
+    )
+
+
 def calculate_loss(matrix, orders, target_counts, labels, teacher, args):
     pair_labels = torch.zeros_like(matrix)
     valid_rows = torch.arange(4, device=matrix.device)[None, :] < target_counts[:, None]
@@ -380,7 +555,10 @@ def evaluate(model, values, samples, teacher, args):
     targets, candidates, orders, target_counts, labels, boxes = values
     started = time.perf_counter()
     model.eval()
-    matrix = model(targets, candidates)
+    matrix = torch.cat([
+        model(targets[start:start + args.eval_batch_size], candidates[start:start + args.eval_batch_size])
+        for start in range(0, len(targets), args.eval_batch_size)
+    ])
     elapsed_ms = (time.perf_counter() - started) * 1000
     total_loss, order_ce, pair_bce, distillation = calculate_loss(
         matrix, orders, target_counts, labels, teacher, args
@@ -510,11 +688,30 @@ def main():
     parser.add_argument("--local-grid", type=int, default=4)
     parser.add_argument(
         "--matcher",
-        choices=("global", "local-chamfer"),
+        choices=(
+            "global", "local-chamfer", "mobilenet-v3-small", "mobilenet-local", "efficientnet-local",
+        ),
         default="global",
-        help="Global pooled baseline or foreground-aware local token matcher.",
+        help="Small CNN baselines or an ImageNet-pretrained mobile matcher.",
     )
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--eval-batch-size", type=int, default=32)
+    parser.add_argument(
+        "--freeze-mobile-backbone",
+        action="store_true",
+        help="Cache pretrained MobileNet features and train only the projection and pair head.",
+    )
+    parser.add_argument(
+        "--mobile-cache-cut",
+        type=int,
+        default=0,
+        help="Cache MobileNet blocks before this index and fine-tune the remaining blocks.",
+    )
+    parser.add_argument(
+        "--mobile-feature-cache",
+        default="",
+        help="Optional reusable cache for frozen MobileNet prefix activations.",
+    )
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--input-noise", type=float, default=0.02)
@@ -560,21 +757,91 @@ def main():
     background = make_candidate_background(splits["train"])
     values = {name: build_split_tensors(samples, background, args) for name, samples in splits.items()}
     teachers = {
-        name: teacher_probabilities(
-            samples,
-            args.teacher_dino_report,
-            args.teacher_ppocr_dir,
-            args.teacher_ppocr_pattern,
-            args.teacher_weight,
-            args.teacher_temperature,
+        name: (
+            teacher_probabilities(
+                samples,
+                args.teacher_dino_report,
+                args.teacher_ppocr_dir,
+                args.teacher_ppocr_pattern,
+                args.teacher_weight,
+                args.teacher_temperature,
+            )
+            if name != "test" else None
         )
         for name, samples in splits.items()
     }
-    model = (
-        LocalStudentPermutationMatcher(args.embedding_dim, args.pair_hidden, args.local_grid)
-        if args.matcher == "local-chamfer"
-        else StudentPermutationMatcher(args.embedding_dim, args.pair_hidden)
-    )
+    mobile_encoder = None
+    deployed_parameter_count = None
+    if args.matcher == "local-chamfer":
+        model = LocalStudentPermutationMatcher(args.embedding_dim, args.pair_hidden, args.local_grid)
+    elif args.matcher in ("mobilenet-v3-small", "mobilenet-local", "efficientnet-local"):
+        if args.matcher in ("mobilenet-local", "efficientnet-local") and not args.mobile_cache_cut:
+            raise ValueError(f"{args.matcher} requires --mobile-cache-cut")
+        if args.freeze_mobile_backbone and args.mobile_cache_cut:
+            raise ValueError("Choose either --freeze-mobile-backbone or --mobile-cache-cut")
+        if args.mobile_cache_cut:
+            network = (
+                efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
+                if args.matcher == "efficientnet-local"
+                else mobilenet_v3_small(weights=MobileNet_V3_Small_Weights.DEFAULT)
+            )
+            if args.mobile_cache_cut < 1 or args.mobile_cache_cut >= len(network.features):
+                raise ValueError("--mobile-cache-cut must leave at least one trainable MobileNet block")
+            mobile_encoder = MobilePrefixEncoder(network.features[:args.mobile_cache_cut])
+            cache_key = {
+                "format": "nju-click-captcha-mobile-prefix/v1",
+                "backbone": args.matcher,
+                "trainRounds": train_rounds,
+                "validationRounds": validation_rounds,
+                "testRounds": test_rounds,
+                "inputSize": args.input_size,
+                "foregroundThreshold": args.foreground_threshold,
+                "residualGain": args.residual_gain,
+                "candidateRotations": args.candidate_rotations,
+                "mobileCacheCut": args.mobile_cache_cut,
+            }
+            cache_path = Path(args.mobile_feature_cache) if args.mobile_feature_cache else None
+            cached = torch.load(cache_path, map_location="cpu", weights_only=False) if cache_path and cache_path.exists() else None
+            if cached and cached.get("key") == cache_key:
+                values = cached["values"]
+                print(f"Loaded mobile prefix features from {cache_path}")
+            else:
+                values = {
+                    name: encode_mobile_prefix_values(mobile_encoder, split_values, args.eval_batch_size)
+                    for name, split_values in values.items()
+                }
+                if cache_path:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save({"key": cache_key, "values": values}, cache_path)
+                    print(f"Cached mobile prefix features at {cache_path}")
+            if args.matcher in ("mobilenet-local", "efficientnet-local"):
+                input_channels = values["train"][0].shape[-3]
+                model = MobileLocalFeaturePermutationMatcher(
+                    input_channels, args.embedding_dim, args.pair_hidden
+                )
+            else:
+                model = MobileTailPermutationMatcher(
+                    network.features[args.mobile_cache_cut:], args.embedding_dim, args.pair_hidden
+                )
+            deployed_parameter_count = (
+                sum(parameter.numel() for parameter in mobile_encoder.parameters())
+                + sum(parameter.numel() for parameter in model.parameters())
+            )
+        elif args.freeze_mobile_backbone:
+            mobile_encoder = MobileGlyphEncoder(pretrained=True)
+            values = {
+                name: encode_mobile_values(mobile_encoder, split_values, args.eval_batch_size)
+                for name, split_values in values.items()
+            }
+            model = MobileFeaturePermutationMatcher(args.embedding_dim, args.pair_hidden)
+            deployed_parameter_count = (
+                sum(parameter.numel() for parameter in mobile_encoder.parameters())
+                + sum(parameter.numel() for parameter in model.parameters())
+            )
+        else:
+            model = MobileStudentPermutationMatcher(args.embedding_dim, args.pair_hidden, pretrained=True)
+    else:
+        model = StudentPermutationMatcher(args.embedding_dim, args.pair_hidden)
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
     print(f"Training {parameter_count} student parameters...")
     best_epoch = train(
@@ -600,13 +867,16 @@ def main():
     torch.save({
         "format": "nju-click-captcha-student-checkpoint/v1",
         "stateDict": model.state_dict(),
+        "backboneStateDict": mobile_encoder.state_dict() if mobile_encoder is not None else None,
         "inputSize": args.input_size,
         "foregroundThreshold": args.foreground_threshold,
         "residualGain": args.residual_gain,
+        "candidateRotations": args.candidate_rotations,
         "embeddingDim": args.embedding_dim,
         "pairHidden": args.pair_hidden,
         "matcher": args.matcher,
         "localGrid": args.local_grid if args.matcher == "local-chamfer" else None,
+        "mobileCacheCut": args.mobile_cache_cut,
         "bestEpoch": best_epoch,
     }, checkpoint)
     report = {
@@ -614,6 +884,7 @@ def main():
         "warning": "round-009/010 were previously used during development and are not a final holdout.",
         "checkpoint": str(checkpoint),
         "parameterCount": parameter_count,
+        "deployedParameterCount": deployed_parameter_count or parameter_count,
         "bestEpoch": best_epoch,
         "splits": {"trainRounds": train_rounds, "validationRounds": validation_rounds, "testRounds": test_rounds},
         "corrections": str(corrections_path) if corrections else None,
@@ -630,6 +901,8 @@ def main():
             "embeddingDim": args.embedding_dim,
             "pairHidden": args.pair_hidden,
             "matcher": args.matcher,
+            "frozenMobileBackbone": args.freeze_mobile_backbone,
+            "mobileCacheCut": args.mobile_cache_cut,
             "localGrid": args.local_grid if args.matcher == "local-chamfer" else None,
             "pairBceWeight": args.pair_bce_weight,
             "distillWeight": args.distill_weight,
