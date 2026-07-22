@@ -21,6 +21,13 @@ import torch.nn.functional as functional
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
 
+from click_captcha_dataset import (
+    assignment_index,
+    assignments_for,
+    load_corrections,
+    load_round,
+)
+
 
 REPORT_FORMAT = "nju-click-captcha-dinov2-permutation-report/v1"
 CACHE_FORMAT = "nju-click-captcha-dinov2-cls-cache/v1"
@@ -29,8 +36,6 @@ CANDIDATE_SLOTS = ((0, 58), (58, 128), (128, 190), (190, 250))
 TARGET_TOP = 101
 TARGET_BOTTOM = 119
 SCENE_HEIGHT = 100
-PERMUTATIONS = tuple(itertools.permutations(range(4)))
-PERMUTATION_INDEX = {permutation: index for index, permutation in enumerate(PERMUTATIONS)}
 
 
 def parse_rounds(value):
@@ -47,33 +52,6 @@ def parse_rounds(value):
     if not rounds:
         raise ValueError("At least one round is required.")
     return rounds
-
-
-def candidate_zone(x):
-    if x < 58:
-        return 0
-    if x < 128:
-        return 1
-    if x < 190:
-        return 2
-    return 3
-
-
-def load_round(round_dir):
-    metadata = json.loads((round_dir / "metadata.json").read_text(encoding="utf-8"))
-    samples = []
-    for row in metadata["samples"]:
-        image = np.asarray(Image.open(round_dir / row["image"]).convert("RGB"))
-        order = tuple(candidate_zone(click["x"]) for click in row["clicks"])
-        if sorted(order) != [0, 1, 2, 3]:
-            raise ValueError(f"{round_dir.name}/{row['id']}: click positions must form a permutation")
-        samples.append({
-            "round": round_dir.name,
-            "id": row["id"],
-            "image": image,
-            "order": order,
-        })
-    return samples
 
 
 def fingerprint(samples):
@@ -123,7 +101,7 @@ def background_subtracted_crop(
 def crop_records(samples, input_size, mean, std, preprocess, background, residual_gain):
     for sample in samples:
         image = sample["image"]
-        for index, (left, right) in enumerate(TARGET_SLOTS):
+        for index, (left, right) in enumerate(TARGET_SLOTS[:sample["targetCount"]]):
             if preprocess == "full-background-residual":
                 value = background_subtracted_crop(
                     image,
@@ -190,7 +168,7 @@ def load_or_extract_features(
     features = {}
     pending_keys = []
     pending_values = []
-    total = len(samples) * 8
+    total = sum(4 + sample["targetCount"] for sample in samples)
     completed = 0
     input_size = config["input_size"][1]
     mean = np.asarray(config["mean"], dtype=np.float32).reshape(1, 1, 3)
@@ -232,17 +210,23 @@ def split_tensors(features, samples):
     candidates = []
     orders = []
     permutation_labels = []
+    target_counts = []
     for sample in samples:
         prefix = (sample["round"], sample["id"])
-        targets.append(torch.stack([features[prefix + ("target", index)] for index in range(4)]))
+        target_count = sample["targetCount"]
+        glyphs = [features[prefix + ("target", index)] for index in range(target_count)]
+        glyphs.extend(torch.zeros_like(glyphs[0]) for _ in range(4 - target_count))
+        targets.append(torch.stack(glyphs))
         candidates.append(torch.stack([features[prefix + ("candidate", index)] for index in range(4)]))
-        orders.append(sample["order"])
-        permutation_labels.append(PERMUTATION_INDEX[sample["order"]])
+        orders.append(sample["order"] + (0,) * (4 - target_count))
+        permutation_labels.append(assignment_index(sample["order"]))
+        target_counts.append(target_count)
     return (
         torch.stack(targets),
         torch.stack(candidates),
         torch.tensor(orders, dtype=torch.long),
         torch.tensor(permutation_labels, dtype=torch.long),
+        torch.tensor(target_counts, dtype=torch.long),
     )
 
 
@@ -269,18 +253,27 @@ class PermutationMatcher(nn.Module):
         return self.head(paired).squeeze(3)
 
 
-def permutation_logits(matrix):
+def permutation_logits(matrix, target_counts):
     return torch.stack([
-        matrix[:, tuple(range(4)), permutation].sum(dim=1)
-        for permutation in PERMUTATIONS
-    ], dim=1)
+        torch.stack([
+            matrix[index, tuple(range(int(count))), assignment].sum()
+            for assignment in assignments_for(int(count))
+        ])
+        for index, count in enumerate(target_counts.tolist())
+    ])
 
 
-def matcher_loss(matrix, orders, permutation_labels, mode, hybrid_weight):
+def matcher_loss(matrix, orders, permutation_labels, target_counts, mode, hybrid_weight):
     pair_labels = torch.zeros_like(matrix)
-    pair_labels.scatter_(2, orders[:, :, None], 1.0)
-    bce = functional.binary_cross_entropy_with_logits(matrix, pair_labels)
-    permutation = functional.cross_entropy(permutation_logits(matrix), permutation_labels)
+    pair_mask = torch.zeros_like(matrix)
+    for index, count in enumerate(target_counts.tolist()):
+        pair_labels[index, tuple(range(int(count))), orders[index, :int(count)]] = 1.0
+        pair_mask[index, :int(count), :] = 1.0
+    bce = functional.binary_cross_entropy_with_logits(
+        matrix, pair_labels, reduction="none"
+    )
+    bce = (bce * pair_mask).sum() / pair_mask.sum()
+    permutation = functional.cross_entropy(permutation_logits(matrix, target_counts), permutation_labels)
     if mode == "bce":
         return bce, bce, permutation
     if mode == "permutation":
@@ -290,21 +283,21 @@ def matcher_loss(matrix, orders, permutation_labels, mode, hybrid_weight):
 
 @torch.no_grad()
 def evaluate(model, values, samples, loss_mode, hybrid_weight):
-    targets, candidates, orders, permutation_labels = values
+    targets, candidates, orders, permutation_labels, target_counts = values
     model.eval()
     matrix = model(targets, candidates)
     total_loss, bce_loss, order_loss = matcher_loss(
-        matrix, orders, permutation_labels, loss_mode, hybrid_weight
+        matrix, orders, permutation_labels, target_counts, loss_mode, hybrid_weight
     )
     scores = matrix.cpu().numpy()
-    order_values = permutation_logits(matrix).cpu()
+    order_values = permutation_logits(matrix, target_counts).cpu()
     probabilities = torch.softmax(order_values, dim=1).numpy()
     exact = 0
     characters = 0
     rows = []
     for index, sample in enumerate(samples):
         ranking = np.argsort(order_values[index].numpy())[::-1]
-        predicted = PERMUTATIONS[int(ranking[0])]
+        predicted = assignments_for(sample["targetCount"])[int(ranking[0])]
         expected = sample["order"]
         correct = tuple(predicted) == tuple(expected)
         exact += correct
@@ -313,6 +306,7 @@ def evaluate(model, values, samples, loss_mode, hybrid_weight):
         rows.append({
             "round": sample["round"],
             "id": sample["id"],
+            "targetCount": sample["targetCount"],
             "expected": list(expected),
             "predicted": list(predicted),
             "correct": correct,
@@ -327,8 +321,8 @@ def evaluate(model, values, samples, loss_mode, hybrid_weight):
         "total": len(samples),
         "exactAccuracy": round(exact / len(samples), 6),
         "characterCorrect": characters,
-        "characterTotal": len(samples) * 4,
-        "characterAccuracy": round(characters / (len(samples) * 4), 6),
+        "characterTotal": sum(sample["targetCount"] for sample in samples),
+        "characterAccuracy": round(characters / sum(sample["targetCount"] for sample in samples), 6),
         "loss": round(float(total_loss), 6),
         "pairBce": round(float(bce_loss), 6),
         "permutationLoss": round(float(order_loss), 6),
@@ -343,8 +337,8 @@ def seed_everything(seed):
 
 
 def train(model, train_values, validation_values, validation_samples, args):
-    train_targets, train_candidates, train_orders, train_permutations = train_values
-    dataset = TensorDataset(train_targets, train_candidates, train_orders, train_permutations)
+    train_targets, train_candidates, train_orders, train_permutations, train_target_counts = train_values
+    dataset = TensorDataset(train_targets, train_candidates, train_orders, train_permutations, train_target_counts)
     loader = DataLoader(
         dataset,
         batch_size=min(args.head_batch_size, len(dataset)),
@@ -359,13 +353,15 @@ def train(model, train_values, validation_values, validation_samples, args):
 
     for epoch in range(1, args.epochs + 1):
         model.train()
-        for targets, candidates, orders, labels in loader:
+        for targets, candidates, orders, labels, target_counts in loader:
             if args.feature_noise:
                 targets = targets + torch.randn_like(targets) * args.feature_noise
                 candidates = candidates + torch.randn_like(candidates) * args.feature_noise
             optimizer.zero_grad()
             matrix = model(targets, candidates)
-            loss, _, _ = matcher_loss(matrix, orders, labels, args.loss, args.hybrid_weight)
+            loss, _, _ = matcher_loss(
+                matrix, orders, labels, target_counts, args.loss, args.hybrid_weight
+            )
             loss.backward()
             optimizer.step()
 
@@ -395,6 +391,11 @@ def train(model, train_values, validation_values, validation_samples, args):
 def main():
     parser = argparse.ArgumentParser(description="Train a frozen-DINO click-captcha permutation matcher.")
     parser.add_argument("--data-dir", default="data/click-captcha-samples")
+    parser.add_argument(
+        "--corrections",
+        default="",
+        help="Optional correction manifest for legacy samples with extra captured clicks.",
+    )
     parser.add_argument("--train-rounds", default="001-006")
     parser.add_argument("--validation-rounds", default="007-008")
     parser.add_argument("--test-rounds", default="009-010")
@@ -445,7 +446,9 @@ def main():
         raise ValueError("train, validation, and test rounds must not overlap")
 
     data_dir = Path(args.data_dir)
-    loaded = {round_name: load_round(data_dir / round_name) for round_name in all_rounds}
+    corrections_path = Path(args.corrections) if args.corrections else data_dir / "corrections.json"
+    corrections = load_corrections(corrections_path)
+    loaded = {round_name: load_round(data_dir / round_name, corrections) for round_name in all_rounds}
     splits = {
         "train": [sample for round_name in train_rounds for sample in loaded[round_name]],
         "validation": [sample for round_name in validation_rounds for sample in loaded[round_name]],
@@ -520,6 +523,7 @@ def main():
             "validationRounds": validation_rounds,
             "testRounds": test_rounds,
         },
+        "corrections": str(corrections_path) if corrections else None,
         "preprocess": cache_key,
         "training": {
             "seed": args.seed,

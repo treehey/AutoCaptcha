@@ -18,6 +18,8 @@ import numpy as np
 import yaml
 from PIL import Image
 
+from click_captcha_dataset import assignments_for, load_corrections, load_round
+
 
 TARGET_SLOTS = ((120, 134), (143, 157), (166, 180), (189, 203))
 CANDIDATE_SLOTS = ((0, 58), (58, 128), (128, 190), (190, 250))
@@ -26,16 +28,6 @@ TARGET_BOTTOM = 120
 SCENE_HEIGHT = 100
 MODEL_HEIGHT = 48
 MODEL_WIDTH = 320
-
-
-def candidate_zone(x):
-    if x < 58:
-        return 0
-    if x < 128:
-        return 1
-    if x < 190:
-        return 2
-    return 3
 
 
 def read_dictionary(model_dir):
@@ -150,20 +142,18 @@ def text_similarity(target, candidate):
     return 0.0
 
 
-def evaluate(round_dir, session, dictionary, threshold, mode, rotations, residual_gain):
-    metadata = json.loads((round_dir / "metadata.json").read_text(encoding="utf-8"))
-    images = [
-        np.asarray(Image.open(round_dir / sample["image"]).convert("RGB"))
-        for sample in metadata["samples"]
-    ]
+def evaluate(round_dir, session, dictionary, threshold, mode, rotations, residual_gain, corrections):
+    samples = load_round(round_dir, corrections)
+    images = [sample["image"] for sample in samples]
     background = np.median(np.stack(images, axis=0), axis=0).astype(np.float32)
     rows = []
     exact = 0
     characters = 0
     started = time.perf_counter()
 
-    for sample, image in zip(metadata["samples"], images):
-        targets = [recognize(session, dictionary, target_glyph(image, index)) for index in range(4)]
+    for sample, image in zip(samples, images):
+        target_count = sample["targetCount"]
+        targets = [recognize(session, dictionary, target_glyph(image, index)) for index in range(target_count)]
         candidate_variants = []
         for index in range(4):
             glyph = candidate_glyph(image, index, threshold, mode, background, residual_gain)
@@ -182,10 +172,10 @@ def evaluate(round_dir, session, dictionary, threshold, mode, rotations, residua
             for target in targets
         ])
         predicted = max(
-            itertools.permutations(range(4)),
-            key=lambda permutation: sum(matrix[index, permutation[index]] for index in range(4)),
+            assignments_for(target_count),
+            key=lambda assignment: sum(matrix[index, candidate_index] for index, candidate_index in enumerate(assignment)),
         )
-        expected = tuple(candidate_zone(click["x"]) for click in sample["clicks"])
+        expected = sample["order"]
         derived_candidate_labels = [None] * 4
         for target_index, candidate_index in enumerate(expected):
             derived_candidate_labels[candidate_index] = targets[target_index][0]
@@ -194,6 +184,7 @@ def evaluate(round_dir, session, dictionary, threshold, mode, rotations, residua
         characters += sum(left == right for left, right in zip(predicted, expected))
         rows.append({
             "id": sample["id"],
+            "targetCount": target_count,
             "expected": list(expected),
             "predicted": list(predicted),
             "correct": correct,
@@ -214,7 +205,7 @@ def evaluate(round_dir, session, dictionary, threshold, mode, rotations, residua
         "exact": exact,
         "total": len(rows),
         "characterCorrect": characters,
-        "characterTotal": len(rows) * 4,
+        "characterTotal": sum(row["targetCount"] for row in rows),
         "elapsedMs": round(elapsed_ms, 1),
         "averageMs": round(elapsed_ms / len(rows), 1),
         "rows": rows,
@@ -226,6 +217,11 @@ def main():
     parser.add_argument("round", nargs="?", default="data/click-captcha-samples/round-001")
     parser.add_argument("--model-dir", default="data/click-captcha-experiments/ppocr-v5")
     parser.add_argument("--deps", default="data/click-captcha-experiments/python-deps")
+    parser.add_argument(
+        "--corrections",
+        default="",
+        help="Optional correction manifest for legacy samples with extra captured clicks.",
+    )
     parser.add_argument("--threshold", type=int, default=160)
     parser.add_argument("--candidate-mode", choices=("raw", "binary", "gray", "residual"), default="binary")
     parser.add_argument(
@@ -251,18 +247,23 @@ def main():
     rotations = tuple(float(value) for value in args.rotations.split(",") if value.strip())
     if not rotations:
         raise ValueError("At least one rotation angle is required.")
+    round_dir = Path(args.round)
+    corrections_path = Path(args.corrections) if args.corrections else round_dir.parent / "corrections.json"
+    corrections = load_corrections(corrections_path)
     metrics = evaluate(
-        Path(args.round),
+        round_dir,
         session,
         read_dictionary(model_dir),
         args.threshold,
         args.candidate_mode,
         rotations,
         args.residual_gain,
+        corrections,
     )
     metrics.update({
         "format": "nju-click-captcha-ppocr-report/v1",
-        "round": Path(args.round).name,
+        "round": round_dir.name,
+        "corrections": str(corrections_path) if corrections else None,
         "model": "PP-OCRv5_mobile_rec_onnx",
         "candidateMode": args.candidate_mode,
         "threshold": args.threshold,

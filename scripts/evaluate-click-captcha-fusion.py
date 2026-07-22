@@ -5,14 +5,12 @@ reported after selection only; it must not be used to choose the weight.
 """
 
 import argparse
-import itertools
 import json
 from pathlib import Path
 
 import numpy as np
 
-
-PERMUTATIONS = tuple(itertools.permutations(range(4)))
+from click_captcha_dataset import assignments_for
 
 
 def parse_args():
@@ -25,11 +23,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def permutation_scores(matrix):
+def permutation_scores(matrix, target_count):
     return np.asarray([
         sum(matrix[target_index, candidate_index]
-            for target_index, candidate_index in enumerate(permutation))
-        for permutation in PERMUTATIONS
+            for target_index, candidate_index in enumerate(assignment))
+        for assignment in assignments_for(target_count)
     ], dtype=np.float64)
 
 
@@ -51,6 +49,7 @@ def dino_rows(path):
             rows[(row["round"], row["id"])] = {
                 "split": split,
                 "expected": tuple(row["expected"]),
+                "targetCount": int(row.get("targetCount", len(row["expected"]))),
                 "matrix": np.asarray(matrix, dtype=np.float64),
             }
     return rows
@@ -61,21 +60,30 @@ def ppocr_rows(directory, pattern):
     for path in directory.glob(pattern):
         report = json.loads(path.read_text(encoding="utf-8"))
         for row in report["rows"]:
-            rows[(report["round"], row["id"])] = np.asarray(row["matrix"], dtype=np.float64)
+            rows[(report["round"], row["id"])] = {
+                "targetCount": int(row.get("targetCount", len(row["expected"]))),
+                "matrix": np.asarray(row["matrix"], dtype=np.float64),
+            }
     return rows
 
 
 def evaluate(rows, ppo_rows, weight):
     output = []
     for key, row in sorted(rows.items()):
-        dino = permutation_scores(row["matrix"])
-        ppo = permutation_scores(ppo_rows[key])
-        dino_prediction = PERMUTATIONS[int(np.argmax(dino))]
+        target_count = row["targetCount"]
+        ppo_row = ppo_rows[key]
+        if ppo_row["targetCount"] != target_count:
+            raise ValueError(f"Target count mismatch for {key}: {target_count} vs {ppo_row['targetCount']}")
+        dino = permutation_scores(row["matrix"], target_count)
+        ppo = permutation_scores(ppo_row["matrix"], target_count)
+        assignments = assignments_for(target_count)
+        dino_prediction = assignments[int(np.argmax(dino))]
         scores = standardize(dino) + weight * standardize(ppo)
-        prediction = PERMUTATIONS[int(np.argmax(scores))]
+        prediction = assignments[int(np.argmax(scores))]
         output.append({
             "round": key[0],
             "id": key[1],
+            "targetCount": target_count,
             "expected": list(row["expected"]),
             "dinoPredicted": list(dino_prediction),
             "predicted": list(prediction),
