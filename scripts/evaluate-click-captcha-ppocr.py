@@ -67,9 +67,19 @@ def target_glyph(image, index):
     return 255 - image[TARGET_TOP:TARGET_BOTTOM, left:right]
 
 
-def candidate_glyph(image, index, threshold, mode):
+def candidate_glyph(image, index, threshold, mode, background=None, residual_gain=2.0):
     left, right = CANDIDATE_SLOTS[index]
     region = image[:SCENE_HEIGHT, left:right]
+    if mode == "residual":
+        if background is None:
+            raise ValueError("Candidate residual mode requires a static background image.")
+        background_region = background[:SCENE_HEIGHT, left:right]
+        residual = np.abs(region.astype(np.float32) - background_region).max(axis=2)
+        gray = 255 - np.clip(residual * residual_gain, 0, 255)
+        normalized = np.repeat(gray[:, :, None], 3, axis=2).astype(np.uint8)
+        x0, y0, x1, y1 = foreground_bbox(normalized, threshold)
+        return normalized[y0:y1, x0:x1]
+
     x0, y0, x1, y1 = foreground_bbox(region, threshold)
     crop = region[y0:y1, x0:x1]
 
@@ -81,6 +91,19 @@ def candidate_glyph(image, index, threshold, mode):
         gray = np.mean(crop, axis=2, keepdims=True)
         return np.repeat(gray, 3, axis=2).astype(np.uint8)
     return crop
+
+
+def rotate_glyph(image, angle):
+    if not angle:
+        return image
+    return np.asarray(
+        Image.fromarray(image).rotate(
+            angle,
+            resample=Image.Resampling.BICUBIC,
+            expand=True,
+            fillcolor=(255, 255, 255),
+        )
+    )
 
 
 def prepare_image(image):
@@ -127,22 +150,35 @@ def text_similarity(target, candidate):
     return 0.0
 
 
-def evaluate(round_dir, session, dictionary, threshold, mode):
+def evaluate(round_dir, session, dictionary, threshold, mode, rotations, residual_gain):
     metadata = json.loads((round_dir / "metadata.json").read_text(encoding="utf-8"))
+    images = [
+        np.asarray(Image.open(round_dir / sample["image"]).convert("RGB"))
+        for sample in metadata["samples"]
+    ]
+    background = np.median(np.stack(images, axis=0), axis=0).astype(np.float32)
     rows = []
     exact = 0
     characters = 0
     started = time.perf_counter()
 
-    for sample in metadata["samples"]:
-        image = np.asarray(Image.open(round_dir / sample["image"]).convert("RGB"))
+    for sample, image in zip(metadata["samples"], images):
         targets = [recognize(session, dictionary, target_glyph(image, index)) for index in range(4)]
-        candidates = [
-            recognize(session, dictionary, candidate_glyph(image, index, threshold, mode))
-            for index in range(4)
-        ]
+        candidate_variants = []
+        for index in range(4):
+            glyph = candidate_glyph(image, index, threshold, mode, background, residual_gain)
+            candidate_variants.append([
+                (angle, *recognize(session, dictionary, rotate_glyph(glyph, angle)))
+                for angle in rotations
+            ])
         matrix = np.array([
-            [text_similarity(target[0], candidate[0]) for candidate in candidates]
+            [
+                max(
+                    text_similarity(target[0], candidate_text)
+                    for _, candidate_text, _ in variants
+                )
+                for variants in candidate_variants
+            ]
             for target in targets
         ])
         predicted = max(
@@ -162,7 +198,13 @@ def evaluate(round_dir, session, dictionary, threshold, mode):
             "predicted": list(predicted),
             "correct": correct,
             "targets": [{"text": text, "score": score} for text, score in targets],
-            "candidates": [{"text": text, "score": score} for text, score in candidates],
+            "candidates": [
+                [
+                    {"angle": angle, "text": text, "score": score}
+                    for angle, text, score in variants
+                ]
+                for variants in candidate_variants
+            ],
             "derivedCandidateLabels": derived_candidate_labels,
             "matrix": matrix.tolist(),
         })
@@ -185,7 +227,13 @@ def main():
     parser.add_argument("--model-dir", default="data/click-captcha-experiments/ppocr-v5")
     parser.add_argument("--deps", default="data/click-captcha-experiments/python-deps")
     parser.add_argument("--threshold", type=int, default=160)
-    parser.add_argument("--candidate-mode", choices=("raw", "binary", "gray"), default="binary")
+    parser.add_argument("--candidate-mode", choices=("raw", "binary", "gray", "residual"), default="binary")
+    parser.add_argument(
+        "--rotations",
+        default="0",
+        help="Comma-separated rotation angles applied to each isolated candidate glyph.",
+    )
+    parser.add_argument("--residual-gain", type=float, default=2.0)
     parser.add_argument("--output", default="data/click-captcha-experiments/round-001-ppocr.json")
     args = parser.parse_args()
 
@@ -200,13 +248,26 @@ def main():
         sess_options=session_options,
         providers=["CPUExecutionProvider"],
     )
-    metrics = evaluate(Path(args.round), session, read_dictionary(model_dir), args.threshold, args.candidate_mode)
+    rotations = tuple(float(value) for value in args.rotations.split(",") if value.strip())
+    if not rotations:
+        raise ValueError("At least one rotation angle is required.")
+    metrics = evaluate(
+        Path(args.round),
+        session,
+        read_dictionary(model_dir),
+        args.threshold,
+        args.candidate_mode,
+        rotations,
+        args.residual_gain,
+    )
     metrics.update({
         "format": "nju-click-captcha-ppocr-report/v1",
         "round": Path(args.round).name,
         "model": "PP-OCRv5_mobile_rec_onnx",
         "candidateMode": args.candidate_mode,
         "threshold": args.threshold,
+        "rotations": rotations,
+        "residualGain": args.residual_gain if args.candidate_mode == "residual" else None,
         "warning": "Development-only local-model spike. This report is not a generalization claim.",
     })
     output = Path(args.output)

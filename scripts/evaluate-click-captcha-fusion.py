@@ -1,0 +1,161 @@
+"""Evaluate DINO and PP-OCR click-captcha fusion without retraining either model.
+
+The validation rounds select an auxiliary PP-OCR weight.  The test split is
+reported after selection only; it must not be used to choose the weight.
+"""
+
+import argparse
+import itertools
+import json
+from pathlib import Path
+
+import numpy as np
+
+
+PERMUTATIONS = tuple(itertools.permutations(range(4)))
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dino-report", type=Path, required=True)
+    parser.add_argument("--ppocr-dir", type=Path, required=True)
+    parser.add_argument("--ppocr-pattern", default="round-*-ppocr-residual-rot45.json")
+    parser.add_argument("--weights", default="0,0.1,0.2,0.3,0.5,0.75,1,1.5,2")
+    parser.add_argument("--output", type=Path)
+    return parser.parse_args()
+
+
+def permutation_scores(matrix):
+    return np.asarray([
+        sum(matrix[target_index, candidate_index]
+            for target_index, candidate_index in enumerate(permutation))
+        for permutation in PERMUTATIONS
+    ], dtype=np.float64)
+
+
+def standardize(scores):
+    spread = scores.std()
+    if spread < 1e-8:
+        return np.zeros_like(scores)
+    return (scores - scores.mean()) / spread
+
+
+def dino_rows(path):
+    report = json.loads(path.read_text(encoding="utf-8"))
+    rows = {}
+    for split in ("validation", "test"):
+        for row in report["metrics"][split]["rows"]:
+            matrix = row["matrix"]
+            if matrix and isinstance(matrix[0], str):
+                matrix = [[float(value) for value in line.split()] for line in matrix]
+            rows[(row["round"], row["id"])] = {
+                "split": split,
+                "expected": tuple(row["expected"]),
+                "matrix": np.asarray(matrix, dtype=np.float64),
+            }
+    return rows
+
+
+def ppocr_rows(directory, pattern):
+    rows = {}
+    for path in directory.glob(pattern):
+        report = json.loads(path.read_text(encoding="utf-8"))
+        for row in report["rows"]:
+            rows[(report["round"], row["id"])] = np.asarray(row["matrix"], dtype=np.float64)
+    return rows
+
+
+def evaluate(rows, ppo_rows, weight):
+    output = []
+    for key, row in sorted(rows.items()):
+        dino = permutation_scores(row["matrix"])
+        ppo = permutation_scores(ppo_rows[key])
+        dino_prediction = PERMUTATIONS[int(np.argmax(dino))]
+        scores = standardize(dino) + weight * standardize(ppo)
+        prediction = PERMUTATIONS[int(np.argmax(scores))]
+        output.append({
+            "round": key[0],
+            "id": key[1],
+            "expected": list(row["expected"]),
+            "dinoPredicted": list(dino_prediction),
+            "predicted": list(prediction),
+            "dinoCorrect": dino_prediction == row["expected"],
+            "correct": prediction == row["expected"],
+        })
+    exact = sum(row["correct"] for row in output)
+    return {
+        "exact": exact,
+        "total": len(output),
+        "exactAccuracy": exact / len(output),
+        "changedCorrect": sum(not row["dinoCorrect"] and row["correct"] for row in output),
+        "changedWrong": sum(row["dinoCorrect"] and not row["correct"] for row in output),
+        "rows": output,
+    }
+
+
+def metrics_only(result):
+    return {key: result[key] for key in (
+        "exact", "total", "exactAccuracy", "changedCorrect", "changedWrong",
+    )}
+
+
+def main():
+    args = parse_args()
+    weights = tuple(float(value) for value in args.weights.split(",") if value.strip())
+    dino = dino_rows(args.dino_report)
+    ppo = ppocr_rows(args.ppocr_dir, args.ppocr_pattern)
+    missing = set(dino).difference(ppo)
+    if missing:
+        raise ValueError(f"Missing PP-OCR rows for {len(missing)} DINO rows, e.g. {sorted(missing)[:3]}")
+    splits = {
+        split: {key: row for key, row in dino.items() if row["split"] == split}
+        for split in ("validation", "test")
+    }
+    grid = {
+        str(weight): {
+            split: evaluate(rows, ppo, weight)
+            for split, rows in splits.items()
+        }
+        for weight in weights
+    }
+    best_weight = max(
+        weights,
+        key=lambda weight: (
+            grid[str(weight)]["validation"]["exactAccuracy"],
+            -weight,
+        ),
+    )
+    result = {
+        "format": "nju-click-captcha-fusion-report/v1",
+        "dinoReport": str(args.dino_report),
+        "ppocrPattern": args.ppocr_pattern,
+        "selectionSplit": "validation",
+        "selectedWeight": best_weight,
+        "selected": {
+            split: grid[str(best_weight)][split]
+            for split in ("validation", "test")
+        },
+        "grid": {
+            weight: {
+                split: metrics_only(metrics)
+                for split, metrics in values.items()
+            }
+            for weight, values in grid.items()
+        },
+    }
+    print(json.dumps({
+        "selectedWeight": best_weight,
+        "selected": {
+            split: metrics_only(metrics)
+            for split, metrics in result["selected"].items()
+        },
+        "grid": result["grid"],
+    }, ensure_ascii=False, indent=2))
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"Saved fusion report to {args.output}")
+
+
+if __name__ == "__main__":
+    main()
