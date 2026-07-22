@@ -253,7 +253,7 @@ function renderClickCaptchaCaptureState() {
 
   setBadge(els.clickCaptchaCaptureBadge, ready ? '就绪' : '待验证码', ready ? 'info' : 'warning');
   els.clickCaptchaCaptureTitle.textContent = count >= max ? '请先导出当前样本' : '仅记录手动点击';
-  els.clickCaptchaCaptureSub.textContent = state?.status || '完成 4 次点击后自动保存并停止采样。';
+  els.clickCaptchaCaptureSub.textContent = state?.status || '完成当前验证码要求的点击后自动保存并继续采样。';
   els.clickCaptchaCaptureBtn.textContent = '开始采样';
   els.clickCaptchaCaptureBtn.className = 'primary-btn';
   els.clickCaptchaCaptureBtn.disabled = count >= max;
@@ -448,7 +448,7 @@ function exportClickCaptchaSamples() {
       const payload = {
         format: 'nju-click-captcha-samples/v1',
         exportedAt: new Date().toISOString(),
-        expectedClicks: 4,
+        clickCountMode: 'per-sample',
         samples
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });

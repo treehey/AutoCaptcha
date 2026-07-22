@@ -25,21 +25,36 @@ function parseArguments(argv) {
   };
 }
 
-function assertSample(sample, index, expectedClicks) {
+function getTargetCount(sample, fallbackTargetCount) {
+  const targetCount = Number(sample?.targetCount ?? fallbackTargetCount ?? 4);
+  if (!Number.isInteger(targetCount) || targetCount < 3 || targetCount > 4) {
+    throw new Error('Target count must be either 3 or 4.');
+  }
+  return targetCount;
+}
+
+function assertSample(sample, index, fallbackTargetCount) {
   if (!sample || typeof sample !== 'object') {
     throw new Error(`Sample ${index + 1} is not an object.`);
   }
   if (typeof sample.imageDataUrl !== 'string' || !sample.imageDataUrl.startsWith('data:image/png;base64,')) {
     throw new Error(`Sample ${index + 1} does not contain a PNG data URL.`);
   }
-  if (!Array.isArray(sample.clicks) || sample.clicks.length !== expectedClicks) {
-    throw new Error(`Sample ${index + 1} must contain exactly ${expectedClicks} clicks.`);
+  const targetCount = getTargetCount(sample, fallbackTargetCount);
+  if (!Array.isArray(sample.clicks) || sample.clicks.length !== targetCount) {
+    throw new Error(`Sample ${index + 1} must contain exactly ${targetCount} clicks.`);
   }
+  const seenOrders = new Set();
   sample.clicks.forEach((click, clickIndex) => {
     if (!Number.isFinite(click?.x) || !Number.isFinite(click?.y) || !Number.isFinite(click?.relativeX) || !Number.isFinite(click?.relativeY)) {
       throw new Error(`Sample ${index + 1}, click ${clickIndex + 1} has invalid coordinates.`);
     }
+    if (click.order !== clickIndex + 1 || seenOrders.has(click.order)) {
+      throw new Error(`Sample ${index + 1}, click orders must be consecutive and start at 1.`);
+    }
+    seenOrders.add(click.order);
   });
+  return targetCount;
 }
 
 async function pathExists(target) {
@@ -54,7 +69,7 @@ async function pathExists(target) {
 const { inputPath, round } = parseArguments(process.argv.slice(2));
 const rawExport = await readFile(inputPath, 'utf8');
 const exported = JSON.parse(rawExport);
-const expectedClicks = Number(exported.expectedClicks || 4);
+const legacyExpectedClicks = exported.expectedClicks === undefined ? undefined : Number(exported.expectedClicks);
 
 if (exported.format !== 'nju-click-captcha-samples/v1') {
   throw new Error('Unsupported export format. Expected nju-click-captcha-samples/v1.');
@@ -62,11 +77,11 @@ if (exported.format !== 'nju-click-captcha-samples/v1') {
 if (!Array.isArray(exported.samples) || exported.samples.length === 0) {
   throw new Error('The export does not contain any samples.');
 }
-if (!Number.isInteger(expectedClicks) || expectedClicks <= 0 || expectedClicks > 10) {
+if (legacyExpectedClicks !== undefined && (!Number.isInteger(legacyExpectedClicks) || legacyExpectedClicks < 3 || legacyExpectedClicks > 4)) {
   throw new Error('Invalid expected click count in export.');
 }
 
-exported.samples.forEach((sample, index) => assertSample(sample, index, expectedClicks));
+const targetCounts = exported.samples.map((sample, index) => assertSample(sample, index, legacyExpectedClicks));
 
 const roundDir = path.join(outputBase, `round-${round}`);
 if (await pathExists(roundDir)) {
@@ -90,6 +105,7 @@ for (let index = 0; index < exported.samples.length; index += 1) {
     image: `images/${imageFile}`,
     createdAt: sample.createdAt || null,
     source: sample.image || null,
+    targetCount: targetCounts[index],
     clicks: sample.clicks.map(click => ({
       order: click.order,
       x: click.x,
@@ -104,7 +120,7 @@ const metadata = {
   format: 'nju-click-captcha-round/v1',
   importedAt: new Date().toISOString(),
   sourceExportedAt: exported.exportedAt || null,
-  expectedClicks,
+  targetCounts: [...new Set(targetCounts)].sort((left, right) => left - right),
   sampleCount: samples.length,
   samples
 };

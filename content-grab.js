@@ -349,7 +349,11 @@ function stopGrab() {
 const CLICK_CAPTCHA_SAMPLE_COUNT_KEY = 'nju_click_captcha_v1_count';
 const CLICK_CAPTCHA_SAMPLE_KEY_PREFIX = 'nju_click_captcha_v1_';
 const CLICK_CAPTCHA_SAMPLE_MAX_COUNT = 30;
-const CLICK_CAPTCHA_EXPECTED_CLICKS = 4;
+const CLICK_CAPTCHA_MIN_TARGET_COUNT = 3;
+const CLICK_CAPTCHA_MAX_TARGET_COUNT = 4;
+const CLICK_CAPTCHA_REFERENCE_WIDTH = 250;
+const CLICK_CAPTCHA_REFERENCE_HEIGHT = 120;
+const CLICK_CAPTCHA_TARGET_SLOTS = [[120, 134], [143, 157], [166, 180], [189, 203]];
 const CLICK_CAPTCHA_REFRESH_SETTLE_MS = 450;
 const CLICK_CAPTCHA_REFRESH_TIMEOUT_MS = 4000;
 
@@ -359,6 +363,7 @@ const clickCaptchaCapture = {
   current: null,
   saving: false,
   refreshing: false,
+  expectedClicks: CLICK_CAPTCHA_MAX_TARGET_COUNT,
   status: '未启动'
 };
 
@@ -493,6 +498,7 @@ async function refreshClickCaptchaAndResume(sampleId) {
   const pageRefreshedTarget = await waitForRefreshedClickCaptcha(previousTarget, previousFingerprint, CLICK_CAPTCHA_REFRESH_SETTLE_MS);
   if (pageRefreshedTarget) {
     clickCaptchaCapture.target = pageRefreshedTarget;
+    clickCaptchaCapture.expectedClicks = inferClickCaptchaTargetCount(pageRefreshedTarget);
     clickCaptchaCapture.enabled = true;
     clickCaptchaCapture.refreshing = false;
     clickCaptchaCapture.status = `样本 ${sampleId} 已保存，已检测到新验证码并继续采样`;
@@ -518,6 +524,7 @@ async function refreshClickCaptchaAndResume(sampleId) {
   }
 
   clickCaptchaCapture.target = refreshedTarget;
+  clickCaptchaCapture.expectedClicks = inferClickCaptchaTargetCount(refreshedTarget);
   clickCaptchaCapture.enabled = true;
   clickCaptchaCapture.refreshing = false;
   clickCaptchaCapture.status = `样本 ${sampleId} 已保存，新验证码已就绪，继续采样`;
@@ -564,7 +571,40 @@ function renderClickCaptchaOverlay() {
   overlay.style.width = `${Math.round(rect.width + 4)}px`;
   overlay.style.height = `${Math.round(rect.height + 4)}px`;
   const count = clickCaptchaCapture.current?.clicks.length || 0;
-  overlay.querySelector('[data-nju-capture-label]').textContent = `采样中：请手动点击（${count}/${CLICK_CAPTCHA_EXPECTED_CLICKS}）`;
+  const expected = clickCaptchaCapture.current?.expectedClicks || clickCaptchaCapture.expectedClicks;
+  overlay.querySelector('[data-nju-capture-label]').textContent = `采样中：请手动点击（${count}/${expected}）`;
+}
+
+function inferClickCaptchaTargetCountFromCanvas(canvas) {
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  const xScale = canvas.width / CLICK_CAPTCHA_REFERENCE_WIDTH;
+  const yScale = canvas.height / CLICK_CAPTCHA_REFERENCE_HEIGHT;
+  const top = Math.floor(101 * yScale);
+  const bottom = Math.ceil(119 * yScale);
+  const visible = CLICK_CAPTCHA_TARGET_SLOTS.map(([left, right]) => {
+    const x0 = Math.floor(left * xScale);
+    const x1 = Math.ceil(right * xScale);
+    const pixels = context.getImageData(x0, top, Math.max(1, x1 - x0), Math.max(1, bottom - top)).data;
+    let brightPixels = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index] + pixels[index + 1] + pixels[index + 2] >= 480) brightPixels += 1;
+    }
+    return brightPixels >= 8;
+  });
+  const count = visible.filter(Boolean).length;
+  const contiguous = visible.every((isVisible, index) => isVisible === (index < count));
+  return contiguous && count >= CLICK_CAPTCHA_MIN_TARGET_COUNT && count <= CLICK_CAPTCHA_MAX_TARGET_COUNT
+    ? count
+    : CLICK_CAPTCHA_MAX_TARGET_COUNT;
+}
+
+function inferClickCaptchaTargetCount(element) {
+  try {
+    const source = getClickCaptchaSource(element);
+    return source.targetCount;
+  } catch {
+    return CLICK_CAPTCHA_MAX_TARGET_COUNT;
+  }
 }
 
 function getClickCaptchaSource(element) {
@@ -593,6 +633,7 @@ function getClickCaptchaSource(element) {
     dataUrl: sourceCanvas.toDataURL('image/png'),
     width,
     height,
+    targetCount: inferClickCaptchaTargetCountFromCanvas(sourceCanvas),
     sourcePath: sourceUrl ? new URL(sourceUrl, location.href).pathname : '',
     element: describeCaptureElement(element)
   };
@@ -652,7 +693,7 @@ async function getClickCaptchaCaptureState() {
     refreshing: clickCaptchaCapture.refreshing,
     ready: Boolean(clickCaptchaCapture.target && document.contains(clickCaptchaCapture.target)),
     pendingClicks: clickCaptchaCapture.current?.clicks.length || 0,
-    expectedClicks: CLICK_CAPTCHA_EXPECTED_CLICKS,
+    expectedClicks: clickCaptchaCapture.current?.expectedClicks || clickCaptchaCapture.expectedClicks,
     sampleCount: count,
     maxSampleCount: CLICK_CAPTCHA_SAMPLE_MAX_COUNT,
     status: clickCaptchaCapture.status,
@@ -668,7 +709,7 @@ function notifyClickCaptchaCaptureUpdate(action = 'clickCaptchaCaptureUpdate') {
 
 async function saveClickCaptchaSample() {
   const current = clickCaptchaCapture.current;
-  if (!current || current.clicks.length !== CLICK_CAPTCHA_EXPECTED_CLICKS) return;
+  if (!current || current.clicks.length !== current.expectedClicks) return;
 
   const data = await storageGet([CLICK_CAPTCHA_SAMPLE_COUNT_KEY]);
   const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
@@ -690,6 +731,7 @@ async function saveClickCaptchaSample() {
       createdAt: new Date().toISOString(),
       imageDataUrl: current.imageDataUrl,
       image: current.image,
+      targetCount: current.expectedClicks,
       clicks: current.clicks
     }
   });
@@ -734,7 +776,8 @@ async function setClickCaptchaCaptureEnabled(enabled) {
   clickCaptchaCapture.target = target;
   clickCaptchaCapture.current = null;
   clickCaptchaCapture.refreshing = false;
-  clickCaptchaCapture.status = '已锁定验证码，请正常手动点击';
+  clickCaptchaCapture.expectedClicks = inferClickCaptchaTargetCount(target);
+  clickCaptchaCapture.status = `已锁定验证码，请正常手动点击 ${clickCaptchaCapture.expectedClicks} 个目标字`;
   renderClickCaptchaOverlay();
   return await getClickCaptchaCaptureState();
 }
@@ -776,6 +819,7 @@ document.addEventListener('pointerdown', event => {
       const source = getClickCaptchaSource(target);
       clickCaptchaCapture.current = {
         imageDataUrl: source.dataUrl,
+        expectedClicks: source.targetCount,
         image: {
           width: source.width,
           height: source.height,
@@ -798,10 +842,10 @@ document.addEventListener('pointerdown', event => {
       relativeX: Number(relativeX.toFixed(6)),
       relativeY: Number(relativeY.toFixed(6))
     });
-    clickCaptchaCapture.status = `已记录 ${clickCaptchaCapture.current.clicks.length}/${CLICK_CAPTCHA_EXPECTED_CLICKS} 次点击`;
+    clickCaptchaCapture.status = `已记录 ${clickCaptchaCapture.current.clicks.length}/${clickCaptchaCapture.current.expectedClicks} 次点击`;
     renderClickCaptchaOverlay();
 
-    if (clickCaptchaCapture.current.clicks.length === CLICK_CAPTCHA_EXPECTED_CLICKS) {
+    if (clickCaptchaCapture.current.clicks.length === clickCaptchaCapture.current.expectedClicks) {
       clickCaptchaCapture.saving = true;
       saveClickCaptchaSample()
         .catch(error => {
