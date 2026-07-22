@@ -2,6 +2,7 @@ const AUTH_URL = 'https://authserver.nju.edu.cn/';
 const GRAB_URL = 'https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do';
 const CLICK_CAPTCHA_SAMPLE_COUNT_KEY = 'nju_click_captcha_v1_count';
 const CLICK_CAPTCHA_SAMPLE_KEY_PREFIX = 'nju_click_captcha_v1_';
+const CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY = 'nju_click_captcha_v1_skipped_three_count';
 
 const storageKeys = [
   'nju_user',
@@ -429,8 +430,12 @@ async function syncClickCaptchaCaptureStatus() {
 }
 
 function exportClickCaptchaSamples() {
-  chrome.storage.local.get([CLICK_CAPTCHA_SAMPLE_COUNT_KEY], data => {
+  chrome.storage.local.get([
+    CLICK_CAPTCHA_SAMPLE_COUNT_KEY,
+    CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY
+  ], data => {
     const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
+    const skippedThreeTargetCount = Number(data[CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY] || 0);
     if (count === 0) {
       showToast('暂无可导出的样本');
       return;
@@ -449,6 +454,10 @@ function exportClickCaptchaSamples() {
         format: 'nju-click-captcha-samples/v1',
         exportedAt: new Date().toISOString(),
         clickCountMode: 'per-sample',
+        capturePolicy: {
+          requiredTargetCount: 4,
+          skippedThreeTargetCount
+        },
         samples
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -464,7 +473,11 @@ function exportClickCaptchaSamples() {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
 
       // 清除所有独立 key + 计数器
-      const allKeys = [...keys, CLICK_CAPTCHA_SAMPLE_COUNT_KEY];
+      const allKeys = [
+        ...keys,
+        CLICK_CAPTCHA_SAMPLE_COUNT_KEY,
+        CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY
+      ];
       chrome.storage.local.remove(allKeys, () => {
         showToast(`已导出 ${samples.length} 条样本，计数已重置`);
         syncClickCaptchaCaptureStatus();
@@ -678,12 +691,20 @@ function initGrabEvents() {
 
   els.resetClickCaptchaBtn.addEventListener('click', async () => {
     // 先获取当前计数，构造所有要清除的 key
-    chrome.storage.local.get([CLICK_CAPTCHA_SAMPLE_COUNT_KEY], data => {
+    chrome.storage.local.get([
+      CLICK_CAPTCHA_SAMPLE_COUNT_KEY,
+      CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY
+    ], data => {
       const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
       const keys = Array.from({ length: count }, (_, i) =>
         CLICK_CAPTCHA_SAMPLE_KEY_PREFIX + String(i + 1).padStart(4, '0'));
       // 同时清除新格式 keys + 计数器 + 旧格式残留 key
-      const allKeys = [...keys, CLICK_CAPTCHA_SAMPLE_COUNT_KEY, 'nju_click_captcha_samples_v1'];
+      const allKeys = [
+        ...keys,
+        CLICK_CAPTCHA_SAMPLE_COUNT_KEY,
+        CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY,
+        'nju_click_captcha_samples_v1'
+      ];
       chrome.storage.local.remove(allKeys, () => {
         showToast('采样数据已全部清除');
         syncClickCaptchaCaptureStatus();

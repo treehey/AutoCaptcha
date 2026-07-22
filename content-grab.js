@@ -348,6 +348,7 @@ function stopGrab() {
 // 采样默认关闭。开启后仅旁路记录验证码原图和用户的手动点击，不会阻止、修改或代替页面点击。
 const CLICK_CAPTCHA_SAMPLE_COUNT_KEY = 'nju_click_captcha_v1_count';
 const CLICK_CAPTCHA_SAMPLE_KEY_PREFIX = 'nju_click_captcha_v1_';
+const CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY = 'nju_click_captcha_v1_skipped_three_count';
 const CLICK_CAPTCHA_SAMPLE_MAX_COUNT = 30;
 const CLICK_CAPTCHA_MIN_TARGET_COUNT = 3;
 const CLICK_CAPTCHA_MAX_TARGET_COUNT = 4;
@@ -358,6 +359,8 @@ const CLICK_CAPTCHA_TARGET_TEXT_TOP = 101;
 const CLICK_CAPTCHA_TARGET_TEXT_BOTTOM = 119;
 const CLICK_CAPTCHA_REFRESH_SETTLE_MS = 450;
 const CLICK_CAPTCHA_REFRESH_TIMEOUT_MS = 4000;
+const CLICK_CAPTCHA_REQUIRED_TARGET_COUNT = 4;
+const CLICK_CAPTCHA_MAX_TARGET_REFRESH_ATTEMPTS = 5;
 
 const clickCaptchaCapture = {
   enabled: false,
@@ -365,6 +368,7 @@ const clickCaptchaCapture = {
   current: null,
   saving: false,
   refreshing: false,
+  skippedThreeTargetCount: 0,
   expectedClicks: CLICK_CAPTCHA_MAX_TARGET_COUNT,
   status: '未启动'
 };
@@ -492,23 +496,8 @@ async function waitForRefreshedClickCaptcha(previousTarget, previousFingerprint,
   return null;
 }
 
-async function refreshClickCaptchaAndResume(sampleId) {
-  const previousTarget = clickCaptchaCapture.target;
+async function requestFreshClickCaptcha(previousTarget) {
   const previousFingerprint = getClickCaptchaFingerprint(previousTarget);
-
-  // Some pages refresh automatically after the final valid click. Prefer that result and avoid an unnecessary extra request.
-  const pageRefreshedTarget = await waitForRefreshedClickCaptcha(previousTarget, previousFingerprint, CLICK_CAPTCHA_REFRESH_SETTLE_MS);
-  if (pageRefreshedTarget) {
-    clickCaptchaCapture.target = pageRefreshedTarget;
-    clickCaptchaCapture.expectedClicks = inferClickCaptchaTargetCount(pageRefreshedTarget);
-    clickCaptchaCapture.enabled = true;
-    clickCaptchaCapture.refreshing = false;
-    clickCaptchaCapture.status = `样本 ${sampleId} 已保存，已检测到新验证码并继续采样`;
-    renderClickCaptchaOverlay();
-    notifyClickCaptchaCaptureUpdate('clickCaptchaSampleSaved');
-    return;
-  }
-
   const refreshControl = previousTarget ? findClickCaptchaRefreshControl(previousTarget) : null;
   if (refreshControl) {
     refreshControl.click();
@@ -525,11 +514,71 @@ async function refreshClickCaptchaAndResume(sampleId) {
     throw new Error('等待新验证码超时');
   }
 
-  clickCaptchaCapture.target = refreshedTarget;
-  clickCaptchaCapture.expectedClicks = inferClickCaptchaTargetCount(refreshedTarget);
+  return refreshedTarget;
+}
+
+async function recordSkippedThreeTargetCaptcha() {
+  try {
+    const data = await storageGet([CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY]);
+    const count = Number(data[CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY] || 0) + 1;
+    await storageSet({ [CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY]: count });
+    clickCaptchaCapture.skippedThreeTargetCount = count;
+  } catch {
+    // Telemetry must never prevent the refresh policy from running.
+    clickCaptchaCapture.skippedThreeTargetCount += 1;
+  }
+}
+
+async function ensureFourTargetClickCaptcha(target) {
+  let currentTarget = target;
+  let refreshCount = 0;
+
+  while (inferClickCaptchaTargetCount(currentTarget) !== CLICK_CAPTCHA_REQUIRED_TARGET_COUNT) {
+    if (refreshCount >= CLICK_CAPTCHA_MAX_TARGET_REFRESH_ATTEMPTS) {
+      throw new Error(`连续 ${CLICK_CAPTCHA_MAX_TARGET_REFRESH_ATTEMPTS} 次仍为三字验证码`);
+    }
+
+    refreshCount += 1;
+    await recordSkippedThreeTargetCaptcha();
+    clickCaptchaCapture.enabled = false;
+    clickCaptchaCapture.current = null;
+    clickCaptchaCapture.target = currentTarget;
+    clickCaptchaCapture.refreshing = true;
+    clickCaptchaCapture.status = `检测到三字验证码，正在刷新为四字（${refreshCount}/${CLICK_CAPTCHA_MAX_TARGET_REFRESH_ATTEMPTS}）`;
+    renderClickCaptchaOverlay();
+    notifyClickCaptchaCaptureUpdate();
+    currentTarget = await requestFreshClickCaptcha(currentTarget);
+  }
+
+  return { target: currentTarget, refreshCount };
+}
+
+async function refreshClickCaptchaAndResume(sampleId) {
+  const previousTarget = clickCaptchaCapture.target;
+  const previousFingerprint = getClickCaptchaFingerprint(previousTarget);
+
+  // Some pages refresh automatically after the final valid click. Prefer that result and avoid an unnecessary extra request.
+  let refreshedTarget = await waitForRefreshedClickCaptcha(
+    previousTarget,
+    previousFingerprint,
+    CLICK_CAPTCHA_REFRESH_SETTLE_MS
+  );
+  const pageRefreshed = Boolean(refreshedTarget);
+  if (!refreshedTarget) {
+    refreshedTarget = await requestFreshClickCaptcha(previousTarget);
+  }
+
+  const prepared = await ensureFourTargetClickCaptcha(refreshedTarget);
+
+  clickCaptchaCapture.target = prepared.target;
+  clickCaptchaCapture.expectedClicks = CLICK_CAPTCHA_REQUIRED_TARGET_COUNT;
   clickCaptchaCapture.enabled = true;
   clickCaptchaCapture.refreshing = false;
-  clickCaptchaCapture.status = `样本 ${sampleId} 已保存，新验证码已就绪，继续采样`;
+  clickCaptchaCapture.status = prepared.refreshCount
+    ? `样本 ${sampleId} 已保存，已跳过三字验证码并继续采样`
+    : pageRefreshed
+      ? `样本 ${sampleId} 已保存，已检测到新验证码并继续采样`
+      : `样本 ${sampleId} 已保存，新验证码已就绪，继续采样`;
   renderClickCaptchaOverlay();
   notifyClickCaptchaCaptureUpdate('clickCaptchaSampleSaved');
 }
@@ -684,8 +733,12 @@ async function getClickCaptchaSamples() {
 }
 
 async function getClickCaptchaCaptureState() {
-  const data = await storageGet([CLICK_CAPTCHA_SAMPLE_COUNT_KEY]);
+  const data = await storageGet([
+    CLICK_CAPTCHA_SAMPLE_COUNT_KEY,
+    CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY
+  ]);
   const count = Number(data[CLICK_CAPTCHA_SAMPLE_COUNT_KEY] || 0);
+  clickCaptchaCapture.skippedThreeTargetCount = Number(data[CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY] || 0);
   return {
     enabled: clickCaptchaCapture.enabled,
     refreshing: clickCaptchaCapture.refreshing,
@@ -693,6 +746,7 @@ async function getClickCaptchaCaptureState() {
     pendingClicks: clickCaptchaCapture.current?.clicks.length || 0,
     expectedClicks: clickCaptchaCapture.current?.expectedClicks || clickCaptchaCapture.expectedClicks,
     sampleCount: count,
+    skippedThreeTargetCount: clickCaptchaCapture.skippedThreeTargetCount,
     maxSampleCount: CLICK_CAPTCHA_SAMPLE_MAX_COUNT,
     status: clickCaptchaCapture.status,
     target: clickCaptchaCapture.target ? describeCaptureElement(clickCaptchaCapture.target) : null
@@ -770,12 +824,28 @@ async function setClickCaptchaCaptureEnabled(enabled) {
     return await getClickCaptchaCaptureState();
   }
 
-  clickCaptchaCapture.enabled = true;
+  clickCaptchaCapture.enabled = false;
   clickCaptchaCapture.target = target;
   clickCaptchaCapture.current = null;
   clickCaptchaCapture.refreshing = false;
-  clickCaptchaCapture.expectedClicks = inferClickCaptchaTargetCount(target);
-  clickCaptchaCapture.status = `已锁定验证码，请正常手动点击 ${clickCaptchaCapture.expectedClicks} 个目标字`;
+  let prepared;
+  try {
+    prepared = await ensureFourTargetClickCaptcha(target);
+  } catch (error) {
+    clickCaptchaCapture.enabled = false;
+    clickCaptchaCapture.refreshing = false;
+    clickCaptchaCapture.status = `准备四字验证码失败：${error.message}`;
+    renderClickCaptchaOverlay();
+    return await getClickCaptchaCaptureState();
+  }
+
+  clickCaptchaCapture.enabled = true;
+  clickCaptchaCapture.target = prepared.target;
+  clickCaptchaCapture.refreshing = false;
+  clickCaptchaCapture.expectedClicks = CLICK_CAPTCHA_REQUIRED_TARGET_COUNT;
+  clickCaptchaCapture.status = prepared.refreshCount
+    ? '已跳过三字验证码，请正常手动点击 4 个目标字'
+    : '已锁定验证码，请正常手动点击 4 个目标字';
   renderClickCaptchaOverlay();
   return await getClickCaptchaCaptureState();
 }
@@ -815,9 +885,34 @@ document.addEventListener('pointerdown', event => {
   try {
     if (!clickCaptchaCapture.current) {
       const source = getClickCaptchaSource(target);
+      if (source.targetCount !== CLICK_CAPTCHA_REQUIRED_TARGET_COUNT) {
+        clickCaptchaCapture.enabled = false;
+        clickCaptchaCapture.refreshing = true;
+        clickCaptchaCapture.status = '检测到三字验证码，正在刷新为四字';
+        renderClickCaptchaOverlay();
+        notifyClickCaptchaCaptureUpdate();
+        ensureFourTargetClickCaptcha(target)
+          .then(prepared => {
+            clickCaptchaCapture.target = prepared.target;
+            clickCaptchaCapture.expectedClicks = CLICK_CAPTCHA_REQUIRED_TARGET_COUNT;
+            clickCaptchaCapture.enabled = true;
+            clickCaptchaCapture.refreshing = false;
+            clickCaptchaCapture.status = '已跳过三字验证码，请正常手动点击 4 个目标字';
+            renderClickCaptchaOverlay();
+            notifyClickCaptchaCaptureUpdate();
+          })
+          .catch(error => {
+            clickCaptchaCapture.enabled = false;
+            clickCaptchaCapture.refreshing = false;
+            clickCaptchaCapture.status = `准备四字验证码失败：${error.message}`;
+            renderClickCaptchaOverlay();
+            notifyClickCaptchaCaptureUpdate();
+          });
+        return;
+      }
       clickCaptchaCapture.current = {
         imageDataUrl: source.dataUrl,
-        expectedClicks: source.targetCount,
+        expectedClicks: CLICK_CAPTCHA_REQUIRED_TARGET_COUNT,
         image: {
           width: source.width,
           height: source.height,

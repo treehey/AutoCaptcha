@@ -22,4 +22,25 @@ if (!/document\.querySelector\('\.verify-refresh'\)/.test(source) || !/CVVerifyC
   throw new Error('Click-captcha refresh must prioritize the verified page refresh control and wait for canvas redraw stability.');
 }
 
+if (!/CLICK_CAPTCHA_REQUIRED_TARGET_COUNT = 4/.test(source)
+  || !/async function ensureFourTargetClickCaptcha\(target\)/.test(source)
+  || !/CLICK_CAPTCHA_MAX_TARGET_REFRESH_ATTEMPTS/.test(source)) {
+  throw new Error('Click-captcha capture must refresh three-target challenges before rearming.');
+}
+
+if (!/refreshClickCaptchaAndResume[\s\S]*?ensureFourTargetClickCaptcha\(refreshedTarget\)/.test(source)
+  || !/setClickCaptchaCaptureEnabled[\s\S]*?ensureFourTargetClickCaptcha\(target\)/.test(source)) {
+  throw new Error('Both initial capture and post-save refresh must enforce four-target challenges.');
+}
+
+if (!/recordSkippedThreeTargetCaptcha\(\)/.test(source)
+  || !/skippedThreeTargetCount/.test(source)) {
+  throw new Error('Skipped three-target challenges must be counted for evaluation.');
+}
+
+if (!/if \(source\.targetCount !== CLICK_CAPTCHA_REQUIRED_TARGET_COUNT\)/.test(source)
+  || !/expectedClicks: CLICK_CAPTCHA_REQUIRED_TARGET_COUNT/.test(source)) {
+  throw new Error('A canvas changed after capture starts must not produce a three-target sample.');
+}
+
 console.log('Click-captcha sampler completion guard verified.');
