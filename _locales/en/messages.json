@@ -1,4 +1,4 @@
 {
   "appName": { "message": "NJU Login Pro" },
-  "appDesc": { "message": "Local lightweight-CNN auto-login helper for NJU unified authentication, with OCR fallback and post-login course monitoring." }
+  "appDesc": { "message": "Local auto-login helper for NJU unified authentication and course selection, with lightweight CNN, click-captcha recognition, and course monitoring." }
 }

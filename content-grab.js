@@ -367,6 +367,7 @@ const CLICK_CAPTCHA_AUTO_MARGIN = 0.4;
 const CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL = 12;
 const CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS = 5;
 const CLICK_CAPTCHA_SOLVER_POLL_MS = 650;
+const CLICK_CAPTCHA_LOGIN_SUBMIT_DELAY_MS = 180;
 
 const clickCaptchaSolver = {
   enabled: false,
@@ -376,9 +377,12 @@ const clickCaptchaSolver = {
   fingerprint: '',
   attemptedTarget: null,
   attemptedFingerprint: '',
+  submittedTarget: null,
+  submittedFingerprint: '',
   autoClickToken: 0,
   lowConfidenceRefreshes: 0,
   result: null,
+  loginStatus: '未检测登录表单',
   status: '未启用',
   monitor: null
 };
@@ -543,6 +547,175 @@ async function requestFreshClickCaptcha(previousTarget) {
   }
 
   return refreshedTarget;
+}
+
+function isVisibleFormControl(element) {
+  return element instanceof HTMLElement
+    && !element.disabled
+    && isVisibleCaptureElement(element);
+}
+
+function getControlHint(element) {
+  return [
+    element.id,
+    element.name,
+    element.className,
+    element.getAttribute('placeholder'),
+    element.getAttribute('aria-label'),
+    element.getAttribute('autocomplete'),
+    element.getAttribute('type')
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function getElementDistance(first, second) {
+  const a = first.getBoundingClientRect();
+  const b = second.getBoundingClientRect();
+  return Math.hypot((a.left + a.width / 2) - (b.left + b.width / 2), (a.top + a.height / 2) - (b.top + b.height / 2));
+}
+
+function getLoginScopes(target) {
+  const scopes = [];
+  const form = target.closest('form');
+  if (form) scopes.push(form);
+
+  let ancestor = target.parentElement;
+  for (let depth = 0; ancestor && depth < 5; depth += 1, ancestor = ancestor.parentElement) {
+    if (!scopes.includes(ancestor)) scopes.push(ancestor);
+  }
+  return scopes;
+}
+
+function findLoginSubmitControl(scope, target) {
+  const controls = Array.from(scope.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"]'))
+    .filter(isVisibleFormControl)
+    .map(element => {
+      const label = [element.textContent, element.value, element.getAttribute('title'), element.getAttribute('aria-label'), element.id, element.className]
+        .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      if (/(verify-refresh|captcha-refresh|刷新|换一张|看不清|reload|refresh|重置|reset)/i.test(label)) return null;
+      const loginMatch = /(登录|login|sign\s*in|提交|submit|确认)/i.test(label);
+      const typeMatch = element.matches('input[type="submit"]') || element.getAttribute('type') === 'submit';
+      if (!loginMatch && !typeMatch) return null;
+      return {
+        element,
+        score: (loginMatch ? 1000 : 0) + (typeMatch ? 120 : 0) - getElementDistance(element, target)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+  return controls[0]?.element || null;
+}
+
+function findClickCaptchaLoginContext(target) {
+  const contexts = getLoginScopes(target)
+    .map(scope => {
+      const passwordInput = Array.from(scope.querySelectorAll('input[type="password"]'))
+        .filter(isVisibleFormControl)
+        .sort((a, b) => getElementDistance(a, target) - getElementDistance(b, target))[0];
+      if (!passwordInput) return null;
+
+      const usernameInput = Array.from(scope.querySelectorAll('input'))
+        .filter(isVisibleFormControl)
+        .filter(input => input !== passwordInput && !/captcha|verify|valid|code|yzm|验证码|校验/.test(getControlHint(input)))
+        .filter(input => /^(text|email|tel|number)?$/i.test(input.type || 'text'))
+        .map(input => ({
+          input,
+          score: (/(user|account|student|username|login|xh|学号|账号)/.test(getControlHint(input)) ? 1000 : 0)
+            - getElementDistance(input, passwordInput)
+        }))
+        .sort((a, b) => b.score - a.score)[0]?.input;
+      if (!usernameInput) return null;
+
+      const submitButton = findLoginSubmitControl(scope, target);
+      const form = scope instanceof HTMLFormElement ? scope : (passwordInput.closest('form') || usernameInput.closest('form'));
+      if (!submitButton && !form) return null;
+      return {
+        scope,
+        form,
+        usernameInput,
+        passwordInput,
+        submitButton,
+        score: (scope instanceof HTMLFormElement ? 2000 : 0) + (submitButton ? 500 : 0)
+          - getElementDistance(passwordInput, target)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+  return contexts[0] || null;
+}
+
+function setNativeInputValue(input, value) {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  if (descriptor?.set) descriptor.set.call(input, value);
+  else input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+async function prepareClickCaptchaLogin(target) {
+  const settings = await storageGet(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force']);
+  if (settings.nju_enabled === false) {
+    clickCaptchaSolver.loginStatus = '自动登录总开关已关闭';
+    return null;
+  }
+
+  const context = findClickCaptchaLoginContext(target);
+  if (!context) {
+    clickCaptchaSolver.loginStatus = '未在验证码附近找到登录表单';
+    return null;
+  }
+
+  const shouldFill = settings.nju_force || (!context.usernameInput.value && !context.passwordInput.value);
+  if (shouldFill && settings.nju_user && settings.nju_pass) {
+    setNativeInputValue(context.usernameInput, settings.nju_user);
+    setNativeInputValue(context.passwordInput, settings.nju_pass);
+  }
+
+  if (!context.usernameInput.value || !context.passwordInput.value) {
+    clickCaptchaSolver.loginStatus = '登录表单已找到，但账号或密码未配置';
+    return null;
+  }
+
+  clickCaptchaSolver.loginStatus = context.submitButton
+    ? '登录表单已就绪'
+    : '登录表单已就绪，将通过表单提交';
+  return context;
+}
+
+async function submitClickCaptchaLogin(target, fingerprint, context, autoClickToken) {
+  if (!context || !clickCaptchaSolver.enabled || !clickCaptchaSolver.autoClick
+    || clickCaptchaSolver.autoClickToken !== autoClickToken) {
+    return false;
+  }
+  if (clickCaptchaSolver.submittedTarget === target && clickCaptchaSolver.submittedFingerprint === fingerprint) {
+    clickCaptchaSolver.loginStatus = '当前验证码已提交过登录';
+    return false;
+  }
+  if (!document.contains(target) || getClickCaptchaFingerprint(target) !== fingerprint) {
+    clickCaptchaSolver.loginStatus = '验证码已更新，跳过重复提交';
+    return false;
+  }
+
+  await sleep(CLICK_CAPTCHA_LOGIN_SUBMIT_DELAY_MS);
+  if (!document.contains(target) || getClickCaptchaFingerprint(target) !== fingerprint) {
+    clickCaptchaSolver.loginStatus = '验证码已验证，页面正在跳转';
+    return false;
+  }
+
+  clickCaptchaSolver.status = '验证码已点击，正在提交登录';
+  notifyClickCaptchaSolverUpdate();
+  if (context.submitButton && isVisibleFormControl(context.submitButton)) {
+    context.submitButton.click();
+  } else if (context.form) {
+    if (typeof context.form.requestSubmit === 'function') context.form.requestSubmit();
+    else context.form.submit();
+  } else {
+    clickCaptchaSolver.loginStatus = '登录按钮已不可用，未提交';
+    return false;
+  }
+  clickCaptchaSolver.submittedTarget = target;
+  clickCaptchaSolver.submittedFingerprint = fingerprint;
+  clickCaptchaSolver.loginStatus = '登录已提交';
+  return true;
 }
 
 async function recordSkippedThreeTargetCaptcha() {
@@ -871,6 +1044,7 @@ function getClickCaptchaSolverState() {
   return {
     enabled: clickCaptchaSolver.enabled,
     autoClick: clickCaptchaSolver.autoClick,
+    loginStatus: clickCaptchaSolver.loginStatus,
     running: clickCaptchaSolver.running,
     lowConfidenceRefreshes: clickCaptchaSolver.lowConfidenceRefreshes,
     ready: Boolean(clickCaptchaSolver.target && document.contains(clickCaptchaSolver.target)),
@@ -1111,11 +1285,15 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
       clickCaptchaSolver.result = result;
       const autoEligible = isClickCaptchaAutoEligible(result);
       if (canAutoClickNow() && autoEligible) {
+        const loginContext = await prepareClickCaptchaLogin(target);
         clickCaptchaSolver.status = '正在按识别顺序点击';
         renderClickCaptchaSolverOverlay();
         notifyClickCaptchaSolverUpdate();
         await dispatchClickCaptchaPoints(target, result, clickCaptchaSolver.autoClickToken);
-        clickCaptchaSolver.status = `已发送点击，等待页面验证（分差 ${result.margin.toFixed(2)}）`;
+        const submitted = await submitClickCaptchaLogin(target, fingerprint, loginContext, clickCaptchaSolver.autoClickToken);
+        clickCaptchaSolver.status = submitted
+          ? `已提交登录，等待页面验证（分差 ${result.margin.toFixed(2)}）`
+          : `已发送点击，等待页面验证（分差 ${result.margin.toFixed(2)}；${clickCaptchaSolver.loginStatus}）`;
         break;
       }
 
@@ -1188,8 +1366,11 @@ async function setClickCaptchaSolverEnabled(enabled) {
     clickCaptchaSolver.fingerprint = '';
     clickCaptchaSolver.attemptedTarget = null;
     clickCaptchaSolver.attemptedFingerprint = '';
+    clickCaptchaSolver.submittedTarget = null;
+    clickCaptchaSolver.submittedFingerprint = '';
     clickCaptchaSolver.lowConfidenceRefreshes = 0;
     clickCaptchaSolver.result = null;
+    clickCaptchaSolver.loginStatus = '未检测登录表单';
     clickCaptchaSolver.status = '等待点击验证码';
     startClickCaptchaSolverMonitor();
   } else {
@@ -1207,7 +1388,7 @@ async function setClickCaptchaAutoClick(enabled) {
   clickCaptchaSolver.autoClick = enabled;
   await storageSet({ [CLICK_CAPTCHA_AUTO_CLICK_KEY]: enabled });
   clickCaptchaSolver.status = enabled
-    ? '自动点击已开启，低置信会换图重试'
+    ? '自动点击与自动登录已开启，低置信会换图重试'
     : '仅标出识别顺序，不会自动点击';
   notifyClickCaptchaSolverUpdate();
   return getClickCaptchaSolverState();

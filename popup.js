@@ -319,7 +319,7 @@ function renderClickCaptchaSolverState() {
   setBadge(els.clickCaptchaSolverBadge, enabled ? '等待中' : '已暂停', enabled ? 'info' : 'warning');
   els.clickCaptchaSolverTitle.textContent = enabled ? '等待下一张点击验证码' : '点击验证码识别已暂停';
   els.clickCaptchaSolverSub.textContent = state?.status || '可随时手动识别当前验证码。';
-  els.clickCaptchaSolverMeta.textContent = autoClick ? '自动点击' : '仅标点';
+  els.clickCaptchaSolverMeta.textContent = autoClick ? '自动点击并登录' : '仅标点';
 }
 
 function setIntervalValue(value) {
@@ -775,7 +775,7 @@ function initGrabEvents() {
     clickCaptchaSolverConnected = true;
     clickCaptchaSolverState = result.response?.state || null;
     renderClickCaptchaSolverState();
-    showToast(event.target.checked ? '自动点击已开启' : '已切换为仅标点');
+    showToast(event.target.checked ? '自动点击并登录已开启' : '已切换为仅标点');
   });
 
   els.runClickCaptchaSolverBtn.addEventListener('click', async () => {
