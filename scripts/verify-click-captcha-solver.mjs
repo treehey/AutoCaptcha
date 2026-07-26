@@ -32,6 +32,7 @@ for (const resource of [
 
 if (!/const CLICK_CAPTCHA_AUTO_MARGIN = 0\.4/.test(content)
   || !/const CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL = 12/.test(content)
+  || !/const CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS = 5/.test(content)
   || !/result\.margin >= CLICK_CAPTCHA_AUTO_MARGIN/.test(content)
   || !/result\.backgroundResidual <= CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL/.test(content)) {
   throw new Error('The calibrated confidence gate is missing from automatic click handling.');
@@ -74,6 +75,19 @@ if (!/autoClickToken/.test(content)
   || !/自动点击已取消/.test(content)
   || !/attemptedFingerprint/.test(content)) {
   throw new Error('Automatic clicks must be cancellable and failed frames must not restart continuously.');
+}
+
+if (!/lowConfidenceRefreshes/.test(content)
+  || !/requestFreshClickCaptcha\(target\)/.test(content)
+  || !/连续换图后仍未达到自动点击门槛/.test(content)
+  || !/runClickCaptchaSolver\(\{ allowAutoClick: true, force: true \}\)/.test(content)) {
+  throw new Error('Manual recognition must rerun the frame and automatic click must retry low-confidence frames safely.');
+}
+
+if (!/box:\s*\{[\s\S]*?left: box\.left/.test(worker)
+  || !/data-nju-solver-box/.test(content)
+  || !/glyphRight \+ 2/.test(content)) {
+  throw new Error('The marker overlay must use glyph bounds and keep order labels away from the characters.');
 }
 
 if (!/calculateBackgroundResidual/.test(worker)

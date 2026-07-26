@@ -280,6 +280,7 @@ function renderClickCaptchaSolverState() {
   const hasResult = Array.isArray(state?.order);
   const margin = Number(state?.confidenceMargin);
   const backgroundResidual = Number(state?.backgroundResidual);
+  const refreshes = Number(state?.lowConfidenceRefreshes || 0);
 
   els.clickCaptchaSolverEnabled.checked = enabled;
   els.clickCaptchaAutoClick.checked = autoClick;
@@ -311,7 +312,7 @@ function renderClickCaptchaSolverState() {
     setBadge(els.clickCaptchaSolverBadge, state.autoEligible ? '可执行' : '待确认', state.autoEligible ? 'success' : 'warning');
     els.clickCaptchaSolverTitle.textContent = `识别顺序：候选 ${order}`;
     els.clickCaptchaSolverSub.textContent = state?.status || '已在验证码上标出顺序。';
-    els.clickCaptchaSolverMeta.textContent = label;
+    els.clickCaptchaSolverMeta.textContent = refreshes > 0 ? `${label} · 换图 ${refreshes} 次` : label;
     return;
   }
 

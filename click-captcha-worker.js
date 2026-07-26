@@ -301,7 +301,15 @@ function selectAssignment(matrices, targetCount, boxes) {
       return {
         x: Math.round((box.left + box.right) / 2),
         y: Math.round((box.top + box.bottom) / 2),
-        candidate
+        candidate,
+        // Keep the glyph bounds so the page overlay can label beside, rather
+        // than directly on top of, the character the user may need to inspect.
+        box: {
+          left: box.left,
+          top: box.top,
+          right: box.right,
+          bottom: box.bottom
+        }
       };
     }),
     margin: best.score - next.score,

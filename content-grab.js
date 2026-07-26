@@ -365,6 +365,7 @@ const CLICK_CAPTCHA_SOLVER_ENABLED_KEY = 'nju_click_captcha_solver_enabled';
 const CLICK_CAPTCHA_AUTO_CLICK_KEY = 'nju_click_captcha_auto_click';
 const CLICK_CAPTCHA_AUTO_MARGIN = 0.4;
 const CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL = 12;
+const CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS = 5;
 const CLICK_CAPTCHA_SOLVER_POLL_MS = 650;
 
 const clickCaptchaSolver = {
@@ -376,6 +377,7 @@ const clickCaptchaSolver = {
   attemptedTarget: null,
   attemptedFingerprint: '',
   autoClickToken: 0,
+  lowConfidenceRefreshes: 0,
   result: null,
   status: '未启用',
   monitor: null
@@ -798,27 +800,60 @@ function renderClickCaptchaSolverOverlay() {
   overlay.style.width = `${Math.round(rect.width + 4)}px`;
   overlay.style.height = `${Math.round(rect.height + 4)}px`;
   overlay.querySelector('[data-nju-solver-label]').textContent = clickCaptchaSolver.status;
-  overlay.querySelectorAll('[data-nju-solver-point]').forEach(node => node.remove());
+  overlay.querySelectorAll('[data-nju-solver-point], [data-nju-solver-box]').forEach(node => node.remove());
 
   result.points.forEach((point, index) => {
+    const markerSize = 18;
+    const box = point.box || {
+      left: point.x - 8,
+      top: point.y - 8,
+      right: point.x + 8,
+      bottom: point.y + 8
+    };
+    const scaleX = rect.width / result.referenceWidth;
+    const scaleY = rect.height / result.referenceHeight;
+    const glyphLeft = 2 + (box.left * scaleX);
+    const glyphTop = 2 + (box.top * scaleY);
+    const glyphRight = 2 + (box.right * scaleX);
+    const glyphBottom = 2 + (box.bottom * scaleY);
+    const maxMarkerLeft = Math.max(2, rect.width + 2 - markerSize);
+    const maxMarkerTop = Math.max(2, rect.height + 2 - markerSize);
+    const markerLeft = Math.max(2, Math.min(maxMarkerLeft, glyphRight + 2));
+    const markerTop = Math.max(2, Math.min(maxMarkerTop, glyphTop - markerSize - 2));
+
+    const highlight = document.createElement('div');
+    highlight.dataset.njuSolverBox = 'true';
+    highlight.style.cssText = [
+      'position:absolute',
+      `left:${Math.round(glyphLeft - 1)}px`,
+      `top:${Math.round(glyphTop - 1)}px`,
+      `width:${Math.max(2, Math.round(glyphRight - glyphLeft + 2))}px`,
+      `height:${Math.max(2, Math.round(glyphBottom - glyphTop + 2))}px`,
+      'box-sizing:border-box',
+      'border:1px solid rgba(37,99,235,.82)',
+      'border-radius:3px',
+      'background:rgba(37,99,235,.035)'
+    ].join(';');
+    overlay.appendChild(highlight);
+
     const marker = document.createElement('div');
     marker.dataset.njuSolverPoint = 'true';
     marker.textContent = String(index + 1);
     marker.style.cssText = [
       'position:absolute',
-      `left:${Math.round((point.x / result.referenceWidth) * rect.width) - 12}px`,
-      `top:${Math.round((point.y / result.referenceHeight) * rect.height) - 12}px`,
-      'width:24px',
-      'height:24px',
+      `left:${Math.round(markerLeft)}px`,
+      `top:${Math.round(markerTop)}px`,
+      `width:${markerSize}px`,
+      `height:${markerSize}px`,
       'display:flex',
       'align-items:center',
       'justify-content:center',
       'border-radius:50%',
       'color:#fff',
-      'background:#2563eb',
-      'border:2px solid #fff',
+      'background:#1d4ed8',
+      'border:1px solid #fff',
       'box-shadow:0 1px 5px rgba(20,49,109,.32)',
-      'font:800 12px/1 system-ui,-apple-system,"Segoe UI",sans-serif'
+      'font:800 11px/1 system-ui,-apple-system,"Segoe UI",sans-serif'
     ].join(';');
     overlay.appendChild(marker);
   });
@@ -837,6 +872,7 @@ function getClickCaptchaSolverState() {
     enabled: clickCaptchaSolver.enabled,
     autoClick: clickCaptchaSolver.autoClick,
     running: clickCaptchaSolver.running,
+    lowConfidenceRefreshes: clickCaptchaSolver.lowConfidenceRefreshes,
     ready: Boolean(clickCaptchaSolver.target && document.contains(clickCaptchaSolver.target)),
     status: clickCaptchaSolver.status,
     confidenceMargin: result?.margin ?? null,
@@ -1042,39 +1078,72 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
   }
 
   clickCaptchaSolver.running = true;
+  clickCaptchaSolver.lowConfidenceRefreshes = 0;
   clickCaptchaSolver.target = initialTarget;
   clickCaptchaSolver.status = '正在识别点击验证码';
   notifyClickCaptchaSolverUpdate();
   try {
-    const target = await prepareFourTargetClickCaptchaForSolver(initialTarget);
-    const fingerprint = getClickCaptchaFingerprint(target);
-    clickCaptchaSolver.attemptedTarget = target;
-    clickCaptchaSolver.attemptedFingerprint = fingerprint;
-    const frame = getClickCaptchaFrame(target);
-    if (frame.width !== CLICK_CAPTCHA_REFERENCE_WIDTH || frame.height !== CLICK_CAPTCHA_REFERENCE_HEIGHT) {
-      throw new Error(`当前验证码尺寸 ${frame.width}x${frame.height} 与本地模型不兼容`);
-    }
-    const result = await solveClickCaptchaFrame(frame, CLICK_CAPTCHA_REQUIRED_TARGET_COUNT);
-    if (!document.contains(target) || getClickCaptchaFingerprint(target) !== fingerprint) {
-      throw new Error('验证码在识别过程中已刷新');
-    }
+    let target = initialTarget;
+    const canAutoClickNow = () => allowAutoClick
+      && clickCaptchaSolver.enabled
+      && clickCaptchaSolver.autoClick;
 
-    clickCaptchaSolver.target = target;
-    clickCaptchaSolver.fingerprint = fingerprint;
-    clickCaptchaSolver.result = result;
-    const autoEligible = isClickCaptchaAutoEligible(result);
-    if (allowAutoClick && clickCaptchaSolver.enabled && clickCaptchaSolver.autoClick && autoEligible) {
-      clickCaptchaSolver.status = '正在按识别顺序点击';
-      renderClickCaptchaSolverOverlay();
-      notifyClickCaptchaSolverUpdate();
-      await dispatchClickCaptchaPoints(target, result, clickCaptchaSolver.autoClickToken);
-      clickCaptchaSolver.status = `已发送点击，等待页面验证（分差 ${result.margin.toFixed(2)}）`;
-    } else if (result.backgroundResidual > CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL) {
-      clickCaptchaSolver.status = `页面背景与模型不匹配，已标点待人工确认（残差 ${result.backgroundResidual.toFixed(1)}）`;
-    } else if (autoEligible) {
-      clickCaptchaSolver.status = `已标出识别顺序（分差 ${result.margin.toFixed(2)}）`;
-    } else {
-      clickCaptchaSolver.status = `置信度不足，已标点待人工确认（分差 ${result.margin.toFixed(2)}）`;
+    while (true) {
+      if (clickCaptchaSolver.lowConfidenceRefreshes > 0 && !canAutoClickNow()) {
+        clickCaptchaSolver.status = '自动点击已关闭，已停止换图重试';
+        break;
+      }
+      target = await prepareFourTargetClickCaptchaForSolver(target);
+      const fingerprint = getClickCaptchaFingerprint(target);
+      clickCaptchaSolver.attemptedTarget = target;
+      clickCaptchaSolver.attemptedFingerprint = fingerprint;
+      const frame = getClickCaptchaFrame(target);
+      if (frame.width !== CLICK_CAPTCHA_REFERENCE_WIDTH || frame.height !== CLICK_CAPTCHA_REFERENCE_HEIGHT) {
+        throw new Error(`当前验证码尺寸 ${frame.width}x${frame.height} 与本地模型不兼容`);
+      }
+      const result = await solveClickCaptchaFrame(frame, CLICK_CAPTCHA_REQUIRED_TARGET_COUNT);
+      if (!document.contains(target) || getClickCaptchaFingerprint(target) !== fingerprint) {
+        throw new Error('验证码在识别过程中已刷新');
+      }
+
+      clickCaptchaSolver.target = target;
+      clickCaptchaSolver.fingerprint = fingerprint;
+      clickCaptchaSolver.result = result;
+      const autoEligible = isClickCaptchaAutoEligible(result);
+      if (canAutoClickNow() && autoEligible) {
+        clickCaptchaSolver.status = '正在按识别顺序点击';
+        renderClickCaptchaSolverOverlay();
+        notifyClickCaptchaSolverUpdate();
+        await dispatchClickCaptchaPoints(target, result, clickCaptchaSolver.autoClickToken);
+        clickCaptchaSolver.status = `已发送点击，等待页面验证（分差 ${result.margin.toFixed(2)}）`;
+        break;
+      }
+
+      if (result.backgroundResidual > CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL) {
+        clickCaptchaSolver.status = `页面背景与模型不匹配，已标点待人工确认（残差 ${result.backgroundResidual.toFixed(1)}）`;
+        break;
+      }
+
+      if (autoEligible) {
+        clickCaptchaSolver.status = `已标出识别顺序（分差 ${result.margin.toFixed(2)}）`;
+        break;
+      }
+
+      if (canAutoClickNow()
+        && clickCaptchaSolver.lowConfidenceRefreshes < CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS) {
+        clickCaptchaSolver.lowConfidenceRefreshes += 1;
+        clickCaptchaSolver.status = `置信度不足，正在换图重试（${clickCaptchaSolver.lowConfidenceRefreshes}/${CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS}，分差 ${result.margin.toFixed(2)}）`;
+        clickCaptchaSolver.result = null;
+        renderClickCaptchaSolverOverlay();
+        notifyClickCaptchaSolverUpdate();
+        target = await requestFreshClickCaptcha(target);
+        continue;
+      }
+
+      clickCaptchaSolver.status = clickCaptchaSolver.lowConfidenceRefreshes > 0
+        ? `连续换图后仍未达到自动点击门槛，已标点待人工确认（分差 ${result.margin.toFixed(2)}）`
+        : `置信度不足，已标点待人工确认（分差 ${result.margin.toFixed(2)}）`;
+      break;
     }
     renderClickCaptchaSolverOverlay();
   } catch (error) {
@@ -1119,6 +1188,7 @@ async function setClickCaptchaSolverEnabled(enabled) {
     clickCaptchaSolver.fingerprint = '';
     clickCaptchaSolver.attemptedTarget = null;
     clickCaptchaSolver.attemptedFingerprint = '';
+    clickCaptchaSolver.lowConfidenceRefreshes = 0;
     clickCaptchaSolver.result = null;
     clickCaptchaSolver.status = '等待点击验证码';
     startClickCaptchaSolverMonitor();
@@ -1137,7 +1207,7 @@ async function setClickCaptchaAutoClick(enabled) {
   clickCaptchaSolver.autoClick = enabled;
   await storageSet({ [CLICK_CAPTCHA_AUTO_CLICK_KEY]: enabled });
   clickCaptchaSolver.status = enabled
-    ? '自动点击已开启，低置信结果仍会转人工'
+    ? '自动点击已开启，低置信会换图重试'
     : '仅标出识别顺序，不会自动点击';
   notifyClickCaptchaSolverUpdate();
   return getClickCaptchaSolverState();
@@ -1430,7 +1500,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(error => sendResponse({ ok: false, error: error.message, state: getClickCaptchaSolverState() }));
     return true;
   } else if (msg.action === 'runClickCaptchaSolver') {
-    runClickCaptchaSolver({ allowAutoClick: false })
+    runClickCaptchaSolver({ allowAutoClick: true, force: true })
       .then(state => sendResponse({ ok: true, state }))
       .catch(error => sendResponse({ ok: false, error: error.message, state: getClickCaptchaSolverState() }));
     return true;

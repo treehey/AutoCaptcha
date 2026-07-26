@@ -847,19 +847,19 @@
         <div class="setting-row">
           <div>
             <div class="setting-title">自动识别并标点</div>
-            <div class="setting-desc">新验证码出现后在本地识别，低置信时保留给人工确认。</div>
+            <div class="setting-desc">新验证码出现后在本地识别，并在字旁标出点击顺序。</div>
           </div>
           <label class="switch"><input type="checkbox" id="clickCaptchaSolverEnabled"><span class="slider"></span></label>
         </div>
         <div class="setting-row">
           <div>
             <div class="setting-title">自动点击</div>
-            <div class="setting-desc">只对通过置信度门槛的结果执行，默认关闭。</div>
+            <div class="setting-desc">低置信会自动换图重试，通过门槛后按顺序点击。</div>
           </div>
           <label class="switch"><input type="checkbox" id="clickCaptchaAutoClick"><span class="slider"></span></label>
         </div>
         <div class="action-row">
-          <button class="primary-btn" id="runClickCaptchaSolverBtn" type="button" disabled>识别当前验证码</button>
+          <button class="primary-btn" id="runClickCaptchaSolverBtn" type="button" disabled>重新识别当前验证码</button>
           <button class="secondary-btn" id="clearClickCaptchaSolverBtn" type="button" disabled>清除标点</button>
         </div>
       </div>
