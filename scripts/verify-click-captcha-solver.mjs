@@ -81,6 +81,9 @@ if (!/function findClickCaptchaLoginContext\(target\)/.test(content)
   || !/storageGet\(\['nju_enabled', 'nju_user', 'nju_pass', 'nju_force'\]\)/.test(content)
   || !/function submitClickCaptchaLogin\(target, fingerprint, context, autoClickToken\)/.test(content)
   || !/clickCaptchaSolver\.submittedFingerprint/.test(content)
+  || !/document\.getElementById\('studentLoginBtn'\)/.test(content)
+  || !/document\.getElementById\('vcodeImg'\)/.test(content)
+  || !/clearClickCaptchaSolverOverlay\(\);[\s\S]*?return true;/.test(content)
   || !/验证码已点击，正在提交登录/.test(content)
   || !/已提交登录，等待页面验证/.test(content)) {
   throw new Error('Automatic click-captcha login must fill a scoped form and submit at most once per captcha frame.');

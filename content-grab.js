@@ -606,6 +606,32 @@ function findLoginSubmitControl(scope, target) {
 }
 
 function findClickCaptchaLoginContext(target) {
+  // The current selection portal has stable login IDs. Prefer this exact
+  // container so a later in-page captcha cannot be mistaken for login.
+  const loginContainer = document.getElementById('loginDiv');
+  const portalCaptcha = document.getElementById('vcodeImg');
+  const portalUsername = document.getElementById('loginName');
+  const portalPassword = document.getElementById('loginPwd');
+  const portalSubmit = document.getElementById('studentLoginBtn');
+  if (target === portalCaptcha
+    && loginContainer
+    && portalUsername
+    && portalPassword
+    && portalSubmit
+    && isVisibleCaptureElement(loginContainer)
+    && isVisibleFormControl(portalUsername)
+    && isVisibleFormControl(portalPassword)
+    && isVisibleFormControl(portalSubmit)) {
+    return {
+      scope: loginContainer,
+      form: null,
+      usernameInput: portalUsername,
+      passwordInput: portalPassword,
+      submitButton: portalSubmit,
+      score: Number.POSITIVE_INFINITY
+    };
+  }
+
   const contexts = getLoginScopes(target)
     .map(scope => {
       const passwordInput = Array.from(scope.querySelectorAll('input[type="password"]'))
@@ -715,6 +741,9 @@ async function submitClickCaptchaLogin(target, fingerprint, context, autoClickTo
   clickCaptchaSolver.submittedTarget = target;
   clickCaptchaSolver.submittedFingerprint = fingerprint;
   clickCaptchaSolver.loginStatus = '登录已提交';
+  // The portal switches to the user card asynchronously without a full page
+  // navigation. The prior captcha canvas can therefore remain in the DOM.
+  clearClickCaptchaSolverOverlay();
   return true;
 }
 

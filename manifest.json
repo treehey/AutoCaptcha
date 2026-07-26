@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "NJU 自动登录助手",
   "description": "南大统一身份认证与选课系统本地自动登录助手，内置轻量 CNN、点击验证码识别和自动抢课，无需大模型 API。",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "default_locale": "zh_CN",
   "icons": {
     "16": "icon16.png",
