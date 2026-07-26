@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Click CAPTCHA Worker Fixture</title>
+  <style>
+    body { margin: 24px; font: 14px/1.5 system-ui, sans-serif; background: #f5f7fb; color: #172033; }
+    main { max-width: 720px; padding: 24px; border: 1px solid #d9deea; background: #fff; border-radius: 8px; }
+    button { padding: 8px 12px; font: inherit; cursor: pointer; }
+    img { display: block; width: 250px; height: 120px; margin-top: 16px; image-rendering: auto; }
+    pre { padding: 12px; overflow: auto; background: #101827; color: #d8e6ff; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <main>
+    <button id="run" type="button">Run fixture</button>
+    <button id="run-all" type="button">Run all fixtures</button>
+    <img id="captcha" alt="fixture captcha">
+    <pre id="result">Ready</pre>
+  </main>
+  <script type="module">
+    const result = document.getElementById('result');
+    const image = document.getElementById('captcha');
+    const button = document.getElementById('run');
+    const runAllButton = document.getElementById('run-all');
+    const worker = new Worker('../click-captcha-worker.js', { type: 'module' });
+    const workerStartedAt = performance.now();
+    let ready = false;
+    let requestId = 0;
+    const pending = new Map();
+    const renderer = new URLSearchParams(location.search).get('renderer') === 'custom' ? 'custom' : 'canvas';
+
+    const candidateFor = x => x < 58 ? 0 : x < 128 ? 1 : x < 190 ? 2 : 3;
+    const waitForImage = () => new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('Fixture image failed to load'));
+    });
+
+    worker.onmessage = event => {
+      const message = event.data;
+      if (message.type === 'ready') {
+        ready = true;
+        window.__clickCaptchaWorkerReadyMs = performance.now() - workerStartedAt;
+        result.textContent = 'Worker ready';
+        return;
+      }
+      if (message.type === 'error') {
+        const pendingRequest = pending.get(message.requestId);
+        if (pendingRequest) {
+          pending.delete(message.requestId);
+          clearTimeout(pendingRequest.timer);
+          pendingRequest.reject(new Error(message.error));
+          return;
+        }
+        result.textContent = `Worker error: ${message.error}`;
+        return;
+      }
+      if (message.type === 'solved') {
+        const pendingRequest = pending.get(message.requestId);
+        if (pendingRequest) {
+          pending.delete(message.requestId);
+          clearTimeout(pendingRequest.timer);
+          pendingRequest.resolve(message.result);
+          return;
+        }
+        window.__clickCaptchaFixtureResult = message.result;
+        result.textContent = JSON.stringify(message.result, null, 2);
+      }
+    };
+    worker.onerror = event => {
+      result.textContent = `Worker startup error: ${event.message}`;
+    };
+    worker.postMessage({
+      type: 'init',
+      modelUrl: new URL('../assets/click-captcha-model.onnx', import.meta.url).href,
+      backgroundUrl: new URL('../assets/click-captcha-background.png', import.meta.url).href,
+      wasmBaseUrl: new URL('../vendor/onnxruntime/', import.meta.url).href
+    });
+
+    const solveFrame = (frame, targetCount, debug = false) => new Promise((resolve, reject) => {
+      const id = ++requestId;
+      const timer = setTimeout(() => {
+        const pendingRequest = pending.get(id);
+        if (pendingRequest) {
+          pending.delete(id);
+          pendingRequest.reject(new Error('Worker solve timed out'));
+        }
+      }, 10000);
+      pending.set(id, { resolve, reject, timer });
+      worker.postMessage({
+        type: 'solve',
+        requestId: id,
+        width: frame.width,
+        height: frame.height,
+        targetCount,
+        renderer,
+        debug,
+        pixels: frame.data.buffer
+      }, [frame.data.buffer]);
+    });
+
+    const frameFromUrl = async url => {
+      const bitmap = await createImageBitmap(await fetch(url).then(response => response.blob()));
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(bitmap, 0, 0);
+      return context.getImageData(0, 0, canvas.width, canvas.height);
+    };
+
+    button.addEventListener('click', async () => {
+      if (!ready) {
+        result.textContent = 'Worker is still loading';
+        return;
+      }
+      const roundName = new URLSearchParams(location.search).get('round') || '001';
+      const sampleId = new URLSearchParams(location.search).get('id') || '0001';
+      const metadata = await fetch(`../data/click-captcha-samples/round-${roundName}/metadata.json`).then(response => response.json());
+      const sample = metadata.samples.find(item => item.id === sampleId) || metadata.samples[0];
+      image.src = `../data/click-captcha-samples/round-${roundName}/${sample.image}`;
+      await waitForImage();
+      const canvas = new OffscreenCanvas(image.naturalWidth, image.naturalHeight);
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(image, 0, 0);
+      const frame = context.getImageData(0, 0, canvas.width, canvas.height);
+      const expected = sample.clicks.map(click => candidateFor(click.x));
+      window.__clickCaptchaFixtureExpected = expected;
+      result.textContent = `Expected: ${expected.join(', ')}\nSolving...`;
+      const solved = await solveFrame(frame, sample.clicks.length, true);
+      window.__clickCaptchaFixtureResult = solved;
+      result.textContent = JSON.stringify(solved, null, 2);
+    });
+
+    runAllButton.addEventListener('click', async () => {
+      if (!ready) {
+        result.textContent = 'Worker is still loading';
+        return;
+      }
+      button.disabled = true;
+      runAllButton.disabled = true;
+      const corrections = await fetch('../data/click-captcha-samples/corrections.json').then(response => response.json());
+      const correctionBySample = corrections.samples || {};
+      const summary = { total: 0, exact: 0, elapsedMs: [], mismatches: [], rows: [] };
+      try {
+        for (let round = 1; round <= 20; round += 1) {
+          const roundName = String(round).padStart(3, '0');
+          const metadata = await fetch(`../data/click-captcha-samples/round-${roundName}/metadata.json`).then(response => response.json());
+          for (const sample of metadata.samples) {
+            const correction = correctionBySample[`round-${roundName}/${sample.id}`] || {};
+            const targetCount = correction.targetCount || sample.clicks.length;
+            const selectedIndexes = correction.selectedClickIndexes || Array.from({ length: targetCount }, (_, index) => index);
+            const expected = selectedIndexes.map(index => candidateFor(sample.clicks[index].x));
+            const frame = await frameFromUrl(`../data/click-captcha-samples/round-${roundName}/${sample.image}`);
+            const solved = await solveFrame(frame, targetCount);
+            const correct = expected.every((candidate, index) => solved.order[index] === candidate);
+            summary.total += 1;
+            summary.exact += Number(correct);
+            summary.elapsedMs.push(solved.elapsedMs);
+            summary.rows.push({
+              round: roundName,
+              id: sample.id,
+              correct,
+              margin: solved.margin,
+              headAgreement: solved.headAgreement
+            });
+            if (!correct) summary.mismatches.push({
+              round: roundName,
+              id: sample.id,
+              expected,
+              predicted: solved.order,
+              margin: solved.margin,
+              headAgreement: solved.headAgreement,
+              elapsedMs: solved.elapsedMs
+            });
+            if (summary.total % 10 === 0) {
+              result.textContent = `Running ${summary.total}/600... ${summary.exact}/${summary.total} correct`;
+            }
+          }
+        }
+        summary.accuracy = summary.exact / summary.total;
+        summary.averageElapsedMs = summary.elapsedMs.reduce((sum, value) => sum + value, 0) / summary.elapsedMs.length;
+        summary.p95ElapsedMs = summary.elapsedMs.slice().sort((left, right) => left - right)[Math.floor(summary.elapsedMs.length * 0.95)];
+        delete summary.elapsedMs;
+        window.__clickCaptchaFixtureAll = summary;
+        const display = { ...summary };
+        delete display.rows;
+        result.textContent = JSON.stringify(display, null, 2);
+      } finally {
+        button.disabled = false;
+        runAllButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

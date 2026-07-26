@@ -361,6 +361,32 @@ const CLICK_CAPTCHA_REFRESH_SETTLE_MS = 450;
 const CLICK_CAPTCHA_REFRESH_TIMEOUT_MS = 4000;
 const CLICK_CAPTCHA_REQUIRED_TARGET_COUNT = 4;
 const CLICK_CAPTCHA_MAX_TARGET_REFRESH_ATTEMPTS = 5;
+const CLICK_CAPTCHA_SOLVER_ENABLED_KEY = 'nju_click_captcha_solver_enabled';
+const CLICK_CAPTCHA_AUTO_CLICK_KEY = 'nju_click_captcha_auto_click';
+const CLICK_CAPTCHA_AUTO_MARGIN = 0.4;
+const CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL = 12;
+const CLICK_CAPTCHA_SOLVER_POLL_MS = 650;
+
+const clickCaptchaSolver = {
+  enabled: false,
+  autoClick: false,
+  running: false,
+  target: null,
+  fingerprint: '',
+  attemptedTarget: null,
+  attemptedFingerprint: '',
+  autoClickToken: 0,
+  result: null,
+  status: '未启用',
+  monitor: null
+};
+
+const clickCaptchaWorker = {
+  worker: null,
+  ready: null,
+  requestId: 0,
+  requests: new Map()
+};
 
 const clickCaptchaCapture = {
   enabled: false,
@@ -647,14 +673,13 @@ function inferClickCaptchaTargetCountFromCanvas(canvas) {
 
 function inferClickCaptchaTargetCount(element) {
   try {
-    const source = getClickCaptchaSource(element);
-    return source.targetCount;
+    return inferClickCaptchaTargetCountFromCanvas(getClickCaptchaFrame(element).canvas);
   } catch {
     return CLICK_CAPTCHA_MAX_TARGET_COUNT;
   }
 }
 
-function getClickCaptchaSource(element) {
+function getClickCaptchaFrame(element) {
   const sourceCanvas = document.createElement('canvas');
   let width = 0;
   let height = 0;
@@ -675,12 +700,23 @@ function getClickCaptchaSource(element) {
   sourceCanvas.height = height;
   const context = sourceCanvas.getContext('2d', { willReadFrequently: true });
   context.drawImage(element, 0, 0, width, height);
-  const sourceUrl = element instanceof HTMLImageElement ? (element.currentSrc || element.src || '') : '';
   return {
-    dataUrl: sourceCanvas.toDataURL('image/png'),
+    canvas: sourceCanvas,
+    context,
     width,
     height,
-    targetCount: inferClickCaptchaTargetCountFromCanvas(sourceCanvas),
+    imageData: context.getImageData(0, 0, width, height)
+  };
+}
+
+function getClickCaptchaSource(element) {
+  const frame = getClickCaptchaFrame(element);
+  const sourceUrl = element instanceof HTMLImageElement ? (element.currentSrc || element.src || '') : '';
+  return {
+    dataUrl: frame.canvas.toDataURL('image/png'),
+    width: frame.width,
+    height: frame.height,
+    targetCount: inferClickCaptchaTargetCountFromCanvas(frame.canvas),
     sourcePath: sourceUrl ? new URL(sourceUrl, location.href).pathname : '',
     element: describeCaptureElement(element)
   };
@@ -720,6 +756,388 @@ function storageRemove(keys) {
       resolve();
     });
   });
+}
+
+function getClickCaptchaSolverOverlay() {
+  let overlay = document.getElementById('nju-click-captcha-solver-overlay');
+  if (overlay) return overlay;
+
+  overlay = document.createElement('div');
+  overlay.id = 'nju-click-captcha-solver-overlay';
+  overlay.style.cssText = [
+    'position:fixed',
+    'z-index:2147483646',
+    'display:none',
+    'pointer-events:none',
+    'border:2px solid rgba(37,99,235,.72)',
+    'border-radius:5px',
+    'box-shadow:0 0 0 3px rgba(37,99,235,.12)'
+  ].join(';');
+
+  const label = document.createElement('div');
+  label.dataset.njuSolverLabel = 'true';
+  label.style.cssText = 'position:absolute;left:0;top:-27px;padding:4px 7px;border-radius:5px;background:#2563eb;color:#fff;font:700 12px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;white-space:nowrap;box-shadow:0 2px 8px rgba(20,49,109,.22)';
+  overlay.appendChild(label);
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function renderClickCaptchaSolverOverlay() {
+  const overlay = getClickCaptchaSolverOverlay();
+  const target = clickCaptchaSolver.target;
+  const result = clickCaptchaSolver.result;
+  if (!target || !result || !document.contains(target) || !isVisibleCaptureElement(target)) {
+    overlay.style.display = 'none';
+    return;
+  }
+
+  const rect = target.getBoundingClientRect();
+  overlay.style.display = 'block';
+  overlay.style.left = `${Math.round(rect.left - 2)}px`;
+  overlay.style.top = `${Math.round(rect.top - 2)}px`;
+  overlay.style.width = `${Math.round(rect.width + 4)}px`;
+  overlay.style.height = `${Math.round(rect.height + 4)}px`;
+  overlay.querySelector('[data-nju-solver-label]').textContent = clickCaptchaSolver.status;
+  overlay.querySelectorAll('[data-nju-solver-point]').forEach(node => node.remove());
+
+  result.points.forEach((point, index) => {
+    const marker = document.createElement('div');
+    marker.dataset.njuSolverPoint = 'true';
+    marker.textContent = String(index + 1);
+    marker.style.cssText = [
+      'position:absolute',
+      `left:${Math.round((point.x / result.referenceWidth) * rect.width) - 12}px`,
+      `top:${Math.round((point.y / result.referenceHeight) * rect.height) - 12}px`,
+      'width:24px',
+      'height:24px',
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+      'border-radius:50%',
+      'color:#fff',
+      'background:#2563eb',
+      'border:2px solid #fff',
+      'box-shadow:0 1px 5px rgba(20,49,109,.32)',
+      'font:800 12px/1 system-ui,-apple-system,"Segoe UI",sans-serif'
+    ].join(';');
+    overlay.appendChild(marker);
+  });
+}
+
+function clearClickCaptchaSolverOverlay() {
+  clickCaptchaSolver.result = null;
+  renderClickCaptchaSolverOverlay();
+}
+
+function getClickCaptchaSolverState() {
+  const result = clickCaptchaSolver.result;
+  const backgroundCompatible = Boolean(result
+    && result.backgroundResidual <= CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL);
+  return {
+    enabled: clickCaptchaSolver.enabled,
+    autoClick: clickCaptchaSolver.autoClick,
+    running: clickCaptchaSolver.running,
+    ready: Boolean(clickCaptchaSolver.target && document.contains(clickCaptchaSolver.target)),
+    status: clickCaptchaSolver.status,
+    confidenceMargin: result?.margin ?? null,
+    backgroundResidual: result?.backgroundResidual ?? null,
+    backgroundCompatible,
+    headAgreement: result?.headAgreement ?? null,
+    autoEligible: isClickCaptchaAutoEligible(result),
+    order: result?.order || null,
+    elapsedMs: result?.elapsedMs ?? null,
+    modelVersion: result?.modelVersion || null
+  };
+}
+
+function isClickCaptchaAutoEligible(result) {
+  return Boolean(result
+    && result.margin >= CLICK_CAPTCHA_AUTO_MARGIN
+    && result.backgroundResidual <= CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL);
+}
+
+function notifyClickCaptchaSolverUpdate() {
+  try {
+    chrome.runtime.sendMessage({ action: 'clickCaptchaSolverUpdate', state: getClickCaptchaSolverState() });
+  } catch {
+    // The popup is optional; solving must continue while it is closed.
+  }
+}
+
+function rejectClickCaptchaWorkerRequests(error) {
+  for (const request of clickCaptchaWorker.requests.values()) {
+    clearTimeout(request.timer);
+    request.reject(error);
+  }
+  clickCaptchaWorker.requests.clear();
+}
+
+function resetClickCaptchaWorker(error) {
+  const worker = clickCaptchaWorker.worker;
+  clickCaptchaWorker.ready = null;
+  clickCaptchaWorker.worker = null;
+  if (worker) worker.terminate();
+  rejectClickCaptchaWorkerRequests(error);
+}
+
+function getClickCaptchaWorker() {
+  if (clickCaptchaWorker.ready) return clickCaptchaWorker.ready;
+
+  clickCaptchaWorker.ready = new Promise((resolve, reject) => {
+    const worker = new Worker(chrome.runtime.getURL('click-captcha-worker.js'), { type: 'module' });
+    clickCaptchaWorker.worker = worker;
+    worker.onmessage = event => {
+      const message = event.data || {};
+      if (message.type === 'ready') {
+        resolve(worker);
+        return;
+      }
+      if (message.type === 'solved' || message.type === 'error') {
+        if (message.type === 'error' && !message.requestId) {
+          const error = new Error(message.error || '点击验证码模型初始化失败');
+          resetClickCaptchaWorker(error);
+          reject(error);
+          return;
+        }
+        const request = clickCaptchaWorker.requests.get(message.requestId);
+        if (!request) return;
+        clickCaptchaWorker.requests.delete(message.requestId);
+        clearTimeout(request.timer);
+        if (message.type === 'solved') request.resolve(message.result);
+        else request.reject(new Error(message.error || '点击验证码模型执行失败'));
+      }
+    };
+    worker.onerror = event => {
+      const error = new Error(event.message || '点击验证码 Worker 启动失败');
+      resetClickCaptchaWorker(error);
+      reject(error);
+    };
+    worker.postMessage({
+      type: 'init',
+      modelUrl: chrome.runtime.getURL('assets/click-captcha-model.onnx'),
+      backgroundUrl: chrome.runtime.getURL('assets/click-captcha-background.png'),
+      wasmBaseUrl: chrome.runtime.getURL('vendor/onnxruntime/')
+    });
+  });
+  return clickCaptchaWorker.ready;
+}
+
+async function solveClickCaptchaFrame(frame, targetCount) {
+  const worker = await getClickCaptchaWorker();
+  const requestId = ++clickCaptchaWorker.requestId;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (clickCaptchaWorker.requests.delete(requestId)) {
+        reject(new Error('点击验证码识别超时'));
+      }
+    }, 6000);
+    clickCaptchaWorker.requests.set(requestId, { resolve, reject, timer });
+    worker.postMessage({
+      type: 'solve',
+      requestId,
+      width: frame.width,
+      height: frame.height,
+      targetCount,
+      pixels: frame.imageData.data.buffer
+    }, [frame.imageData.data.buffer]);
+  });
+}
+
+async function prepareFourTargetClickCaptchaForSolver(target) {
+  let current = target;
+  for (let attempts = 0; attempts < CLICK_CAPTCHA_MAX_TARGET_REFRESH_ATTEMPTS; attempts += 1) {
+    if (inferClickCaptchaTargetCount(current) === CLICK_CAPTCHA_REQUIRED_TARGET_COUNT) return current;
+    clickCaptchaSolver.status = `检测到三字验证码，正在刷新（${attempts + 1}/${CLICK_CAPTCHA_MAX_TARGET_REFRESH_ATTEMPTS}）`;
+    notifyClickCaptchaSolverUpdate();
+    current = await requestFreshClickCaptcha(current);
+  }
+  throw new Error('连续刷新后仍未获得四字验证码');
+}
+
+function dispatchClickCaptchaPointer(target, clientX, clientY, type) {
+  const common = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX,
+    clientY,
+    button: 0,
+    buttons: type === 'pointerdown' || type === 'mousedown' ? 1 : 0
+  };
+  if (type.startsWith('pointer') && window.PointerEvent) {
+    target.dispatchEvent(new PointerEvent(type, { ...common, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+  } else {
+    target.dispatchEvent(new MouseEvent(type, common));
+  }
+}
+
+function createClickCaptchaAutoClickCancelledError() {
+  const error = new Error('自动点击已取消');
+  error.code = 'AUTO_CLICK_CANCELLED';
+  return error;
+}
+
+async function dispatchClickCaptchaPoints(target, result, autoClickToken) {
+  const fingerprint = getClickCaptchaFingerprint(target);
+  for (const point of result.points) {
+    if (!clickCaptchaSolver.enabled
+      || !clickCaptchaSolver.autoClick
+      || clickCaptchaSolver.autoClickToken !== autoClickToken) {
+      throw createClickCaptchaAutoClickCancelledError();
+    }
+    if (!document.contains(target) || getClickCaptchaFingerprint(target) !== fingerprint) {
+      throw new Error('验证码在点击过程中已刷新');
+    }
+    const rect = target.getBoundingClientRect();
+    const clientX = rect.left + ((point.x / result.referenceWidth) * rect.width);
+    const clientY = rect.top + ((point.y / result.referenceHeight) * rect.height);
+    dispatchClickCaptchaPointer(target, clientX, clientY, 'pointerdown');
+    dispatchClickCaptchaPointer(target, clientX, clientY, 'mousedown');
+    dispatchClickCaptchaPointer(target, clientX, clientY, 'pointerup');
+    dispatchClickCaptchaPointer(target, clientX, clientY, 'mouseup');
+    dispatchClickCaptchaPointer(target, clientX, clientY, 'click');
+    await sleep(80);
+  }
+}
+
+async function runClickCaptchaSolver({ allowAutoClick = false, force = false } = {}) {
+  if (clickCaptchaCapture.enabled) {
+    clickCaptchaSolver.status = '采样进行中，识别已暂停';
+    notifyClickCaptchaSolverUpdate();
+    return getClickCaptchaSolverState();
+  }
+  if (clickCaptchaSolver.running) return getClickCaptchaSolverState();
+
+  const initialTarget = findClickCaptchaElement();
+  if (!initialTarget) {
+    clickCaptchaSolver.target = null;
+    clickCaptchaSolver.status = '未找到点击验证码';
+    clearClickCaptchaSolverOverlay();
+    notifyClickCaptchaSolverUpdate();
+    return getClickCaptchaSolverState();
+  }
+
+  const initialFingerprint = getClickCaptchaFingerprint(initialTarget);
+  if (!force
+    && initialTarget === clickCaptchaSolver.attemptedTarget
+    && initialFingerprint === clickCaptchaSolver.attemptedFingerprint) {
+    return getClickCaptchaSolverState();
+  }
+
+  clickCaptchaSolver.running = true;
+  clickCaptchaSolver.target = initialTarget;
+  clickCaptchaSolver.status = '正在识别点击验证码';
+  notifyClickCaptchaSolverUpdate();
+  try {
+    const target = await prepareFourTargetClickCaptchaForSolver(initialTarget);
+    const fingerprint = getClickCaptchaFingerprint(target);
+    clickCaptchaSolver.attemptedTarget = target;
+    clickCaptchaSolver.attemptedFingerprint = fingerprint;
+    const frame = getClickCaptchaFrame(target);
+    if (frame.width !== CLICK_CAPTCHA_REFERENCE_WIDTH || frame.height !== CLICK_CAPTCHA_REFERENCE_HEIGHT) {
+      throw new Error(`当前验证码尺寸 ${frame.width}x${frame.height} 与本地模型不兼容`);
+    }
+    const result = await solveClickCaptchaFrame(frame, CLICK_CAPTCHA_REQUIRED_TARGET_COUNT);
+    if (!document.contains(target) || getClickCaptchaFingerprint(target) !== fingerprint) {
+      throw new Error('验证码在识别过程中已刷新');
+    }
+
+    clickCaptchaSolver.target = target;
+    clickCaptchaSolver.fingerprint = fingerprint;
+    clickCaptchaSolver.result = result;
+    const autoEligible = isClickCaptchaAutoEligible(result);
+    if (allowAutoClick && clickCaptchaSolver.enabled && clickCaptchaSolver.autoClick && autoEligible) {
+      clickCaptchaSolver.status = '正在按识别顺序点击';
+      renderClickCaptchaSolverOverlay();
+      notifyClickCaptchaSolverUpdate();
+      await dispatchClickCaptchaPoints(target, result, clickCaptchaSolver.autoClickToken);
+      clickCaptchaSolver.status = `已发送点击，等待页面验证（分差 ${result.margin.toFixed(2)}）`;
+    } else if (result.backgroundResidual > CLICK_CAPTCHA_MAX_BACKGROUND_RESIDUAL) {
+      clickCaptchaSolver.status = `页面背景与模型不匹配，已标点待人工确认（残差 ${result.backgroundResidual.toFixed(1)}）`;
+    } else if (autoEligible) {
+      clickCaptchaSolver.status = `已标出识别顺序（分差 ${result.margin.toFixed(2)}）`;
+    } else {
+      clickCaptchaSolver.status = `置信度不足，已标点待人工确认（分差 ${result.margin.toFixed(2)}）`;
+    }
+    renderClickCaptchaSolverOverlay();
+  } catch (error) {
+    if (error?.code === 'AUTO_CLICK_CANCELLED') {
+      clickCaptchaSolver.status = '自动点击已取消，已保留标点供人工确认';
+      renderClickCaptchaSolverOverlay();
+    } else {
+      clickCaptchaSolver.status = `识别未执行：${error.message}`;
+      clearClickCaptchaSolverOverlay();
+    }
+  } finally {
+    clickCaptchaSolver.running = false;
+    notifyClickCaptchaSolverUpdate();
+  }
+  return getClickCaptchaSolverState();
+}
+
+async function pollClickCaptchaSolver() {
+  if (!clickCaptchaSolver.enabled || clickCaptchaSolver.running || clickCaptchaCapture.enabled) return;
+  const target = findClickCaptchaElement();
+  if (!target || !isReadyClickCaptchaElement(target)) return;
+  const fingerprint = getClickCaptchaFingerprint(target);
+  if (target === clickCaptchaSolver.attemptedTarget && fingerprint === clickCaptchaSolver.attemptedFingerprint) return;
+  await runClickCaptchaSolver({ allowAutoClick: true });
+}
+
+function startClickCaptchaSolverMonitor() {
+  if (clickCaptchaSolver.monitor) return;
+  clickCaptchaSolver.monitor = setInterval(() => {
+    pollClickCaptchaSolver().catch(error => {
+      clickCaptchaSolver.status = `识别监控异常：${error.message}`;
+      notifyClickCaptchaSolverUpdate();
+    });
+  }, CLICK_CAPTCHA_SOLVER_POLL_MS);
+  pollClickCaptchaSolver().catch(() => {});
+}
+
+async function setClickCaptchaSolverEnabled(enabled) {
+  clickCaptchaSolver.enabled = enabled;
+  if (enabled) {
+    clickCaptchaSolver.target = null;
+    clickCaptchaSolver.fingerprint = '';
+    clickCaptchaSolver.attemptedTarget = null;
+    clickCaptchaSolver.attemptedFingerprint = '';
+    clickCaptchaSolver.result = null;
+    clickCaptchaSolver.status = '等待点击验证码';
+    startClickCaptchaSolverMonitor();
+  } else {
+    clickCaptchaSolver.autoClickToken += 1;
+    clickCaptchaSolver.status = '识别已暂停';
+    clearClickCaptchaSolverOverlay();
+  }
+  await storageSet({ [CLICK_CAPTCHA_SOLVER_ENABLED_KEY]: enabled });
+  notifyClickCaptchaSolverUpdate();
+  return getClickCaptchaSolverState();
+}
+
+async function setClickCaptchaAutoClick(enabled) {
+  if (!enabled) clickCaptchaSolver.autoClickToken += 1;
+  clickCaptchaSolver.autoClick = enabled;
+  await storageSet({ [CLICK_CAPTCHA_AUTO_CLICK_KEY]: enabled });
+  clickCaptchaSolver.status = enabled
+    ? '自动点击已开启，低置信结果仍会转人工'
+    : '仅标出识别顺序，不会自动点击';
+  notifyClickCaptchaSolverUpdate();
+  return getClickCaptchaSolverState();
+}
+
+async function initializeClickCaptchaSolver() {
+  try {
+    const settings = await storageGet([CLICK_CAPTCHA_SOLVER_ENABLED_KEY, CLICK_CAPTCHA_AUTO_CLICK_KEY]);
+    clickCaptchaSolver.enabled = Boolean(settings[CLICK_CAPTCHA_SOLVER_ENABLED_KEY]);
+    clickCaptchaSolver.autoClick = Boolean(settings[CLICK_CAPTCHA_AUTO_CLICK_KEY]);
+    clickCaptchaSolver.status = clickCaptchaSolver.enabled ? '等待点击验证码' : '未启用';
+    if (clickCaptchaSolver.enabled) startClickCaptchaSolverMonitor();
+    notifyClickCaptchaSolverUpdate();
+  } catch {
+    clickCaptchaSolver.status = '本地设置读取失败';
+  }
 }
 
 async function getClickCaptchaSamples() {
@@ -960,6 +1378,8 @@ document.addEventListener('pointerdown', event => {
 
 window.addEventListener('scroll', renderClickCaptchaOverlay, true);
 window.addEventListener('resize', renderClickCaptchaOverlay);
+window.addEventListener('scroll', renderClickCaptchaSolverOverlay, true);
+window.addEventListener('resize', renderClickCaptchaSolverOverlay);
 
 // ============ 消息监听（与popup通信）============
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -981,9 +1401,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === 'discardLastClickCaptchaSample') {
     discardLastClickCaptchaSample().then(state => sendResponse({ ok: true, state }));
     return true;
+  } else if (msg.action === 'getClickCaptchaSolverStatus') {
+    sendResponse({ ok: true, state: getClickCaptchaSolverState() });
+  } else if (msg.action === 'setClickCaptchaSolverEnabled') {
+    setClickCaptchaSolverEnabled(Boolean(msg.enabled))
+      .then(state => sendResponse({ ok: true, state }))
+      .catch(error => sendResponse({ ok: false, error: error.message, state: getClickCaptchaSolverState() }));
+    return true;
+  } else if (msg.action === 'setClickCaptchaAutoClick') {
+    setClickCaptchaAutoClick(Boolean(msg.enabled))
+      .then(state => sendResponse({ ok: true, state }))
+      .catch(error => sendResponse({ ok: false, error: error.message, state: getClickCaptchaSolverState() }));
+    return true;
+  } else if (msg.action === 'runClickCaptchaSolver') {
+    runClickCaptchaSolver({ allowAutoClick: false })
+      .then(state => sendResponse({ ok: true, state }))
+      .catch(error => sendResponse({ ok: false, error: error.message, state: getClickCaptchaSolverState() }));
+    return true;
+  } else if (msg.action === 'clearClickCaptchaSolverOverlay') {
+    clearClickCaptchaSolverOverlay();
+    sendResponse({ ok: true, state: getClickCaptchaSolverState() });
   }
   return true; // 保持消息通道以支持异步sendResponse
 });
 
 // 迁移：清除旧版单 key 数组格式的残留数据（v5.0 之前的格式）
 storageRemove(['nju_click_captcha_samples_v1']).catch(() => {});
+initializeClickCaptchaSolver();

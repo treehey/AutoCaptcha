@@ -56,6 +56,14 @@ const els = {
   exportClickCaptchaBtn: document.getElementById('exportClickCaptchaBtn'),
   discardClickCaptchaBtn: document.getElementById('discardClickCaptchaBtn'),
   resetClickCaptchaBtn: document.getElementById('resetClickCaptchaBtn'),
+  clickCaptchaSolverBadge: document.getElementById('clickCaptchaSolverBadge'),
+  clickCaptchaSolverTitle: document.getElementById('clickCaptchaSolverTitle'),
+  clickCaptchaSolverSub: document.getElementById('clickCaptchaSolverSub'),
+  clickCaptchaSolverMeta: document.getElementById('clickCaptchaSolverMeta'),
+  clickCaptchaSolverEnabled: document.getElementById('clickCaptchaSolverEnabled'),
+  clickCaptchaAutoClick: document.getElementById('clickCaptchaAutoClick'),
+  runClickCaptchaSolverBtn: document.getElementById('runClickCaptchaSolverBtn'),
+  clearClickCaptchaSolverBtn: document.getElementById('clearClickCaptchaSolverBtn'),
   grabStatus: document.getElementById('grabStatus'),
   copyLogBtn: document.getElementById('copyLogBtn'),
   clearLogBtn: document.getElementById('clearLogBtn'),
@@ -75,9 +83,12 @@ let grabConnected = false;
 let grabState = null;
 let clickCaptchaCaptureState = null;
 let clickCaptchaCaptureConnected = false;
+let clickCaptchaSolverState = null;
+let clickCaptchaSolverConnected = false;
 let toastTimer = null;
 let syncingGrab = false;
 let syncingClickCaptchaCapture = false;
+let syncingClickCaptchaSolver = false;
 let previewRunning = false;
 
 function setVersion() {
@@ -260,6 +271,56 @@ function renderClickCaptchaCaptureState() {
   els.clickCaptchaCaptureBtn.disabled = count >= max;
 }
 
+function renderClickCaptchaSolverState() {
+  const state = clickCaptchaSolverState;
+  const connected = clickCaptchaSolverConnected;
+  const running = Boolean(state?.running);
+  const enabled = Boolean(state?.enabled);
+  const autoClick = Boolean(state?.autoClick);
+  const hasResult = Array.isArray(state?.order);
+  const margin = Number(state?.confidenceMargin);
+  const backgroundResidual = Number(state?.backgroundResidual);
+
+  els.clickCaptchaSolverEnabled.checked = enabled;
+  els.clickCaptchaAutoClick.checked = autoClick;
+  els.clickCaptchaAutoClick.disabled = !connected || !enabled;
+  els.runClickCaptchaSolverBtn.disabled = !connected || running;
+  els.clearClickCaptchaSolverBtn.disabled = !connected || !hasResult;
+
+  if (!connected) {
+    setBadge(els.clickCaptchaSolverBadge, '未连接', 'warning');
+    els.clickCaptchaSolverTitle.textContent = '等待连接选课页面';
+    els.clickCaptchaSolverSub.textContent = '打开选课页面后可测试本地识别。';
+    els.clickCaptchaSolverMeta.textContent = '本地模型';
+    return;
+  }
+
+  if (running) {
+    setBadge(els.clickCaptchaSolverBadge, '识别中', 'info');
+    els.clickCaptchaSolverTitle.textContent = '正在识别点击验证码';
+    els.clickCaptchaSolverSub.textContent = state?.status || '模型在本地 Worker 中运行。';
+    els.clickCaptchaSolverMeta.textContent = '请稍候';
+    return;
+  }
+
+  if (hasResult) {
+    const order = state.order.map(index => index + 1).join(' → ');
+    const label = state.backgroundCompatible === false && Number.isFinite(backgroundResidual)
+      ? `背景残差 ${backgroundResidual.toFixed(1)}`
+      : Number.isFinite(margin) ? `分差 ${margin.toFixed(2)}` : '已识别';
+    setBadge(els.clickCaptchaSolverBadge, state.autoEligible ? '可执行' : '待确认', state.autoEligible ? 'success' : 'warning');
+    els.clickCaptchaSolverTitle.textContent = `识别顺序：候选 ${order}`;
+    els.clickCaptchaSolverSub.textContent = state?.status || '已在验证码上标出顺序。';
+    els.clickCaptchaSolverMeta.textContent = label;
+    return;
+  }
+
+  setBadge(els.clickCaptchaSolverBadge, enabled ? '等待中' : '已暂停', enabled ? 'info' : 'warning');
+  els.clickCaptchaSolverTitle.textContent = enabled ? '等待下一张点击验证码' : '点击验证码识别已暂停';
+  els.clickCaptchaSolverSub.textContent = state?.status || '可随时手动识别当前验证码。';
+  els.clickCaptchaSolverMeta.textContent = autoClick ? '自动点击' : '仅标点';
+}
+
 function setIntervalValue(value) {
   const normalized = String(value || '3000');
   els.grabInterval.value = normalized;
@@ -429,6 +490,16 @@ async function syncClickCaptchaCaptureStatus() {
   syncingClickCaptchaCapture = false;
 }
 
+async function syncClickCaptchaSolverStatus() {
+  if (syncingClickCaptchaSolver) return;
+  syncingClickCaptchaSolver = true;
+  const result = await sendGrabMessage({ action: 'getClickCaptchaSolverStatus' });
+  clickCaptchaSolverConnected = result.connected;
+  clickCaptchaSolverState = result.connected ? result.response?.state || null : null;
+  renderClickCaptchaSolverState();
+  syncingClickCaptchaSolver = false;
+}
+
 function exportClickCaptchaSamples() {
   chrome.storage.local.get([
     CLICK_CAPTCHA_SAMPLE_COUNT_KEY,
@@ -515,6 +586,7 @@ function initTabs() {
       if (btn.dataset.tab === 'grab') {
         syncGrabStatus();
         syncClickCaptchaCaptureStatus();
+        syncClickCaptchaSolverStatus();
       }
     });
   });
@@ -675,6 +747,59 @@ function initGrabEvents() {
     showToast(enable ? (clickCaptchaCaptureState?.ready ? '采样已开启' : '未找到验证码图片') : '采样已停止');
   });
 
+  els.clickCaptchaSolverEnabled.addEventListener('change', async event => {
+    const result = await sendGrabMessage({ action: 'setClickCaptchaSolverEnabled', enabled: event.target.checked });
+    if (!result.connected) {
+      clickCaptchaSolverConnected = false;
+      clickCaptchaSolverState = null;
+      renderClickCaptchaSolverState();
+      showToast('请先打开选课页面');
+      return;
+    }
+    clickCaptchaSolverConnected = true;
+    clickCaptchaSolverState = result.response?.state || null;
+    renderClickCaptchaSolverState();
+    showToast(event.target.checked ? '点击验证码识别已开启' : '点击验证码识别已暂停');
+  });
+
+  els.clickCaptchaAutoClick.addEventListener('change', async event => {
+    const result = await sendGrabMessage({ action: 'setClickCaptchaAutoClick', enabled: event.target.checked });
+    if (!result.connected) {
+      clickCaptchaSolverConnected = false;
+      clickCaptchaSolverState = null;
+      renderClickCaptchaSolverState();
+      showToast('请先打开选课页面');
+      return;
+    }
+    clickCaptchaSolverConnected = true;
+    clickCaptchaSolverState = result.response?.state || null;
+    renderClickCaptchaSolverState();
+    showToast(event.target.checked ? '自动点击已开启' : '已切换为仅标点');
+  });
+
+  els.runClickCaptchaSolverBtn.addEventListener('click', async () => {
+    const result = await sendGrabMessage({ action: 'runClickCaptchaSolver' });
+    if (!result.connected) {
+      clickCaptchaSolverConnected = false;
+      clickCaptchaSolverState = null;
+      renderClickCaptchaSolverState();
+      showToast('请先打开选课页面');
+      return;
+    }
+    clickCaptchaSolverConnected = true;
+    clickCaptchaSolverState = result.response?.state || null;
+    renderClickCaptchaSolverState();
+    showToast(result.response?.ok === false ? (result.response.error || '识别未完成') : '识别已完成');
+  });
+
+  els.clearClickCaptchaSolverBtn.addEventListener('click', async () => {
+    const result = await sendGrabMessage({ action: 'clearClickCaptchaSolverOverlay' });
+    if (!result.connected) return;
+    clickCaptchaSolverConnected = true;
+    clickCaptchaSolverState = result.response?.state || null;
+    renderClickCaptchaSolverState();
+  });
+
   els.exportClickCaptchaBtn.addEventListener('click', exportClickCaptchaSamples);
 
   els.discardClickCaptchaBtn.addEventListener('click', async () => {
@@ -757,6 +882,10 @@ chrome.runtime.onMessage.addListener(msg => {
     clickCaptchaCaptureConnected = true;
     clickCaptchaCaptureState = msg.state;
     renderClickCaptchaCaptureState();
+  } else if (msg.action === 'clickCaptchaSolverUpdate' && msg.state) {
+    clickCaptchaSolverConnected = true;
+    clickCaptchaSolverState = msg.state;
+    renderClickCaptchaSolverState();
   }
 });
 
@@ -767,3 +896,4 @@ initLoginEvents();
 initGrabEvents();
 syncOcrPreviewStatus();
 syncClickCaptchaCaptureStatus();
+syncClickCaptchaSolverStatus();

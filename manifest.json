@@ -43,6 +43,17 @@
         "icon48.png"
       ],
       "matches": ["<all_urls>"]
+    },
+    {
+      "resources": [
+        "click-captcha-worker.js",
+        "assets/click-captcha-model.onnx",
+        "assets/click-captcha-background.png",
+        "vendor/onnxruntime/ort.wasm.bundle.min.js",
+        "vendor/onnxruntime/ort-wasm-simd-threaded.mjs",
+        "vendor/onnxruntime/ort-wasm-simd-threaded.wasm"
+      ],
+      "matches": ["https://xk.nju.edu.cn/*"]
     }
   ]
 }

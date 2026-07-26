@@ -20,6 +20,7 @@ $files = @(
   'captcha-cnn.js',
   'content.js',
   'content-grab.js',
+  'click-captcha-worker.js',
   'popup.html',
   'popup.js',
   'tesseract.min.js',
@@ -28,12 +29,15 @@ $files = @(
   'icon128.png',
   'assets/captcha-template-model.json',
   'assets/captcha-cnn-model.json',
-  'assets/captcha-cnn-model.bin'
+  'assets/captcha-cnn-model.bin',
+  'assets/click-captcha-model.onnx',
+  'assets/click-captcha-background.png'
 )
 
 $dirs = @(
   '_locales',
-  'langs'
+  'langs',
+  'vendor'
 )
 
 foreach ($file in $files) {
@@ -65,6 +69,14 @@ if ((-not (Test-Path (Join-Path $verify 'captcha-cnn.js'))) -or
     (-not (Test-Path (Join-Path $verify 'assets/captcha-cnn-model.json'))) -or
     (-not (Test-Path (Join-Path $verify 'assets/captcha-cnn-model.bin')))) {
   throw 'Package verification failed: captcha CNN runtime or model is missing.'
+}
+
+if ((-not (Test-Path (Join-Path $verify 'click-captcha-worker.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'assets/click-captcha-model.onnx'))) -or
+    (-not (Test-Path (Join-Path $verify 'assets/click-captcha-background.png'))) -or
+    (-not (Test-Path (Join-Path $verify 'vendor/onnxruntime/ort.wasm.bundle.min.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'vendor/onnxruntime/ort-wasm-simd-threaded.wasm')))) {
+  throw 'Package verification failed: click-captcha runtime or model is missing.'
 }
 
 Remove-Item -LiteralPath $staging -Recurse -Force

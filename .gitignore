@@ -5,4 +5,5 @@ data/regression-results/
 data/recovered-captcha-answers-*/
 data/segmentation-experiments/
 data/click-captcha-experiments/
+.playwright-cli/
 scripts/__pycache__/
