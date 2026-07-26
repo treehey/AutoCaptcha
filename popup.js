@@ -146,17 +146,21 @@ function renderCredentialState() {
   const hasUser = Boolean(els.username.value.trim());
   const hasPass = Boolean(els.password.value);
   const configured = hasUser && hasPass;
+  const hadSavedCredentials = Boolean(initialCredentials.user.trim() && initialCredentials.pass);
+  const dirty = credentialsDirty();
 
   if (configured) {
-    setBadge(els.credentialBadge, credentialsDirty() ? '有未保存更改' : '已配置', credentialsDirty() ? 'warning' : 'success');
-    els.accountSummary.textContent = credentialsDirty() ? '账号信息有未保存更改。' : `已配置 · ${maskUsername(els.username.value)}`;
+    setBadge(els.credentialBadge, dirty ? '有未保存更改' : '已配置', dirty ? 'warning' : 'success');
+    els.accountSummary.textContent = dirty ? '账号信息有未保存更改。' : `已配置 · ${maskUsername(els.username.value)}`;
   } else {
     setBadge(els.credentialBadge, '未配置', 'warning');
     els.accountSummary.textContent = '首次使用时配置，之后可随时修改。';
   }
 
-  els.saveBtn.disabled = !credentialsDirty();
-  els.saveBtn.textContent = credentialsDirty() ? '保存更改' : '已保存';
+  els.saveBtn.disabled = !dirty || (!configured && !hadSavedCredentials);
+  els.saveBtn.textContent = configured
+    ? (dirty ? '保存更改' : '已保存')
+    : hadSavedCredentials ? '保存更改' : (hasUser || hasPass ? '请填写完整账号' : '请填写账号');
   renderLoginState();
 }
 
@@ -411,8 +415,8 @@ function setCaptchaPreviewContent(code, meta, details = '') {
 
 function renderCurrentCaptchaPanel() {
   if (currentCaptchaPage === 'auth') {
-    els.currentCaptchaTitle.textContent = '当前统一认证页';
-    els.currentCaptchaNote.textContent = '可查看或重新识别登录验证码。';
+    els.currentCaptchaTitle.textContent = '验证码测试';
+    els.currentCaptchaNote.textContent = '当前：统一认证页。可按需查看或重新识别登录验证码。';
     setBadge(els.currentCaptchaBadge, authPreviewReady ? '验证码就绪' : authPreviewConnected ? '认证页已连接' : '未连接', authPreviewReady ? 'success' : authPreviewConnected ? 'info' : 'warning');
     els.recognizeAgainBtn.textContent = previewRunning ? '识别中...' : '重新识别';
     els.recognizeAgainBtn.disabled = !authPreviewReady || previewRunning;
@@ -423,8 +427,8 @@ function renderCurrentCaptchaPanel() {
     const state = clickCaptchaSolverState;
     const running = Boolean(state?.running);
     const orderCount = Array.isArray(state?.order) ? state.order.length : 0;
-    els.currentCaptchaTitle.textContent = '当前选课页';
-    els.currentCaptchaNote.textContent = '可查看或重新识别点击验证码；手动识别只标出顺序。';
+    els.currentCaptchaTitle.textContent = '验证码测试';
+    els.currentCaptchaNote.textContent = '当前：选课页。手动识别只标出顺序，不会自动点击或提交。';
     setBadge(els.currentCaptchaBadge, !clickCaptchaSolverConnected ? '未连接' : running ? '识别中' : '选课页已连接', !clickCaptchaSolverConnected ? 'warning' : running ? 'info' : 'success');
     setCaptchaPreviewContent(
       orderCount ? `已识别 ${orderCount} 个点击点` : running ? '正在识别' : '等待点击验证码',
@@ -435,8 +439,8 @@ function renderCurrentCaptchaPanel() {
     return;
   }
 
-  els.currentCaptchaTitle.textContent = '当前页面验证码';
-  els.currentCaptchaNote.textContent = '打开认证页或选课页后显示识别状态。';
+  els.currentCaptchaTitle.textContent = '验证码测试';
+  els.currentCaptchaNote.textContent = '打开认证页或选课页后，可按需查看识别状态。';
   setBadge(els.currentCaptchaBadge, '未连接', 'warning');
   setCaptchaPreviewContent('等待打开页面', '请在统一认证页或选课页面打开面板。');
   els.recognizeAgainBtn.textContent = '重新识别';

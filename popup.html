@@ -813,24 +813,6 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="section-head">
-        <div>
-          <div class="section-title" id="currentCaptchaTitle">当前页面验证码</div>
-          <div class="section-note" id="currentCaptchaNote">打开认证页或选课页后显示识别状态。</div>
-        </div>
-        <span class="badge warning" id="currentCaptchaBadge">未连接</span>
-      </div>
-      <div class="ocr-preview">
-        <div>
-          <div class="ocr-preview-code empty" id="ocrPreviewCode">等待打开页面</div>
-          <div class="ocr-preview-meta" id="ocrPreviewMeta">请在统一认证页或选课页面打开面板。</div>
-        </div>
-        <button class="secondary-btn" id="recognizeAgainBtn" type="button">重新识别</button>
-        <div class="ocr-preview-details" id="ocrPreviewDetails"></div>
-      </div>
-    </div>
-
     <div class="tab-panel active" id="tab-login" role="tabpanel" aria-labelledby="loginTab">
       <div class="card status-card">
         <div class="status-main">
@@ -1031,6 +1013,26 @@
         </div>
       </details>
     </div>
+
+    <details class="card captcha-tools">
+      <summary>
+        <div>
+          <div class="section-title" id="currentCaptchaTitle">验证码测试</div>
+          <div class="section-note" id="currentCaptchaNote">按需查看或重新识别当前页面验证码。</div>
+        </div>
+        <span class="badge warning" id="currentCaptchaBadge">未连接</span>
+      </summary>
+      <div class="details-content">
+        <div class="ocr-preview">
+          <div>
+            <div class="ocr-preview-code empty" id="ocrPreviewCode">等待打开页面</div>
+            <div class="ocr-preview-meta" id="ocrPreviewMeta">请在统一认证页或选课页面打开面板。</div>
+          </div>
+          <button class="secondary-btn" id="recognizeAgainBtn" type="button">重新识别</button>
+          <div class="ocr-preview-details" id="ocrPreviewDetails"></div>
+        </div>
+      </div>
+    </details>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
