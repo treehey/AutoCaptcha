@@ -4,7 +4,11 @@ const REFERENCE_WIDTH = 250;
 const REFERENCE_HEIGHT = 120;
 const SCENE_HEIGHT = 100;
 const MODEL_SIZE = 64;
-const FOREGROUND_THRESHOLD = 160;
+// The bottom prompt text is high contrast, but candidate glyphs may be very
+// pale after background subtraction. Keep their bounding-box thresholds apart
+// so a faint candidate is not expanded back to its entire slot before resize.
+const TARGET_FOREGROUND_THRESHOLD = 160;
+const CANDIDATE_FOREGROUND_THRESHOLD = 205;
 const RESIDUAL_GAIN = 2;
 const TARGET_SLOTS = [[120, 134], [143, 157], [166, 180], [189, 203]];
 const CANDIDATE_SLOTS = [[0, 58], [58, 128], [128, 190], [190, 250]];
@@ -126,7 +130,7 @@ function rotateCanvas(source, angle) {
   return canvasToGray(output);
 }
 
-function foregroundBox(gray, width, height) {
+function foregroundBox(gray, width, height, threshold) {
   let minX = width;
   let minY = height;
   let maxX = -1;
@@ -134,7 +138,7 @@ function foregroundBox(gray, width, height) {
   let count = 0;
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      if (gray[y * width + x] < FOREGROUND_THRESHOLD) {
+      if (gray[y * width + x] < threshold) {
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
@@ -143,17 +147,28 @@ function foregroundBox(gray, width, height) {
       }
     }
   }
-  if (count < 3) return { left: 0, top: 0, right: width, bottom: height };
+  if (count < 3) {
+    return {
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: height,
+      foregroundPixels: count,
+      usedFallback: true
+    };
+  }
   return {
     left: Math.max(0, minX - 2),
     top: Math.max(0, minY - 2),
     right: Math.min(width, maxX + 3),
-    bottom: Math.min(height, maxY + 3)
+    bottom: Math.min(height, maxY + 3),
+    foregroundPixels: count,
+    usedFallback: false
   };
 }
 
-function centerGlyph(gray, width, height, renderer) {
-  const box = foregroundBox(gray, width, height);
+function centerGlyph(gray, width, height, renderer, threshold) {
+  const box = foregroundBox(gray, width, height, threshold);
   const cropWidth = Math.max(1, box.right - box.left);
   const cropHeight = Math.max(1, box.bottom - box.top);
   const crop = new Float32Array(cropWidth * cropHeight);
@@ -189,7 +204,13 @@ function makeGrayTargets(pixels, width, height, targetCount, renderer) {
         offset += 1;
       }
     }
-    const { glyph } = centerGlyph(gray, right - left, TARGET_BOTTOM - TARGET_TOP, renderer);
+    const { glyph } = centerGlyph(
+      gray,
+      right - left,
+      TARGET_BOTTOM - TARGET_TOP,
+      renderer,
+      TARGET_FOREGROUND_THRESHOLD
+    );
     for (let pixel = 0; pixel < glyph.length; pixel += 1) {
       targets[(index * glyph.length) + pixel] = glyph[pixel] / 255;
     }
@@ -219,12 +240,20 @@ function makeCandidates(pixels, width, height, renderer) {
         offset += 1;
       }
     }
-    const centered = centerGlyph(gray, regionWidth, SCENE_HEIGHT, renderer);
+    const centered = centerGlyph(
+      gray,
+      regionWidth,
+      SCENE_HEIGHT,
+      renderer,
+      CANDIDATE_FOREGROUND_THRESHOLD
+    );
     boxes.push({
       left: left + centered.box.left,
       top: centered.box.top,
       right: left + centered.box.right,
-      bottom: centered.box.bottom
+      bottom: centered.box.bottom,
+      foregroundPixels: centered.box.foregroundPixels,
+      usedFallback: centered.box.usedFallback
     });
     for (let rotationIndex = 0; rotationIndex < CANDIDATE_ROTATIONS.length; rotationIndex += 1) {
       const rotated = renderer === 'canvas'
@@ -399,7 +428,15 @@ async function solve(message) {
     debugMatrices: message.debug ? matrices : undefined,
     debugTensorSums: message.debug ? {
       targets: tensorSums(targets, MODEL_SIZE * MODEL_SIZE),
-      candidates: tensorSums(candidateData.candidates, MODEL_SIZE * MODEL_SIZE)
+      candidates: tensorSums(candidateData.candidates, MODEL_SIZE * MODEL_SIZE),
+      candidateBoxes: candidateData.boxes.map(box => ({
+        left: box.left,
+        top: box.top,
+        right: box.right,
+        bottom: box.bottom,
+        foregroundPixels: box.foregroundPixels,
+        usedFallback: box.usedFallback
+      }))
     } : undefined
   };
 }
