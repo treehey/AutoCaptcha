@@ -97,9 +97,13 @@ if (!/calculateBackgroundResidual/.test(worker)
 
 if (!/const TARGET_FOREGROUND_THRESHOLD = 160/.test(worker)
   || !/const CANDIDATE_FOREGROUND_THRESHOLD = 205/.test(worker)
-  || !/renderer,\s*TARGET_FOREGROUND_THRESHOLD\s*\)/.test(worker)
-  || !/renderer,\s*CANDIDATE_FOREGROUND_THRESHOLD\s*\)/.test(worker)
+  || !/const CANDIDATE_MIN_COMPONENT_PIXELS = 2/.test(worker)
+  || !/const CANDIDATE_ISOLATED_NOISE_EXPANSION = 12/.test(worker)
+  || !/renderer,\s*TARGET_FOREGROUND_THRESHOLD,\s*1,\s*Infinity\s*\)/.test(worker)
+  || !/renderer,\s*CANDIDATE_FOREGROUND_THRESHOLD,\s*CANDIDATE_MIN_COMPONENT_PIXELS,\s*CANDIDATE_ISOLATED_NOISE_EXPANSION\s*\)/.test(worker)
   || !/foregroundPixels/.test(worker)
+  || !/discardedForegroundPixels/.test(worker)
+  || !/isolatedNoiseFiltered/.test(worker)
   || !/usedFallback/.test(worker)) {
   throw new Error('Faint candidate glyphs must use the calibrated localization threshold and expose crop diagnostics.');
 }

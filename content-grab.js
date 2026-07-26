@@ -1132,7 +1132,7 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
       if (canAutoClickNow()
         && clickCaptchaSolver.lowConfidenceRefreshes < CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS) {
         clickCaptchaSolver.lowConfidenceRefreshes += 1;
-        clickCaptchaSolver.status = `置信度不足，正在换图重试（${clickCaptchaSolver.lowConfidenceRefreshes}/${CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS}，分差 ${result.margin.toFixed(2)}）`;
+        clickCaptchaSolver.status = `候选顺序接近，正在换图重试（${clickCaptchaSolver.lowConfidenceRefreshes}/${CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS}，分差 ${result.margin.toFixed(2)}）`;
         clickCaptchaSolver.result = null;
         renderClickCaptchaSolverOverlay();
         notifyClickCaptchaSolverUpdate();
@@ -1142,7 +1142,7 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
 
       clickCaptchaSolver.status = clickCaptchaSolver.lowConfidenceRefreshes > 0
         ? `连续换图后仍未达到自动点击门槛，已标点待人工确认（分差 ${result.margin.toFixed(2)}）`
-        : `置信度不足，已标点待人工确认（分差 ${result.margin.toFixed(2)}）`;
+        : `已生成候选顺序，但与次优方案接近，已标点待人工确认（分差 ${result.margin.toFixed(2)}）`;
       break;
     }
     renderClickCaptchaSolverOverlay();

@@ -9,6 +9,8 @@ const MODEL_SIZE = 64;
 // so a faint candidate is not expanded back to its entire slot before resize.
 const TARGET_FOREGROUND_THRESHOLD = 160;
 const CANDIDATE_FOREGROUND_THRESHOLD = 205;
+const CANDIDATE_MIN_COMPONENT_PIXELS = 2;
+const CANDIDATE_ISOLATED_NOISE_EXPANSION = 12;
 const RESIDUAL_GAIN = 2;
 const TARGET_SLOTS = [[120, 134], [143, 157], [166, 180], [189, 203]];
 const CANDIDATE_SLOTS = [[0, 58], [58, 128], [128, 190], [190, 250]];
@@ -130,23 +132,155 @@ function rotateCanvas(source, angle) {
   return canvasToGray(output);
 }
 
-function foregroundBox(gray, width, height, threshold) {
+function foregroundBox(
+  gray,
+  width,
+  height,
+  threshold,
+  minimumComponentPixels = 1,
+  minimumIsolatedNoiseExpansion = Infinity
+) {
+  if (minimumComponentPixels <= 1) {
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    let count = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (gray[y * width + x] < threshold) {
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+          count += 1;
+        }
+      }
+    }
+    if (count < 3) {
+      return {
+        left: 0,
+        top: 0,
+        right: width,
+        bottom: height,
+        foregroundPixels: count,
+        sourceForegroundPixels: count,
+        discardedForegroundPixels: 0,
+        usedFallback: true,
+        isolatedNoiseFiltered: false
+      };
+    }
+    return {
+      left: Math.max(0, minX - 2),
+      top: Math.max(0, minY - 2),
+      right: Math.min(width, maxX + 3),
+      bottom: Math.min(height, maxY + 3),
+      foregroundPixels: count,
+      sourceForegroundPixels: count,
+      discardedForegroundPixels: 0,
+      usedFallback: false,
+      isolatedNoiseFiltered: false
+    };
+  }
+
+  const pixelCount = width * height;
+  const foreground = new Uint8Array(pixelCount);
+  const visited = new Uint8Array(pixelCount);
+  const stack = new Int32Array(pixelCount);
+  let sourceForegroundPixels = 0;
+  let sourceMinX = width;
+  let sourceMinY = height;
+  let sourceMaxX = -1;
+  let sourceMaxY = -1;
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (gray[index] < threshold) {
+      foreground[index] = 1;
+      sourceForegroundPixels += 1;
+      const x = index % width;
+      const y = (index - x) / width;
+      sourceMinX = Math.min(sourceMinX, x);
+      sourceMinY = Math.min(sourceMinY, y);
+      sourceMaxX = Math.max(sourceMaxX, x);
+      sourceMaxY = Math.max(sourceMaxY, y);
+    }
+  }
+
   let minX = width;
   let minY = height;
   let maxX = -1;
   let maxY = -1;
   let count = 0;
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (gray[y * width + x] < threshold) {
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-        count += 1;
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (!foreground[index] || visited[index]) continue;
+
+    let stackLength = 0;
+    let componentPixels = 0;
+    let componentMinX = width;
+    let componentMinY = height;
+    let componentMaxX = -1;
+    let componentMaxY = -1;
+    stack[stackLength] = index;
+    stackLength += 1;
+    visited[index] = 1;
+
+    while (stackLength) {
+      stackLength -= 1;
+      const current = stack[stackLength];
+      const x = current % width;
+      const y = (current - x) / width;
+      componentPixels += 1;
+      componentMinX = Math.min(componentMinX, x);
+      componentMinY = Math.min(componentMinY, y);
+      componentMaxX = Math.max(componentMaxX, x);
+      componentMaxY = Math.max(componentMaxY, y);
+
+      if (current >= width && foreground[current - width] && !visited[current - width]) {
+        visited[current - width] = 1;
+        stack[stackLength] = current - width;
+        stackLength += 1;
+      }
+      if (current < pixelCount - width && foreground[current + width] && !visited[current + width]) {
+        visited[current + width] = 1;
+        stack[stackLength] = current + width;
+        stackLength += 1;
+      }
+      if (x > 0 && foreground[current - 1] && !visited[current - 1]) {
+        visited[current - 1] = 1;
+        stack[stackLength] = current - 1;
+        stackLength += 1;
+      }
+      if (x < width - 1 && foreground[current + 1] && !visited[current + 1]) {
+        visited[current + 1] = 1;
+        stack[stackLength] = current + 1;
+        stackLength += 1;
       }
     }
+    if (componentPixels < minimumComponentPixels) continue;
+    minX = Math.min(minX, componentMinX);
+    minY = Math.min(minY, componentMinY);
+    maxX = Math.max(maxX, componentMaxX);
+    maxY = Math.max(maxY, componentMaxY);
+    count += componentPixels;
   }
+  const isolatedNoiseExpansion = count >= 3
+    ? Math.max(
+      minX - sourceMinX,
+      minY - sourceMinY,
+      sourceMaxX - maxX,
+      sourceMaxY - maxY
+    )
+    : 0;
+  const isolatedNoiseFiltered = count >= 3
+    && isolatedNoiseExpansion >= minimumIsolatedNoiseExpansion;
+  if (!isolatedNoiseFiltered) {
+    minX = sourceMinX;
+    minY = sourceMinY;
+    maxX = sourceMaxX;
+    maxY = sourceMaxY;
+    count = sourceForegroundPixels;
+  }
+  const discardedForegroundPixels = sourceForegroundPixels - count;
+
   if (count < 3) {
     return {
       left: 0,
@@ -154,7 +288,10 @@ function foregroundBox(gray, width, height, threshold) {
       right: width,
       bottom: height,
       foregroundPixels: count,
-      usedFallback: true
+      sourceForegroundPixels,
+      discardedForegroundPixels,
+      usedFallback: true,
+      isolatedNoiseFiltered
     };
   }
   return {
@@ -163,12 +300,30 @@ function foregroundBox(gray, width, height, threshold) {
     right: Math.min(width, maxX + 3),
     bottom: Math.min(height, maxY + 3),
     foregroundPixels: count,
-    usedFallback: false
+    sourceForegroundPixels,
+    discardedForegroundPixels,
+    usedFallback: false,
+    isolatedNoiseFiltered
   };
 }
 
-function centerGlyph(gray, width, height, renderer, threshold) {
-  const box = foregroundBox(gray, width, height, threshold);
+function centerGlyph(
+  gray,
+  width,
+  height,
+  renderer,
+  threshold,
+  minimumComponentPixels,
+  minimumIsolatedNoiseExpansion
+) {
+  const box = foregroundBox(
+    gray,
+    width,
+    height,
+    threshold,
+    minimumComponentPixels,
+    minimumIsolatedNoiseExpansion
+  );
   const cropWidth = Math.max(1, box.right - box.left);
   const cropHeight = Math.max(1, box.bottom - box.top);
   const crop = new Float32Array(cropWidth * cropHeight);
@@ -209,7 +364,9 @@ function makeGrayTargets(pixels, width, height, targetCount, renderer) {
       right - left,
       TARGET_BOTTOM - TARGET_TOP,
       renderer,
-      TARGET_FOREGROUND_THRESHOLD
+      TARGET_FOREGROUND_THRESHOLD,
+      1,
+      Infinity
     );
     for (let pixel = 0; pixel < glyph.length; pixel += 1) {
       targets[(index * glyph.length) + pixel] = glyph[pixel] / 255;
@@ -245,7 +402,9 @@ function makeCandidates(pixels, width, height, renderer) {
       regionWidth,
       SCENE_HEIGHT,
       renderer,
-      CANDIDATE_FOREGROUND_THRESHOLD
+      CANDIDATE_FOREGROUND_THRESHOLD,
+      CANDIDATE_MIN_COMPONENT_PIXELS,
+      CANDIDATE_ISOLATED_NOISE_EXPANSION
     );
     boxes.push({
       left: left + centered.box.left,
@@ -253,7 +412,10 @@ function makeCandidates(pixels, width, height, renderer) {
       right: left + centered.box.right,
       bottom: centered.box.bottom,
       foregroundPixels: centered.box.foregroundPixels,
-      usedFallback: centered.box.usedFallback
+      sourceForegroundPixels: centered.box.sourceForegroundPixels,
+      discardedForegroundPixels: centered.box.discardedForegroundPixels,
+      usedFallback: centered.box.usedFallback,
+      isolatedNoiseFiltered: centered.box.isolatedNoiseFiltered
     });
     for (let rotationIndex = 0; rotationIndex < CANDIDATE_ROTATIONS.length; rotationIndex += 1) {
       const rotated = renderer === 'canvas'
@@ -435,7 +597,10 @@ async function solve(message) {
         right: box.right,
         bottom: box.bottom,
         foregroundPixels: box.foregroundPixels,
-        usedFallback: box.usedFallback
+        sourceForegroundPixels: box.sourceForegroundPixels,
+        discardedForegroundPixels: box.discardedForegroundPixels,
+        usedFallback: box.usedFallback,
+        isolatedNoiseFiltered: box.isolatedNoiseFiltered
       }))
     } : undefined
   };
