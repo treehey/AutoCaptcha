@@ -32,8 +32,8 @@
     }
 
     body {
-      width: 340px;
-      min-height: 500px;
+      width: 360px;
+      min-height: 480px;
       margin: 0;
       font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg);
@@ -56,6 +56,14 @@
     button:disabled {
       cursor: not-allowed;
       opacity: 0.55;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible,
+    summary:focus-visible {
+      outline: 3px solid rgba(99, 71, 152, 0.3);
+      outline-offset: 2px;
     }
 
     .shell {
@@ -116,6 +124,10 @@
       gap: 6px;
       flex-wrap: wrap;
       margin-top: 12px;
+    }
+
+    .status-grid .pill:last-child {
+      display: none;
     }
 
     .pill {
@@ -183,6 +195,104 @@
       border-radius: var(--radius);
       background: var(--surface);
       box-shadow: 0 1px 2px rgba(23, 30, 47, 0.04);
+    }
+
+    .status-card {
+      border-color: rgba(99, 71, 152, 0.22);
+      background: linear-gradient(135deg, #fff 0%, #faf8ff 100%);
+    }
+
+    .status-main {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .status-title {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .status-copy {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .feature-list {
+      display: grid;
+      gap: 7px;
+      margin-top: 11px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .feature-line {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .feature-check {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      color: var(--success);
+      background: var(--success-soft);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    details.card {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    details.card > summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 50px;
+      padding: 12px;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    details.card > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.card > summary::after {
+      content: "›";
+      color: var(--faint);
+      font-size: 19px;
+      line-height: 1;
+      transition: transform 0.16s ease;
+    }
+
+    details.card[open] > summary::after {
+      transform: rotate(90deg);
+    }
+
+    .details-content {
+      padding: 0 12px 12px;
+    }
+
+    .account-summary {
+      min-width: 0;
+    }
+
+    .account-summary .section-note {
+      margin: 3px 0 0;
     }
 
     .section-head {
@@ -373,6 +483,14 @@
       min-height: 42px;
       padding: 9px 0;
       border-top: 1px solid var(--border);
+    }
+
+    .setting-row.emphasis {
+      margin: 0 -12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(99, 71, 152, 0.17);
+      border-radius: 8px;
+      background: #fbf9ff;
     }
 
     .setting-row:first-child {
@@ -617,6 +735,29 @@
       margin-top: 12px;
     }
 
+    .sticky-action {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      padding: 12px 0 2px;
+      background: linear-gradient(to bottom, rgba(245, 246, 251, 0), var(--bg) 34%);
+    }
+
+    .secondary-link {
+      color: var(--primary);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .dev-tools {
+      border-style: dashed;
+    }
+
+    body[data-build="release"] [data-dev-only] {
+      display: none !important;
+    }
+
     .footer-actions button {
       flex: 1;
     }
@@ -649,7 +790,7 @@
   </style>
 </head>
 
-<body>
+<body data-build="dev">
   <div class="topbar">
     <div class="brand-row">
       <div>
@@ -660,7 +801,6 @@
     </div>
     <div class="status-grid">
       <span class="pill" id="loginStatePill"><span class="dot"></span><span>读取设置中</span></span>
-      <span class="pill" id="templateStatePill"><span class="dot"></span><span>CNN 增强</span></span>
       <span class="pill" id="grabStatePill"><span class="dot"></span><span>选课未运行</span></span>
     </div>
   </div>
@@ -668,27 +808,59 @@
   <div class="shell">
     <div class="tabs-card">
       <div class="tab-list" role="tablist">
-        <button class="tab-btn active" data-tab="login" role="tab" aria-selected="true">登录</button>
-        <button class="tab-btn" data-tab="grab" role="tab" aria-selected="false">选课</button>
+        <button class="tab-btn active" id="loginTab" data-tab="login" role="tab" aria-controls="tab-login" aria-selected="true">登录助手</button>
+        <button class="tab-btn" id="grabTab" data-tab="grab" role="tab" aria-controls="tab-grab" aria-selected="false">选课监控</button>
       </div>
     </div>
 
-    <div class="tab-panel active" id="tab-login" role="tabpanel">
-      <div class="card">
-        <div class="section-head">
-          <div class="section-title">账号配置</div>
-          <span class="badge warning" id="credentialBadge">未配置</span>
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <div class="section-title" id="currentCaptchaTitle">当前页面验证码</div>
+          <div class="section-note" id="currentCaptchaNote">打开认证页或选课页后显示识别状态。</div>
         </div>
-        <div class="field">
-          <div class="field-head">
-            <span>学号 / 工号</span>
+        <span class="badge warning" id="currentCaptchaBadge">未连接</span>
+      </div>
+      <div class="ocr-preview">
+        <div>
+          <div class="ocr-preview-code empty" id="ocrPreviewCode">等待打开页面</div>
+          <div class="ocr-preview-meta" id="ocrPreviewMeta">请在统一认证页或选课页面打开面板。</div>
+        </div>
+        <button class="secondary-btn" id="recognizeAgainBtn" type="button">重新识别</button>
+        <div class="ocr-preview-details" id="ocrPreviewDetails"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel active" id="tab-login" role="tabpanel" aria-labelledby="loginTab">
+      <div class="card status-card">
+        <div class="status-main">
+          <div>
+            <div class="status-title" id="loginStatusTitle">自动登录准备中</div>
+            <div class="status-copy" id="loginStatusSub">配置账号后，认证页与选课页都会自动登录。</div>
           </div>
+          <span class="badge info" id="loginStatusBadge">读取中</span>
+        </div>
+        <div class="feature-list">
+          <div class="feature-line"><span class="feature-check">✓</span><span>本地智能识别默认开启，低置信时自动回退 OCR。</span></div>
+          <div class="feature-line"><span class="feature-check">✓</span><span>验证码图片和账号只在浏览器本地处理。</span></div>
+        </div>
+      </div>
+
+      <details class="card account-card" id="accountCard" open>
+        <summary>
+          <div class="account-summary">
+            <div class="section-title">账号</div>
+            <div class="section-note" id="accountSummary">首次使用时配置，之后可随时修改。</div>
+          </div>
+          <span class="badge warning" id="credentialBadge">未配置</span>
+        </summary>
+        <div class="details-content">
+        <div class="field">
+          <label class="field-head" for="username">学号 / 工号</label>
           <input type="text" id="username" autocomplete="username" placeholder="请输入学号或工号">
         </div>
         <div class="field">
-          <div class="field-head">
-            <span>密码</span>
-          </div>
+          <label class="field-head" for="password">密码</label>
           <div class="input-wrap">
             <input class="with-action" type="password" id="password" autocomplete="current-password" placeholder="仅保存在浏览器本地">
             <button class="ghost-input-btn" id="togglePassword" type="button">显示</button>
@@ -697,65 +869,78 @@
         <div class="action-row">
           <button class="primary-btn" id="saveBtn" disabled>已保存</button>
         </div>
-      </div>
+        </div>
+      </details>
 
       <div class="card">
         <div class="section-head">
-          <div class="section-title">登录行为</div>
+          <div>
+            <div class="section-title">自动登录</div>
+            <div class="section-note">两种登录独立控制；正常使用时保持开启即可。</div>
+          </div>
           <span class="badge info" id="loginModeBadge">自动登录</span>
         </div>
-        <div class="setting-row">
+        <div class="setting-row emphasis">
           <div>
-            <div class="setting-title">自动登录总开关</div>
-            <div class="setting-desc">关闭后只保留配置，不在认证页自动执行。</div>
+            <div class="setting-title">统一认证自动登录</div>
+            <div class="setting-desc">自动填写、识别验证码并提交统一认证页。</div>
           </div>
-          <label class="switch"><input type="checkbox" id="isEnabled"><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="isEnabled" aria-label="统一认证自动登录"><span class="slider"></span></label>
         </div>
         <div class="setting-row">
           <div>
-            <div class="setting-title">识别后自动提交</div>
-            <div class="setting-desc">验证码识别完成后自动点击登录按钮。</div>
+            <div class="setting-title">选课系统自动登录</div>
+            <div class="setting-desc">自动识别点击验证码、按顺序点击并提交。</div>
           </div>
-          <label class="switch"><input type="checkbox" id="autoClick"><span class="slider"></span></label>
-        </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-title">本地 CNN 增强</div>
-            <div class="setting-desc">优先使用本地轻量模型，低置信时自动回退 OCR。</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="templateRerank"><span class="slider"></span></label>
-        </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-title">强制填充账号</div>
-            <div class="setting-desc">浏览器或页面脚本干扰时主动刷新表单值。</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="forceFill"><span class="slider"></span></label>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="section-head">
-          <div class="section-title">验证码测试</div>
-          <span class="badge warning" id="ocrPageBadge">未连接</span>
-        </div>
-        <div class="ocr-preview">
-          <div>
-            <div class="ocr-preview-code empty" id="ocrPreviewCode">等待重新识别</div>
-            <div class="ocr-preview-meta" id="ocrPreviewMeta">请在统一认证页打开面板。</div>
-          </div>
-          <button class="secondary-btn" id="recognizeAgainBtn" type="button">重新识别</button>
-          <div class="ocr-preview-details" id="ocrPreviewDetails"></div>
+          <label class="switch"><input type="checkbox" id="clickCaptchaAutoLogin" aria-label="选课系统自动登录"><span class="slider"></span></label>
         </div>
       </div>
 
       <div class="footer-actions">
         <button class="secondary-btn" id="authPageBtn" type="button">打开认证页</button>
-        <button class="secondary-btn" id="githubBtn" type="button">GitHub</button>
+        <button class="secondary-link" id="githubBtn" type="button">项目主页</button>
       </div>
+
+      <details class="card dev-tools" data-dev-only>
+        <summary><div class="section-title">开发诊断</div></summary>
+        <div class="details-content">
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">强制填充账号</div>
+              <div class="setting-desc">认证页面脚本覆盖输入框时启用。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="forceFill" aria-label="强制填充账号"><span class="slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">启用点击验证码识别</div>
+              <div class="setting-desc">在选课页持续识别并标出点击顺序。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="clickCaptchaSolverEnabled" aria-label="启用点击验证码识别"><span class="slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">自动点击并提交</div>
+              <div class="setting-desc">关闭后只标出识别顺序，不会点击或提交。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="clickCaptchaAutoClick" aria-label="自动点击并提交"><span class="slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">统一认证自动提交（调试）</div>
+              <div class="setting-desc">关闭后仅自动填写，不提交认证页。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="autoClick" aria-label="统一认证自动提交"><span class="slider"></span></label>
+          </div>
+          <div class="action-row">
+            <button class="secondary-btn" id="runClickCaptchaSolverBtn" type="button" disabled>重新识别当前验证码</button>
+            <button class="secondary-btn" id="clearClickCaptchaSolverBtn" type="button" disabled>清除标点</button>
+          </div>
+        </div>
+      </details>
     </div>
 
-    <div class="tab-panel" id="tab-grab" role="tabpanel">
+    <div class="tab-panel" id="tab-grab" role="tabpanel" aria-labelledby="grabTab">
       <div class="card">
         <div class="section-head">
           <div class="section-title">选课监控</div>
@@ -801,16 +986,16 @@
             <button class="interval-option" data-value="30000" type="button">30s</button>
           </div>
         </div>
-        <div class="action-row">
+        <div class="sticky-action">
+        <div class="action-row" style="margin-top:0">
           <button class="primary-btn" id="grabBtn" disabled>开始监控</button>
+        </div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="section-head">
-          <div class="section-title">点击验证码采样</div>
-          <span class="badge warning" id="clickCaptchaCaptureBadge">未连接</span>
-        </div>
+      <details class="card dev-tools" data-dev-only>
+        <summary><div class="section-title">点击验证码采样</div><span class="badge warning" id="clickCaptchaCaptureBadge">未连接</span></summary>
+        <div class="details-content">
         <div class="grab-summary">
           <div>
             <div class="summary-main" id="clickCaptchaCaptureTitle">仅记录手动点击</div>
@@ -830,52 +1015,21 @@
             <button class="tiny-btn" id="resetClickCaptchaBtn" type="button" style="color:var(--danger);border-color:rgba(180,35,24,.22)">重置全部</button>
           </div>
         </div>
-      </div>
+        </div>
+      </details>
 
-      <div class="card">
-        <div class="section-head">
-          <div class="section-title">点击验证码识别</div>
-          <span class="badge warning" id="clickCaptchaSolverBadge">未连接</span>
-        </div>
-        <div class="grab-summary">
-          <div>
-            <div class="summary-main" id="clickCaptchaSolverTitle">等待连接选课页面</div>
-            <div class="summary-sub" id="clickCaptchaSolverSub">识别后会在验证码上标出点击顺序。</div>
-          </div>
-          <span class="badge info" id="clickCaptchaSolverMeta">本地模型</span>
-        </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-title">自动识别并标点</div>
-            <div class="setting-desc">新验证码出现后在本地识别，并在字旁标出点击顺序。</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="clickCaptchaSolverEnabled"><span class="slider"></span></label>
-        </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-title">自动点击并登录</div>
-            <div class="setting-desc">低置信会自动换图重试；通过后按顺序点击，并提交已就绪的登录表单。</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="clickCaptchaAutoClick"><span class="slider"></span></label>
-        </div>
-        <div class="action-row">
-          <button class="primary-btn" id="runClickCaptchaSolverBtn" type="button" disabled>重新识别当前验证码</button>
-          <button class="secondary-btn" id="clearClickCaptchaSolverBtn" type="button" disabled>清除标点</button>
-        </div>
-      </div>
-
-      <div class="card log-card">
-        <div class="log-head">
+      <details class="card log-card">
+        <summary class="log-head">
           <div class="section-title">运行日志</div>
-          <div class="log-actions">
-            <button class="tiny-btn" id="copyLogBtn" type="button">复制</button>
-            <button class="tiny-btn" id="clearLogBtn" type="button">清空</button>
-          </div>
+        </summary>
+        <div class="log-actions" style="padding:10px 12px 0">
+          <button class="tiny-btn" id="copyLogBtn" type="button">复制</button>
+          <button class="tiny-btn" id="clearLogBtn" type="button">清空</button>
         </div>
         <div id="grabStatus">
           <div class="empty-log">等待启动...</div>
         </div>
-      </div>
+      </details>
     </div>
   </div>
 

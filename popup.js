@@ -3,6 +3,8 @@ const GRAB_URL = 'https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons
 const CLICK_CAPTCHA_SAMPLE_COUNT_KEY = 'nju_click_captcha_v1_count';
 const CLICK_CAPTCHA_SAMPLE_KEY_PREFIX = 'nju_click_captcha_v1_';
 const CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY = 'nju_click_captcha_v1_skipped_three_count';
+const CLICK_CAPTCHA_SOLVER_ENABLED_KEY = 'nju_click_captcha_solver_enabled';
+const CLICK_CAPTCHA_AUTO_CLICK_KEY = 'nju_click_captcha_auto_click';
 
 const storageKeys = [
   'nju_user',
@@ -10,7 +12,8 @@ const storageKeys = [
   'nju_enabled',
   'nju_force',
   'nju_auto_click',
-  'nju_template_rerank',
+  CLICK_CAPTCHA_SOLVER_ENABLED_KEY,
+  CLICK_CAPTCHA_AUTO_CLICK_KEY,
   'nju_grab_courses',
   'nju_grab_interval'
 ];
@@ -18,10 +21,14 @@ const storageKeys = [
 const els = {
   versionBadge: document.getElementById('versionBadge'),
   loginStatePill: document.getElementById('loginStatePill'),
-  templateStatePill: document.getElementById('templateStatePill'),
   grabStatePill: document.getElementById('grabStatePill'),
   credentialBadge: document.getElementById('credentialBadge'),
+  accountCard: document.getElementById('accountCard'),
+  accountSummary: document.getElementById('accountSummary'),
   loginModeBadge: document.getElementById('loginModeBadge'),
+  loginStatusBadge: document.getElementById('loginStatusBadge'),
+  loginStatusTitle: document.getElementById('loginStatusTitle'),
+  loginStatusSub: document.getElementById('loginStatusSub'),
   username: document.getElementById('username'),
   password: document.getElementById('password'),
   togglePassword: document.getElementById('togglePassword'),
@@ -29,8 +36,10 @@ const els = {
   isEnabled: document.getElementById('isEnabled'),
   forceFill: document.getElementById('forceFill'),
   autoClick: document.getElementById('autoClick'),
-  templateRerank: document.getElementById('templateRerank'),
-  ocrPageBadge: document.getElementById('ocrPageBadge'),
+  clickCaptchaAutoLogin: document.getElementById('clickCaptchaAutoLogin'),
+  currentCaptchaTitle: document.getElementById('currentCaptchaTitle'),
+  currentCaptchaNote: document.getElementById('currentCaptchaNote'),
+  currentCaptchaBadge: document.getElementById('currentCaptchaBadge'),
   recognizeAgainBtn: document.getElementById('recognizeAgainBtn'),
   ocrPreviewCode: document.getElementById('ocrPreviewCode'),
   ocrPreviewMeta: document.getElementById('ocrPreviewMeta'),
@@ -56,10 +65,6 @@ const els = {
   exportClickCaptchaBtn: document.getElementById('exportClickCaptchaBtn'),
   discardClickCaptchaBtn: document.getElementById('discardClickCaptchaBtn'),
   resetClickCaptchaBtn: document.getElementById('resetClickCaptchaBtn'),
-  clickCaptchaSolverBadge: document.getElementById('clickCaptchaSolverBadge'),
-  clickCaptchaSolverTitle: document.getElementById('clickCaptchaSolverTitle'),
-  clickCaptchaSolverSub: document.getElementById('clickCaptchaSolverSub'),
-  clickCaptchaSolverMeta: document.getElementById('clickCaptchaSolverMeta'),
   clickCaptchaSolverEnabled: document.getElementById('clickCaptchaSolverEnabled'),
   clickCaptchaAutoClick: document.getElementById('clickCaptchaAutoClick'),
   runClickCaptchaSolverBtn: document.getElementById('runClickCaptchaSolverBtn'),
@@ -71,10 +76,7 @@ const els = {
 };
 
 const switchKeyMap = {
-  isEnabled: 'nju_enabled',
-  forceFill: 'nju_force',
-  autoClick: 'nju_auto_click',
-  templateRerank: 'nju_template_rerank'
+  forceFill: 'nju_force'
 };
 
 let initialCredentials = { user: '', pass: '' };
@@ -90,6 +92,10 @@ let syncingGrab = false;
 let syncingClickCaptchaCapture = false;
 let syncingClickCaptchaSolver = false;
 let previewRunning = false;
+let clickCaptchaAutoLoginEnabled = true;
+let currentCaptchaPage = 'other';
+let authPreviewConnected = false;
+let authPreviewReady = false;
 
 function setVersion() {
   if (els.versionBadge && chrome.runtime && chrome.runtime.getManifest) {
@@ -143,8 +149,10 @@ function renderCredentialState() {
 
   if (configured) {
     setBadge(els.credentialBadge, credentialsDirty() ? '有未保存更改' : '已配置', credentialsDirty() ? 'warning' : 'success');
+    els.accountSummary.textContent = credentialsDirty() ? '账号信息有未保存更改。' : `已配置 · ${maskUsername(els.username.value)}`;
   } else {
     setBadge(els.credentialBadge, '未配置', 'warning');
+    els.accountSummary.textContent = '首次使用时配置，之后可随时修改。';
   }
 
   els.saveBtn.disabled = !credentialsDirty();
@@ -152,22 +160,34 @@ function renderCredentialState() {
   renderLoginState();
 }
 
+function maskUsername(value) {
+  const trimmed = value.trim();
+  if (trimmed.length <= 4) return trimmed;
+  return `${trimmed.slice(0, 2)}****${trimmed.slice(-2)}`;
+}
+
 function renderLoginState() {
   const enabled = els.isEnabled.checked;
-  const autoClick = els.autoClick.checked;
-  const template = els.templateRerank.checked;
   const configured = Boolean(els.username.value.trim() && els.password.value);
 
   if (!configured) {
     setPill(els.loginStatePill, '账号未配置');
+    setBadge(els.loginStatusBadge, '待配置', 'warning');
+    els.loginStatusTitle.textContent = '先配置账号';
+    els.loginStatusSub.textContent = '保存账号后，统一认证与选课系统会按默认策略自动登录。';
   } else if (!enabled) {
-    setPill(els.loginStatePill, '自动登录关闭');
+    setPill(els.loginStatePill, '统一认证已暂停');
+    setBadge(els.loginStatusBadge, '已暂停', 'warning');
+    els.loginStatusTitle.textContent = '统一认证自动登录已暂停';
+    els.loginStatusSub.textContent = '账号仍保存在浏览器本地；选课系统自动登录不受影响。';
   } else {
-    setPill(els.loginStatePill, autoClick ? '自动登录已启用' : '仅自动填充');
+    setPill(els.loginStatePill, '统一认证已开启');
+    setBadge(els.loginStatusBadge, '已开启', 'success');
+    els.loginStatusTitle.textContent = '统一认证自动登录已开启';
+    els.loginStatusSub.textContent = '认证页会自动填写、识别验证码并提交。';
   }
 
-  setPill(els.templateStatePill, template ? 'CNN 增强开启' : 'CNN 增强关闭');
-  setBadge(els.loginModeBadge, enabled ? (autoClick ? '自动登录' : '自动填充') : '已暂停', enabled ? 'info' : 'warning');
+  setBadge(els.loginModeBadge, enabled ? '已开启' : '已暂停', enabled ? 'success' : 'warning');
 }
 
 function renderGrabState() {
@@ -278,48 +298,15 @@ function renderClickCaptchaSolverState() {
   const enabled = Boolean(state?.enabled);
   const autoClick = Boolean(state?.autoClick);
   const hasResult = Array.isArray(state?.order);
-  const margin = Number(state?.confidenceMargin);
-  const backgroundResidual = Number(state?.backgroundResidual);
-  const refreshes = Number(state?.lowConfidenceRefreshes || 0);
 
-  els.clickCaptchaSolverEnabled.checked = enabled;
-  els.clickCaptchaAutoClick.checked = autoClick;
+  const configured = connected ? enabled && autoClick : clickCaptchaAutoLoginEnabled;
+  els.clickCaptchaAutoLogin.checked = configured;
+  els.clickCaptchaSolverEnabled.checked = connected ? enabled : configured;
+  els.clickCaptchaAutoClick.checked = connected ? autoClick : configured;
   els.clickCaptchaAutoClick.disabled = !connected || !enabled;
   els.runClickCaptchaSolverBtn.disabled = !connected || running;
   els.clearClickCaptchaSolverBtn.disabled = !connected || !hasResult;
-
-  if (!connected) {
-    setBadge(els.clickCaptchaSolverBadge, '未连接', 'warning');
-    els.clickCaptchaSolverTitle.textContent = '等待连接选课页面';
-    els.clickCaptchaSolverSub.textContent = '打开选课页面后可测试本地识别。';
-    els.clickCaptchaSolverMeta.textContent = '本地模型';
-    return;
-  }
-
-  if (running) {
-    setBadge(els.clickCaptchaSolverBadge, '识别中', 'info');
-    els.clickCaptchaSolverTitle.textContent = '正在识别点击验证码';
-    els.clickCaptchaSolverSub.textContent = state?.status || '模型在本地 Worker 中运行。';
-    els.clickCaptchaSolverMeta.textContent = '请稍候';
-    return;
-  }
-
-  if (hasResult) {
-    const order = state.order.map(index => index + 1).join(' → ');
-    const label = state.backgroundCompatible === false && Number.isFinite(backgroundResidual)
-      ? `背景残差 ${backgroundResidual.toFixed(1)}`
-      : Number.isFinite(margin) ? `分差 ${margin.toFixed(2)}` : '已识别';
-    setBadge(els.clickCaptchaSolverBadge, state.autoEligible ? '可执行' : '待确认', state.autoEligible ? 'success' : 'warning');
-    els.clickCaptchaSolverTitle.textContent = `识别顺序：候选 ${order}`;
-    els.clickCaptchaSolverSub.textContent = state?.status || '已在验证码上标出顺序。';
-    els.clickCaptchaSolverMeta.textContent = refreshes > 0 ? `${label} · 换图 ${refreshes} 次` : label;
-    return;
-  }
-
-  setBadge(els.clickCaptchaSolverBadge, enabled ? '等待中' : '已暂停', enabled ? 'info' : 'warning');
-  els.clickCaptchaSolverTitle.textContent = enabled ? '等待下一张点击验证码' : '点击验证码识别已暂停';
-  els.clickCaptchaSolverSub.textContent = state?.status || '可随时手动识别当前验证码。';
-  els.clickCaptchaSolverMeta.textContent = autoClick ? '自动点击并登录' : '仅标点';
+  renderCurrentCaptchaPanel();
 }
 
 function setIntervalValue(value) {
@@ -409,24 +396,57 @@ async function sendActiveTabMessage(message) {
 }
 
 function setPreviewConnection(connected, ready = false) {
-  if (!connected) {
-    setBadge(els.ocrPageBadge, '未连接', 'warning');
-    els.recognizeAgainBtn.disabled = true;
+  authPreviewConnected = connected;
+  authPreviewReady = ready;
+  renderCurrentCaptchaPanel();
+}
+
+function setCaptchaPreviewContent(code, meta, details = '') {
+  els.ocrPreviewCode.textContent = code;
+  els.ocrPreviewCode.classList.toggle('empty', !code || code.startsWith('等待') || code.startsWith('未'));
+  els.ocrPreviewMeta.textContent = meta;
+  els.ocrPreviewDetails.textContent = details;
+  els.ocrPreviewDetails.classList.toggle('has-content', Boolean(details));
+}
+
+function renderCurrentCaptchaPanel() {
+  if (currentCaptchaPage === 'auth') {
+    els.currentCaptchaTitle.textContent = '当前统一认证页';
+    els.currentCaptchaNote.textContent = '可查看或重新识别登录验证码。';
+    setBadge(els.currentCaptchaBadge, authPreviewReady ? '验证码就绪' : authPreviewConnected ? '认证页已连接' : '未连接', authPreviewReady ? 'success' : authPreviewConnected ? 'info' : 'warning');
+    els.recognizeAgainBtn.textContent = previewRunning ? '识别中...' : '重新识别';
+    els.recognizeAgainBtn.disabled = !authPreviewReady || previewRunning;
     return;
   }
 
-  setBadge(els.ocrPageBadge, ready ? '验证码就绪' : '认证页已连接', ready ? 'success' : 'info');
-  els.recognizeAgainBtn.disabled = !ready || previewRunning;
+  if (currentCaptchaPage === 'grab') {
+    const state = clickCaptchaSolverState;
+    const running = Boolean(state?.running);
+    const orderCount = Array.isArray(state?.order) ? state.order.length : 0;
+    els.currentCaptchaTitle.textContent = '当前选课页';
+    els.currentCaptchaNote.textContent = '可查看或重新识别点击验证码；手动识别只标出顺序。';
+    setBadge(els.currentCaptchaBadge, !clickCaptchaSolverConnected ? '未连接' : running ? '识别中' : '选课页已连接', !clickCaptchaSolverConnected ? 'warning' : running ? 'info' : 'success');
+    setCaptchaPreviewContent(
+      orderCount ? `已识别 ${orderCount} 个点击点` : running ? '正在识别' : '等待点击验证码',
+      state?.status || '验证码加载完成后可重新识别。'
+    );
+    els.recognizeAgainBtn.textContent = running ? '识别中...' : '重新识别';
+    els.recognizeAgainBtn.disabled = !clickCaptchaSolverConnected || running;
+    return;
+  }
+
+  els.currentCaptchaTitle.textContent = '当前页面验证码';
+  els.currentCaptchaNote.textContent = '打开认证页或选课页后显示识别状态。';
+  setBadge(els.currentCaptchaBadge, '未连接', 'warning');
+  setCaptchaPreviewContent('等待打开页面', '请在统一认证页或选课页面打开面板。');
+  els.recognizeAgainBtn.textContent = '重新识别';
+  els.recognizeAgainBtn.disabled = true;
 }
 
 function renderOcrPreview(response) {
   const code = response.code || '';
-  els.ocrPreviewCode.textContent = code || '未得到四位结果';
-  els.ocrPreviewCode.classList.toggle('empty', !code);
-
   const mode = response.cnnEnabled ? 'CNN 增强开启' : 'CNN 增强关闭';
   const elapsed = Number.isFinite(response.elapsedMs) ? ` · ${Math.round(response.elapsedMs)}ms` : '';
-  els.ocrPreviewMeta.textContent = `${mode}${elapsed}`;
 
   const candidates = (response.candidates || [])
     .map(item => `${item.variant}=${item.code || '空'}(${Math.round(item.confidence || 0)})`)
@@ -437,8 +457,7 @@ function renderOcrPreview(response) {
     ? `模板：${response.templateRerank.selectedBefore || '空'}=>${response.templateRerank.selectedAfter || '空'} ${response.templateRerank.reason || ''}`
     : '';
   const details = [candidates, rerank].filter(Boolean).join('\n');
-  els.ocrPreviewDetails.textContent = details;
-  els.ocrPreviewDetails.classList.toggle('has-content', Boolean(details));
+  setCaptchaPreviewContent(code || '未得到四位结果', `${mode}${elapsed}`, details);
 }
 
 async function syncOcrPreviewStatus() {
@@ -569,26 +588,53 @@ async function saveCredentials() {
   chrome.storage.local.set(settings, () => {
     initialCredentials = { user: settings.nju_user, pass: settings.nju_pass };
     renderCredentialState();
+    els.accountCard.open = false;
     showToast('账号配置已保存');
   });
 }
 
+function activateTab(tabName, persist = true) {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    const active = btn.dataset.tab === tabName;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === `tab-${tabName}`);
+  });
+  if (persist) chrome.storage.local.set({ nju_popup_tab: tabName });
+  if (tabName === 'grab') {
+    syncGrabStatus();
+    syncClickCaptchaCaptureStatus();
+    syncClickCaptchaSolverStatus();
+  }
+}
+
 function initTabs() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(item => {
-        item.classList.remove('active');
-        item.setAttribute('aria-selected', 'false');
-      });
-      document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
-      btn.classList.add('active');
-      btn.setAttribute('aria-selected', 'true');
-      document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-      if (btn.dataset.tab === 'grab') {
-        syncGrabStatus();
-        syncClickCaptchaCaptureStatus();
-        syncClickCaptchaSolverStatus();
-      }
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+  });
+}
+
+function syncTabToCurrentPage() {
+  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+    const url = tabs?.[0]?.url || '';
+    if (url.includes('xk.nju.edu.cn')) {
+      currentCaptchaPage = 'grab';
+      activateTab('grab', false);
+      renderCurrentCaptchaPanel();
+      return;
+    }
+    if (url.includes('authserver.nju.edu.cn')) {
+      currentCaptchaPage = 'auth';
+      activateTab('login', false);
+      renderCurrentCaptchaPanel();
+      return;
+    }
+    currentCaptchaPage = 'other';
+    renderCurrentCaptchaPanel();
+    chrome.storage.local.get(['nju_popup_tab'], data => {
+      activateTab(data.nju_popup_tab === 'grab' ? 'grab' : 'login', false);
     });
   });
 }
@@ -599,10 +645,12 @@ function initSettings() {
     els.password.value = data.nju_pass || '';
     initialCredentials = { user: els.username.value, pass: els.password.value };
 
-    els.isEnabled.checked = data.nju_enabled !== false;
+    els.isEnabled.checked = data.nju_enabled !== false && data.nju_auto_click !== false;
     els.forceFill.checked = Boolean(data.nju_force);
     els.autoClick.checked = data.nju_auto_click !== false;
-    els.templateRerank.checked = data.nju_template_rerank !== false;
+    clickCaptchaAutoLoginEnabled = data[CLICK_CAPTCHA_SOLVER_ENABLED_KEY] !== false
+      && data[CLICK_CAPTCHA_AUTO_CLICK_KEY] !== false;
+    els.clickCaptchaAutoLogin.checked = clickCaptchaAutoLoginEnabled;
     els.courseNames.value = data.nju_grab_courses || '';
     setIntervalValue(data.nju_grab_interval || '3000');
 
@@ -610,6 +658,7 @@ function initSettings() {
     updateCourseCount();
     renderLoginState();
     syncGrabStatus();
+    syncTabToCurrentPage();
   });
 }
 
@@ -634,7 +683,71 @@ function initLoginEvents() {
     });
   });
 
+  els.isEnabled.addEventListener('change', event => {
+    const enabled = event.target.checked;
+    els.autoClick.checked = enabled;
+    chrome.storage.local.set({ nju_enabled: enabled, nju_auto_click: enabled }, () => {
+      renderLoginState();
+      showToast(enabled ? '统一认证自动登录已开启' : '统一认证自动登录已暂停');
+    });
+  });
+
+  els.autoClick.addEventListener('change', event => {
+    const enabled = event.target.checked;
+    els.isEnabled.checked = enabled;
+    chrome.storage.local.set({ nju_enabled: true, nju_auto_click: enabled }, () => {
+      renderLoginState();
+      showToast(enabled ? '统一认证自动提交已开启' : '已切换为仅自动填写');
+    });
+  });
+
+  els.clickCaptchaAutoLogin.addEventListener('change', async event => {
+    const enabled = event.target.checked;
+    clickCaptchaAutoLoginEnabled = enabled;
+    chrome.storage.local.set({
+      [CLICK_CAPTCHA_SOLVER_ENABLED_KEY]: enabled,
+      [CLICK_CAPTCHA_AUTO_CLICK_KEY]: enabled
+    });
+    const actions = enabled
+      ? [
+          { action: 'setClickCaptchaSolverEnabled', enabled: true },
+          { action: 'setClickCaptchaAutoClick', enabled: true }
+        ]
+      : [
+          { action: 'setClickCaptchaAutoClick', enabled: false },
+          { action: 'setClickCaptchaSolverEnabled', enabled: false }
+        ];
+
+    for (const message of actions) {
+      const result = await sendGrabMessage(message);
+      if (!result.connected) continue;
+      clickCaptchaSolverConnected = true;
+      clickCaptchaSolverState = result.response?.state || clickCaptchaSolverState;
+    }
+    renderClickCaptchaSolverState();
+    showToast(enabled ? '选课系统自动登录已开启' : '选课系统自动登录已暂停');
+  });
+
   els.recognizeAgainBtn.addEventListener('click', async () => {
+    if (currentCaptchaPage === 'grab') {
+      els.recognizeAgainBtn.disabled = true;
+      els.recognizeAgainBtn.textContent = '识别中...';
+      const result = await sendGrabMessage({ action: 'runClickCaptchaSolver' });
+      if (!result.connected) {
+        clickCaptchaSolverConnected = false;
+        clickCaptchaSolverState = null;
+        renderClickCaptchaSolverState();
+        showToast('请切换到选课页面后重试');
+        return;
+      }
+      clickCaptchaSolverConnected = true;
+      clickCaptchaSolverState = result.response?.state || null;
+      renderClickCaptchaSolverState();
+      showToast(result.response?.ok === false ? (result.response.error || '识别未完成') : '已标出识别顺序');
+      return;
+    }
+
+    if (currentCaptchaPage !== 'auth') return;
     if (previewRunning) return;
 
     previewRunning = true;
@@ -643,7 +756,7 @@ function initLoginEvents() {
 
     const result = await sendActiveTabMessage({
       action: 'recognizeCaptchaPreview',
-      templateRerank: els.templateRerank.checked
+      templateRerank: true
     });
 
     previewRunning = false;
@@ -775,7 +888,7 @@ function initGrabEvents() {
     clickCaptchaSolverConnected = true;
     clickCaptchaSolverState = result.response?.state || null;
     renderClickCaptchaSolverState();
-    showToast(event.target.checked ? '自动点击并登录已开启' : '已切换为仅标点');
+    showToast(event.target.checked ? '自动点击并提交已开启' : '已切换为只标出顺序');
   });
 
   els.runClickCaptchaSolverBtn.addEventListener('click', async () => {

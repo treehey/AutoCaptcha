@@ -678,11 +678,7 @@ function setNativeInputValue(input, value) {
 }
 
 async function prepareClickCaptchaLogin(target) {
-  const settings = await storageGet(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force']);
-  if (settings.nju_enabled === false) {
-    clickCaptchaSolver.loginStatus = '自动登录总开关已关闭';
-    return null;
-  }
+  const settings = await storageGet(['nju_user', 'nju_pass', 'nju_force']);
 
   const context = findClickCaptchaLoginContext(target);
   if (!context) {
@@ -1315,6 +1311,12 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
       const autoEligible = isClickCaptchaAutoEligible(result);
       if (canAutoClickNow() && autoEligible) {
         const loginContext = await prepareClickCaptchaLogin(target);
+        if (!loginContext) {
+          clickCaptchaSolver.status = `${clickCaptchaSolver.loginStatus}，已标出识别顺序供人工处理`;
+          renderClickCaptchaSolverOverlay();
+          notifyClickCaptchaSolverUpdate();
+          break;
+        }
         clickCaptchaSolver.status = '正在按识别顺序点击';
         renderClickCaptchaSolverOverlay();
         notifyClickCaptchaSolverUpdate();
@@ -1426,8 +1428,9 @@ async function setClickCaptchaAutoClick(enabled) {
 async function initializeClickCaptchaSolver() {
   try {
     const settings = await storageGet([CLICK_CAPTCHA_SOLVER_ENABLED_KEY, CLICK_CAPTCHA_AUTO_CLICK_KEY]);
-    clickCaptchaSolver.enabled = Boolean(settings[CLICK_CAPTCHA_SOLVER_ENABLED_KEY]);
-    clickCaptchaSolver.autoClick = Boolean(settings[CLICK_CAPTCHA_AUTO_CLICK_KEY]);
+    // 自动登录是发布版默认行为；只有用户显式关闭时才暂停。
+    clickCaptchaSolver.enabled = settings[CLICK_CAPTCHA_SOLVER_ENABLED_KEY] !== false;
+    clickCaptchaSolver.autoClick = settings[CLICK_CAPTCHA_AUTO_CLICK_KEY] !== false;
     clickCaptchaSolver.status = clickCaptchaSolver.enabled ? '等待点击验证码' : '未启用';
     if (clickCaptchaSolver.enabled) startClickCaptchaSolverMonitor();
     notifyClickCaptchaSolverUpdate();
@@ -1710,7 +1713,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(error => sendResponse({ ok: false, error: error.message, state: getClickCaptchaSolverState() }));
     return true;
   } else if (msg.action === 'runClickCaptchaSolver') {
-    runClickCaptchaSolver({ allowAutoClick: true, force: true })
+    // 手动“重新识别”只标出顺序，不触发点击或提交。
+    runClickCaptchaSolver({ allowAutoClick: false, force: true })
       .then(state => sendResponse({ ok: true, state }))
       .catch(error => sendResponse({ ok: false, error: error.message, state: getClickCaptchaSolverState() }));
     return true;

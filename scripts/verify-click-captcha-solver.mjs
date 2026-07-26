@@ -78,7 +78,7 @@ if (!/autoClickToken/.test(content)
 }
 
 if (!/function findClickCaptchaLoginContext\(target\)/.test(content)
-  || !/storageGet\(\['nju_enabled', 'nju_user', 'nju_pass', 'nju_force'\]\)/.test(content)
+  || !/storageGet\(\['nju_user', 'nju_pass', 'nju_force'\]\)/.test(content)
   || !/function submitClickCaptchaLogin\(target, fingerprint, context, autoClickToken\)/.test(content)
   || !/clickCaptchaSolver\.submittedFingerprint/.test(content)
   || !/document\.getElementById\('studentLoginBtn'\)/.test(content)
@@ -89,10 +89,17 @@ if (!/function findClickCaptchaLoginContext\(target\)/.test(content)
   throw new Error('Automatic click-captcha login must fill a scoped form and submit at most once per captcha frame.');
 }
 
+if (!/if \(!loginContext\) \{[\s\S]*?已标出识别顺序供人工处理[\s\S]*?break;/.test(content)
+  || !/settings\[CLICK_CAPTCHA_SOLVER_ENABLED_KEY\] !== false/.test(content)
+  || !/settings\[CLICK_CAPTCHA_AUTO_CLICK_KEY\] !== false/.test(content)
+  || !/runClickCaptchaSolver\(\{ allowAutoClick: false, force: true \}\)/.test(content)) {
+  throw new Error('Selection auto-login must remain independent, require a login form before clicking, and keep manual recognition non-destructive.');
+}
+
 if (!/lowConfidenceRefreshes/.test(content)
   || !/requestFreshClickCaptcha\(target\)/.test(content)
   || !/连续换图后仍未达到自动点击门槛/.test(content)
-  || !/runClickCaptchaSolver\(\{ allowAutoClick: true, force: true \}\)/.test(content)) {
+  || !/runClickCaptchaSolver\(\{ allowAutoClick: false, force: true \}\)/.test(content)) {
   throw new Error('Manual recognition must rerun the frame and automatic click must retry low-confidence frames safely.');
 }
 

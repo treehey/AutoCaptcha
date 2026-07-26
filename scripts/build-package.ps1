@@ -1,3 +1,7 @@
+param(
+  [switch]$Dev
+)
+
 $ErrorActionPreference = 'Stop'
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
@@ -8,7 +12,8 @@ $version = $manifest.version
 $dist = Join-Path $root 'dist'
 $staging = Join-Path $dist 'extension'
 $verify = Join-Path $dist 'verify'
-$zipPath = Join-Path $dist "NJU-Login-Pro-v$version.zip"
+$packageName = if ($Dev) { "NJU-Login-Pro-dev-v$version.zip" } else { "NJU-Login-Pro-v$version.zip" }
+$zipPath = Join-Path $dist $packageName
 
 Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $verify -Recurse -Force -ErrorAction SilentlyContinue
@@ -52,6 +57,14 @@ foreach ($file in $files) {
 
 foreach ($dir in $dirs) {
   Copy-Item -LiteralPath (Join-Path $root $dir) -Destination (Join-Path $staging $dir) -Recurse
+}
+
+if (-not $Dev) {
+  # 开发采样面板只存在于源码/开发包；正式发布包保留运行时兼容代码，但不暴露入口。
+  $popupPath = Join-Path $staging 'popup.html'
+  $popupHtml = Get-Content -Raw -LiteralPath $popupPath
+  $popupHtml = $popupHtml.Replace('data-build="dev"', 'data-build="release"')
+  [System.IO.File]::WriteAllText($popupPath, $popupHtml, [System.Text.UTF8Encoding]::new($false))
 }
 
 Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipPath -Force
