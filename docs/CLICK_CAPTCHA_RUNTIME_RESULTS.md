@@ -10,6 +10,7 @@
 - 推理：ONNX Runtime Web WASM Worker，`numThreads = 1`。
 - 预处理：固定背景残差、目标字灰度反相、浏览器 Canvas 高质量缩放和七角度旋转。
 - 运行策略：分差低于 `0.40` 时只标点并转人工；自动点击默认关闭。自动点击还要求原图为 `250x120`，且顶部候选区相对固定背景的平均 RGB 残差不超过 `12`。
+- 内容脚本通过同源 Blob 启动模块 Worker，再导入已声明为 Web Accessible Resource 的扩展模块。这避免 Chromium 将内容脚本直接创建 `chrome-extension://` Worker 视为跨源 Worker 而拒绝。
 
 ## 可复现结果
 

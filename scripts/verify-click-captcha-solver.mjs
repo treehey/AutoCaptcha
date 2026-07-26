@@ -6,10 +6,11 @@ const __filename = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(__filename), '..');
 const read = relative => readFile(path.join(root, relative), 'utf8');
 
-const [manifestText, content, worker] = await Promise.all([
+const [manifestText, content, worker, fixture] = await Promise.all([
   read('manifest.json'),
   read('content-grab.js'),
-  read('click-captcha-worker.js')
+  read('click-captcha-worker.js'),
+  read('tests/click-captcha-worker.html')
 ]);
 const manifest = JSON.parse(manifestText);
 const workerResources = manifest.web_accessible_resources
@@ -51,10 +52,17 @@ if (!/frame\.width !== CLICK_CAPTCHA_REFERENCE_WIDTH/.test(content)
   throw new Error('Automatic clicks must reject an unknown captcha frame size.');
 }
 
-if (!/new Worker\(chrome\.runtime\.getURL\('click-captcha-worker\.js'\)/.test(content)
+if (!/function createClickCaptchaWorker\(\)/.test(content)
+  || !/import \$\{JSON\.stringify\(workerModuleUrl\)\};/.test(content)
+  || !/new Worker\(bootstrapUrl, \{ type: 'module' \}\)/.test(content)
   || !/executionProviders: \['wasm'\]/.test(worker)
   || !/message\.renderer === 'custom' \? 'custom' : 'canvas'/.test(worker)) {
-  throw new Error('The local Canvas + WASM click-captcha inference path is incomplete.');
+  throw new Error('The local Canvas + WASM click-captcha Worker bootstrap is incomplete.');
+}
+
+if (!/new Blob\(\[/.test(fixture)
+  || !/new Worker\(workerBootstrapUrl, \{ type: 'module' \}\)/.test(fixture)) {
+  throw new Error('The browser fixture must exercise the content-script Worker bootstrap.');
 }
 
 if (!/message\.type === 'error' && !message\.requestId/.test(content)

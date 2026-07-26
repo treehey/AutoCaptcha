@@ -24,7 +24,13 @@
     const image = document.getElementById('captcha');
     const button = document.getElementById('run');
     const runAllButton = document.getElementById('run-all');
-    const worker = new Worker('../click-captcha-worker.js', { type: 'module' });
+    const workerModuleUrl = new URL('../click-captcha-worker.js', import.meta.url).href;
+    const workerBootstrap = new Blob([
+      `import ${JSON.stringify(workerModuleUrl)};`
+    ], { type: 'text/javascript' });
+    const workerBootstrapUrl = URL.createObjectURL(workerBootstrap);
+    const worker = new Worker(workerBootstrapUrl, { type: 'module' });
+    URL.revokeObjectURL(workerBootstrapUrl);
     const workerStartedAt = performance.now();
     let ready = false;
     let requestId = 0;

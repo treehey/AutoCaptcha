@@ -880,11 +880,27 @@ function resetClickCaptchaWorker(error) {
   rejectClickCaptchaWorkerRequests(error);
 }
 
+function createClickCaptchaWorker() {
+  // A content script's dedicated Worker is created under the page's origin.
+  // Bootstrapping from a Blob keeps that initial URL same-origin, then imports
+  // the explicitly declared web-accessible extension module with CORS enabled.
+  const workerModuleUrl = chrome.runtime.getURL('click-captcha-worker.js');
+  const bootstrap = new Blob([
+    `import ${JSON.stringify(workerModuleUrl)};`
+  ], { type: 'text/javascript' });
+  const bootstrapUrl = URL.createObjectURL(bootstrap);
+  try {
+    return new Worker(bootstrapUrl, { type: 'module' });
+  } finally {
+    URL.revokeObjectURL(bootstrapUrl);
+  }
+}
+
 function getClickCaptchaWorker() {
   if (clickCaptchaWorker.ready) return clickCaptchaWorker.ready;
 
   clickCaptchaWorker.ready = new Promise((resolve, reject) => {
-    const worker = new Worker(chrome.runtime.getURL('click-captcha-worker.js'), { type: 'module' });
+    const worker = createClickCaptchaWorker();
     clickCaptchaWorker.worker = worker;
     worker.onmessage = event => {
       const message = event.data || {};
