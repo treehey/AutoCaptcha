@@ -123,9 +123,14 @@ assert.match(
   'The login controller must select the form that is actually rendered, including ancestor visibility.'
 );
 assert.match(contentSource, /function checkAuthserverNeedsCaptcha\(username\)/);
-assert.match(contentSource, /function submitPasswordLoginContext\(context, username\)/);
+assert.match(contentSource, /function submitPasswordLoginContext\(context\)/);
 assert.match(contentSource, /HTMLFormElement\.prototype\.submit\.call\(context\.form\)/);
 assert.match(contentSource, /solveSliderAuthentication\(settings, passwordLoginContext\)/);
 assert.match(contentSource, /openManualSliderFallback\(context/);
+assert.doesNotMatch(
+  contentSource,
+  /AUTH_SLIDER_SUBMIT_GUARD|hasRecentSliderSubmit|rememberSliderSubmit/,
+  'A cross-navigation session lock must not prevent a fresh login attempt after returning to authserver.'
+);
 
 console.log('Auth slider captcha runtime verified.');

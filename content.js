@@ -4600,9 +4600,6 @@ function scheduleRetry(ms) {
     retryTimer = setTimeout(solveCaptcha, ms);
 }
 
-const AUTH_SLIDER_SUBMIT_GUARD_KEY = 'nju-auth-slider-submit-guard';
-const AUTH_SLIDER_SUBMIT_GUARD_MS = 30000;
-
 function isVisibleElement(element) {
     if (!element || !element.isConnected) return false;
     const style = window.getComputedStyle(element);
@@ -4668,51 +4665,24 @@ async function checkAuthserverNeedsCaptcha(username) {
     return Boolean(result?.isNeed);
 }
 
-function hasRecentSliderSubmit(username) {
-    try {
-        const [storedUser, timestamp] = String(sessionStorage.getItem(AUTH_SLIDER_SUBMIT_GUARD_KEY) || '').split(':');
-        return storedUser === username && Date.now() - Number(timestamp) < AUTH_SLIDER_SUBMIT_GUARD_MS;
-    } catch (error) {
-        return false;
-    }
-}
-
-function rememberSliderSubmit(username) {
-    try {
-        sessionStorage.setItem(AUTH_SLIDER_SUBMIT_GUARD_KEY, `${username}:${Date.now()}`);
-    } catch (error) {
-        // The guard is only a loop protection. Authentication still works when storage is unavailable.
-    }
-}
-
-function clearSliderSubmitGuard() {
-    try {
-        sessionStorage.removeItem(AUTH_SLIDER_SUBMIT_GUARD_KEY);
-    } catch (error) {
-        // Ignore private browsing or storage policy failures.
-    }
-}
-
-async function submitPasswordLoginContext(context, username) {
+async function submitPasswordLoginContext(context) {
     const sliderRuntime = window.NjuAuthSliderCaptcha;
     if (!sliderRuntime?.encryptForPage) throw new Error('滑块认证运行时未加载');
     const encrypted = await sliderRuntime.encryptForPage(context.password.value, context.passwordSalt.value);
     setNativeFieldValue(context.encryptedPassword, encrypted);
     context.password.setAttribute('disabled', 'disabled');
-    rememberSliderSubmit(username);
     HTMLFormElement.prototype.submit.call(context.form);
 }
 
 function openManualSliderFallback(context, reason) {
-    clearSliderSubmitGuard();
     showCaptchaStatus(reason || '安全验证需要手动完成', 'warning', 5200);
     context.password.removeAttribute('disabled');
     context.submitButton.click();
 }
 
-async function submitAuthenticatedPassword(context, username) {
+async function submitAuthenticatedPassword(context) {
     try {
-        await submitPasswordLoginContext(context, username);
+        await submitPasswordLoginContext(context);
         return true;
     } catch (error) {
         console.warn('NJU 助手：无法提交新版认证表单:', error);
@@ -4726,10 +4696,6 @@ async function solveSliderAuthentication(settings, context) {
     const username = context.username.value.trim();
     if (!hasCredentials || !username) {
         showCaptchaStatus('请先在插件中保存账号和密码', 'warning', 4200);
-        return;
-    }
-    if (hasRecentSliderSubmit(username)) {
-        showCaptchaStatus('已提交登录，正在等待页面结果', 'loading');
         return;
     }
     if (settings.nju_auto_click === false) {
@@ -4749,7 +4715,7 @@ async function solveSliderAuthentication(settings, context) {
 
     if (!needsCaptcha) {
         showCaptchaStatus('无需安全验证，正在登录...', 'success');
-        await submitAuthenticatedPassword(context, username);
+        await submitAuthenticatedPassword(context);
         return;
     }
 
@@ -4778,7 +4744,7 @@ async function solveSliderAuthentication(settings, context) {
         + `score ${result.match.confidence.toFixed(3)}，margin ${result.match.margin.toFixed(3)}`
     );
     showCaptchaStatus('安全验证通过，正在登录...', 'success');
-    await submitAuthenticatedPassword(context, username);
+    await submitAuthenticatedPassword(context);
 }
 
 async function _solveCaptchaImpl() {
