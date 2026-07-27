@@ -47,6 +47,8 @@ vm.createContext(sandbox);
 vm.runInContext(runtimeSource, sandbox, { filename: 'auth-slider-captcha.js' });
 const runtime = sandbox.NjuAuthSliderCaptcha;
 assert.ok(runtime, 'The auth slider runtime must expose a content-script module.');
+assert.match(runtimeSource, /const MIN_VERIFY_DELAY_MS = 1700;/);
+assert.match(runtimeSource, /const MAX_VERIFY_DELAY_MS = 1820;/);
 
 function image(width, height, fill = 32) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -139,8 +141,8 @@ assert.match(
 );
 assert.match(
   contentSource,
-  /if \(isAuthserverLoginPage\(\)\) \{[\s\S]*?scheduleRetry\(800\);/,
-  'Automatic login startup must run only on the authserver login route.'
+  /if \(isAuthserverLoginPage\(\)\) \{[\s\S]*?void solveCaptcha\(\);/,
+  'Automatic login must start immediately and only on the authserver login route.'
 );
 
 console.log('Auth slider captcha runtime verified.');

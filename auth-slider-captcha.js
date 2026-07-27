@@ -9,8 +9,8 @@
     const BACKGROUND_DRAW_WIDTH = 278;
     const MAX_MOVE_LENGTH = 240;
     const DEFAULT_ATTEMPTS = 3;
-    const MIN_VERIFY_DELAY_MS = 1820;
-    const MAX_VERIFY_DELAY_MS = 2080;
+    const MIN_VERIFY_DELAY_MS = 1700;
+    const MAX_VERIFY_DELAY_MS = 1820;
     const MIN_MATCH_SCORE = 0.12;
     const MIN_MATCH_MARGIN = 0.008;
     const RANDOM_ALPHABET = 'ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678';

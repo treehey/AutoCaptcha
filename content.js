@@ -4867,8 +4867,8 @@ async function _solveCaptchaImpl() {
 // Only the login route owns automatic recognition. The content script also
 // matches post-login authserver pages, where retrying would be pointless.
 if (isAuthserverLoginPage()) {
-    // 稍微等待南大脚本把验证码图片刷出来；若图片未就绪，后续逻辑会继续短轮询
-    scheduleRetry(800);
+    // document_idle 时登录表单通常已就绪；图片若未完成加载，识别流程会自行短轮询。
+    void solveCaptcha();
 }
 
 // 使用捕获阶段事件委托监听验证码图片刷新
