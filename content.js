@@ -4600,6 +4600,180 @@ function scheduleRetry(ms) {
     retryTimer = setTimeout(solveCaptcha, ms);
 }
 
+const AUTH_SLIDER_SUBMIT_GUARD_KEY = 'nju-auth-slider-submit-guard';
+const AUTH_SLIDER_SUBMIT_GUARD_MS = 30000;
+
+function isVisibleElement(element) {
+    if (!element || !element.isConnected) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+function findPasswordLoginContext() {
+    const form = document.getElementById('pwdFromId');
+    const container = document.getElementById('pwdLoginDiv');
+    if (!form || (container && !isVisibleElement(container))) return null;
+    const username = form.querySelector('input[name="username"]');
+    const password = form.querySelector('#password');
+    const encryptedPassword = form.querySelector('#saltPassword');
+    const passwordSalt = form.querySelector('#pwdEncryptSalt');
+    const submitButton = form.querySelector('#login_submit');
+    if (!username || !password || !encryptedPassword || !passwordSalt || !submitButton) return null;
+    return { form, username, password, encryptedPassword, passwordSalt, submitButton };
+}
+
+function isSliderCaptchaPage() {
+    const sliderContainer = document.getElementById('sliderCaptchaDiv');
+    if (!sliderContainer) return false;
+    return Array.from(document.scripts).some(script => /captchaSwitch\s*=\s*["']2["']/.test(script.textContent || ''));
+}
+
+function setNativeFieldValue(element, value) {
+    const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    if (setter) setter.call(element, value);
+    else element.value = value;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function fillPasswordLoginContext(context, settings) {
+    const force = Boolean(settings.nju_force);
+    if ((force || !context.username.value.trim()) && settings.nju_user) {
+        setNativeFieldValue(context.username, settings.nju_user);
+    }
+    if ((force || !context.password.value) && settings.nju_pass) {
+        context.password.removeAttribute('readonly');
+        setNativeFieldValue(context.password, settings.nju_pass);
+    }
+    return Boolean(context.username.value.trim() && context.password.value);
+}
+
+async function checkAuthserverNeedsCaptcha(username) {
+    const endpoint = new URL(`/authserver/checkNeedCaptcha.htl?username=${encodeURIComponent(username)}`, window.location.origin);
+    const request = await fetch(endpoint.href, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
+    if (!request.ok) throw new Error(`验证码状态检查失败 (${request.status})`);
+    const result = await request.json();
+    return Boolean(result?.isNeed);
+}
+
+function hasRecentSliderSubmit(username) {
+    try {
+        const [storedUser, timestamp] = String(sessionStorage.getItem(AUTH_SLIDER_SUBMIT_GUARD_KEY) || '').split(':');
+        return storedUser === username && Date.now() - Number(timestamp) < AUTH_SLIDER_SUBMIT_GUARD_MS;
+    } catch (error) {
+        return false;
+    }
+}
+
+function rememberSliderSubmit(username) {
+    try {
+        sessionStorage.setItem(AUTH_SLIDER_SUBMIT_GUARD_KEY, `${username}:${Date.now()}`);
+    } catch (error) {
+        // The guard is only a loop protection. Authentication still works when storage is unavailable.
+    }
+}
+
+function clearSliderSubmitGuard() {
+    try {
+        sessionStorage.removeItem(AUTH_SLIDER_SUBMIT_GUARD_KEY);
+    } catch (error) {
+        // Ignore private browsing or storage policy failures.
+    }
+}
+
+async function submitPasswordLoginContext(context, username) {
+    const sliderRuntime = window.NjuAuthSliderCaptcha;
+    if (!sliderRuntime?.encryptForPage) throw new Error('滑块认证运行时未加载');
+    const encrypted = await sliderRuntime.encryptForPage(context.password.value, context.passwordSalt.value);
+    setNativeFieldValue(context.encryptedPassword, encrypted);
+    context.password.setAttribute('disabled', 'disabled');
+    rememberSliderSubmit(username);
+    HTMLFormElement.prototype.submit.call(context.form);
+}
+
+function openManualSliderFallback(context, reason) {
+    clearSliderSubmitGuard();
+    showCaptchaStatus(reason || '安全验证需要手动完成', 'warning', 5200);
+    context.password.removeAttribute('disabled');
+    context.submitButton.click();
+}
+
+async function submitAuthenticatedPassword(context, username) {
+    try {
+        await submitPasswordLoginContext(context, username);
+        return true;
+    } catch (error) {
+        console.warn('NJU 助手：无法提交新版认证表单:', error);
+        openManualSliderFallback(context, '自动提交失败，已打开官方滑块');
+        return false;
+    }
+}
+
+async function solveSliderAuthentication(settings, context) {
+    const hasCredentials = fillPasswordLoginContext(context, settings);
+    const username = context.username.value.trim();
+    if (!hasCredentials || !username) {
+        showCaptchaStatus('请先在插件中保存账号和密码', 'warning', 4200);
+        return;
+    }
+    if (hasRecentSliderSubmit(username)) {
+        showCaptchaStatus('已提交登录，正在等待页面结果', 'loading');
+        return;
+    }
+    if (settings.nju_auto_click === false) {
+        showCaptchaStatus('账号已填入，自动登录已暂停', 'success', 3600);
+        return;
+    }
+
+    let needsCaptcha;
+    try {
+        showCaptchaStatus('正在检查登录状态...', 'loading');
+        needsCaptcha = await checkAuthserverNeedsCaptcha(username);
+    } catch (error) {
+        console.warn('NJU 助手：无法检查新版验证码状态:', error);
+        openManualSliderFallback(context, '无法检查安全验证，请使用页面滑块');
+        return;
+    }
+
+    if (!needsCaptcha) {
+        showCaptchaStatus('无需安全验证，正在登录...', 'success');
+        await submitAuthenticatedPassword(context, username);
+        return;
+    }
+
+    const sliderRuntime = window.NjuAuthSliderCaptcha;
+    if (!sliderRuntime?.solve) {
+        openManualSliderFallback(context, '滑块识别模块未加载，请使用页面滑块');
+        return;
+    }
+
+    showCaptchaStatus('正在完成安全验证...', 'loading');
+    const result = await sliderRuntime.solve({
+        attempts: 3,
+        onStatus: state => {
+            if (state.phase === 'matching') showCaptchaStatus(`正在定位拼图缺口（${state.attempt}/3）...`, 'loading');
+            if (state.phase === 'verifying') showCaptchaStatus(`正在验证安全校验（${state.attempt}/3）...`, 'loading');
+        }
+    });
+    if (!result.ok) {
+        console.warn('NJU 助手：滑块自动验证未通过:', result.error);
+        openManualSliderFallback(context, '自动安全验证未通过，已打开官方滑块');
+        return;
+    }
+
+    console.log(
+        `NJU 助手：滑块验证通过，缺口 ${result.match.moveLength}px，`
+        + `score ${result.match.confidence.toFixed(3)}，margin ${result.match.margin.toFixed(3)}`
+    );
+    showCaptchaStatus('安全验证通过，正在登录...', 'success');
+    await submitAuthenticatedPassword(context, username);
+}
+
 async function _solveCaptchaImpl() {
     // --- 新增：检查插件是否启用 ---
     const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force', 'nju_auto_click']);
@@ -4608,6 +4782,12 @@ async function _solveCaptchaImpl() {
         return;
     }
     // ----------------------------
+
+    const passwordLoginContext = findPasswordLoginContext();
+    if (passwordLoginContext && isSliderCaptchaPage()) {
+        await solveSliderAuthentication(settings, passwordLoginContext);
+        return;
+    }
 
     const imgElement = document.querySelector(IMG_SELECTOR);
     const inputElement = document.querySelector(INPUT_SELECTOR);

@@ -22,6 +22,7 @@ New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
 $files = @(
   'manifest.json',
+  'auth-slider-captcha.js',
   'captcha-cnn.js',
   'content.js',
   'content-grab.js',
@@ -82,6 +83,10 @@ if ((-not (Test-Path (Join-Path $verify 'captcha-cnn.js'))) -or
     (-not (Test-Path (Join-Path $verify 'assets/captcha-cnn-model.json'))) -or
     (-not (Test-Path (Join-Path $verify 'assets/captcha-cnn-model.bin')))) {
   throw 'Package verification failed: captcha CNN runtime or model is missing.'
+}
+
+if (-not (Test-Path (Join-Path $verify 'auth-slider-captcha.js'))) {
+  throw 'Package verification failed: auth slider captcha runtime is missing.'
 }
 
 if ((-not (Test-Path (Join-Path $verify 'click-captcha-worker.js'))) -or
