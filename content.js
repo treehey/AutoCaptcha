@@ -4606,20 +4606,27 @@ const AUTH_SLIDER_SUBMIT_GUARD_MS = 30000;
 function isVisibleElement(element) {
     if (!element || !element.isConnected) return false;
     const style = window.getComputedStyle(element);
-    return style.display !== 'none' && style.visibility !== 'hidden';
+    return element.getClientRects().length > 0
+        && style.display !== 'none'
+        && style.visibility !== 'hidden';
 }
 
 function findPasswordLoginContext() {
-    const form = document.getElementById('pwdFromId');
-    const container = document.getElementById('pwdLoginDiv');
-    if (!form || (container && !isVisibleElement(container))) return null;
-    const username = form.querySelector('input[name="username"]');
-    const password = form.querySelector('#password');
-    const encryptedPassword = form.querySelector('#saltPassword');
-    const passwordSalt = form.querySelector('#pwdEncryptSalt');
-    const submitButton = form.querySelector('#login_submit');
-    if (!username || !password || !encryptedPassword || !passwordSalt || !submitButton) return null;
-    return { form, username, password, encryptedPassword, passwordSalt, submitButton };
+    // The live authserver page contains two forms with the same pwdFromId.
+    // Select the rendered one and keep all duplicate-ID field queries form-scoped.
+    const forms = Array.from(document.querySelectorAll('form#pwdFromId'));
+    for (const form of forms) {
+        if (!isVisibleElement(form)) continue;
+        const username = form.querySelector('input[name="username"]');
+        const password = form.querySelector('#password');
+        const encryptedPassword = form.querySelector('#saltPassword');
+        const passwordSalt = form.querySelector('#pwdEncryptSalt');
+        const submitButton = form.querySelector('#login_submit');
+        if (username && password && encryptedPassword && passwordSalt && submitButton) {
+            return { form, username, password, encryptedPassword, passwordSalt, submitButton };
+        }
+    }
+    return null;
 }
 
 function isSliderCaptchaPage() {

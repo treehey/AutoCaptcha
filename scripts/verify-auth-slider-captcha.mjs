@@ -112,6 +112,16 @@ const authScripts = manifest.content_scripts.find(entry => entry.matches.include
 assert.ok(authScripts.indexOf('auth-slider-captcha.js') >= 0, 'The auth slider runtime must be injected on authserver pages.');
 assert.ok(authScripts.indexOf('auth-slider-captcha.js') < authScripts.indexOf('content.js'), 'The auth slider runtime must load before the login controller.');
 assert.match(buildScript, /'auth-slider-captcha\.js'/, 'The release package must include the auth slider runtime.');
+assert.match(
+  contentSource,
+  /querySelectorAll\(['"]form#pwdFromId['"]\)/,
+  'The login controller must enumerate duplicate password-form IDs used by the live authserver page.'
+);
+assert.match(
+  contentSource,
+  /getClientRects\(\)\.length/,
+  'The login controller must select the form that is actually rendered, including ancestor visibility.'
+);
 assert.match(contentSource, /function checkAuthserverNeedsCaptcha\(username\)/);
 assert.match(contentSource, /function submitPasswordLoginContext\(context, username\)/);
 assert.match(contentSource, /HTMLFormElement\.prototype\.submit\.call\(context\.form\)/);
