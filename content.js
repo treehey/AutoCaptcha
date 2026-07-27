@@ -2,10 +2,12 @@
 const EXTENSION_VERSION = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest)
     ? chrome.runtime.getManifest().version
     : 'dev';
-console.log(`NJU 验证码识别助手 v${EXTENSION_VERSION} 已启动...`);
-
+const AUTH_LOGIN_PATH = '/authserver/login';
 const IMG_SELECTOR = "#captchaImg";
 const INPUT_SELECTOR = "#captcha";
+if (window.location.pathname === AUTH_LOGIN_PATH) {
+    console.log(`NJU 验证码识别助手 v${EXTENSION_VERSION} 已启动...`);
+}
 // Labeled samples indicate the captcha alphabet excludes 0/1/o/O/z/Z.
 const CAPTCHA_CHAR_WHITELIST = '23456789abcdefghijklmnpqrstuvwxyABCDEFGHIJKLMNPQRSTUVWXY';
 let captchaWorkerPromise = null;
@@ -4600,6 +4602,10 @@ function scheduleRetry(ms) {
     retryTimer = setTimeout(solveCaptcha, ms);
 }
 
+function isAuthserverLoginPage() {
+    return window.location.pathname === AUTH_LOGIN_PATH;
+}
+
 function isVisibleElement(element) {
     if (!element || !element.isConnected) return false;
     const style = window.getComputedStyle(element);
@@ -4858,8 +4864,12 @@ async function _solveCaptchaImpl() {
     }
 }
 
-// 稍微等待南大脚本把验证码图片刷出来；若图片未就绪，后续逻辑会继续短轮询
-scheduleRetry(800);
+// Only the login route owns automatic recognition. The content script also
+// matches post-login authserver pages, where retrying would be pointless.
+if (isAuthserverLoginPage()) {
+    // 稍微等待南大脚本把验证码图片刷出来；若图片未就绪，后续逻辑会继续短轮询
+    scheduleRetry(800);
+}
 
 // 使用捕获阶段事件委托监听验证码图片刷新
 // load 事件不冒泡，必须用 capture:true；同时避免元素未就绪时 ?. 静默失败

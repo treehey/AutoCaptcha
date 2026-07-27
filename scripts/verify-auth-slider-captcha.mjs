@@ -132,5 +132,15 @@ assert.doesNotMatch(
   /AUTH_SLIDER_SUBMIT_GUARD|hasRecentSliderSubmit|rememberSliderSubmit/,
   'A cross-navigation session lock must not prevent a fresh login attempt after returning to authserver.'
 );
+assert.match(
+  contentSource,
+  /function isAuthserverLoginPage\(\)/,
+  'The auth controller must explicitly distinguish the login route from post-login authserver pages.'
+);
+assert.match(
+  contentSource,
+  /if \(isAuthserverLoginPage\(\)\) \{[\s\S]*?scheduleRetry\(800\);/,
+  'Automatic login startup must run only on the authserver login route.'
+);
 
 console.log('Auth slider captcha runtime verified.');
