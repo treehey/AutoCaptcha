@@ -4940,9 +4940,11 @@ if (chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'getCaptchaPreviewStatus') {
             const image = document.querySelector(IMG_SELECTOR);
+            const sliderCaptcha = isSliderCaptchaPage();
             sendResponse({
                 ok: true,
-                ready: Boolean(image && image.naturalWidth > 0)
+                mode: sliderCaptcha ? 'slider' : 'legacy-ocr',
+                ready: !sliderCaptcha && Boolean(image && image.naturalWidth > 0)
             });
         } else if (message.action === 'recognizeCaptchaPreview') {
             previewCaptchaRecognition(message.templateRerank).then(sendResponse);

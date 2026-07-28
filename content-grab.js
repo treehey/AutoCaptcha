@@ -1085,6 +1085,18 @@ function getClickCaptchaSolverState() {
   };
 }
 
+function getClickCaptchaManualStatus() {
+  const target = findClickCaptchaElement();
+  const loginContext = target && findClickCaptchaLoginContext(target);
+  const ready = Boolean(loginContext && isReadyClickCaptchaElement(target));
+  return {
+    ok: true,
+    mode: ready ? 'click-mark' : 'none',
+    ready,
+    state: getClickCaptchaSolverState()
+  };
+}
+
 function isClickCaptchaAutoEligible(result) {
   return Boolean(result
     && result.margin >= CLICK_CAPTCHA_AUTO_MARGIN
@@ -1702,6 +1714,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   } else if (msg.action === 'getClickCaptchaSolverStatus') {
     sendResponse({ ok: true, state: getClickCaptchaSolverState() });
+  } else if (msg.action === 'getClickCaptchaManualStatus') {
+    sendResponse(getClickCaptchaManualStatus());
   } else if (msg.action === 'setClickCaptchaSolverEnabled') {
     setClickCaptchaSolverEnabled(Boolean(msg.enabled))
       .then(state => sendResponse({ ok: true, state }))

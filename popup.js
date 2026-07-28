@@ -37,6 +37,7 @@ const els = {
   forceFill: document.getElementById('forceFill'),
   autoClick: document.getElementById('autoClick'),
   clickCaptchaAutoLogin: document.getElementById('clickCaptchaAutoLogin'),
+  captchaTools: document.getElementById('captchaTools'),
   currentCaptchaTitle: document.getElementById('currentCaptchaTitle'),
   currentCaptchaNote: document.getElementById('currentCaptchaNote'),
   currentCaptchaBadge: document.getElementById('currentCaptchaBadge'),
@@ -96,6 +97,7 @@ let clickCaptchaAutoLoginEnabled = true;
 let currentCaptchaPage = 'other';
 let authPreviewConnected = false;
 let authPreviewReady = false;
+let captchaTestCapability = { mode: 'none', ready: false };
 
 function setVersion() {
   if (els.versionBadge && chrome.runtime && chrome.runtime.getManifest) {
@@ -405,6 +407,14 @@ function setPreviewConnection(connected, ready = false) {
   renderCurrentCaptchaPanel();
 }
 
+function setCaptchaTestCapability(capability) {
+  captchaTestCapability = {
+    mode: capability?.mode || 'none',
+    ready: Boolean(capability?.ready)
+  };
+  renderCurrentCaptchaPanel();
+}
+
 function setCaptchaPreviewContent(code, meta, details = '') {
   els.ocrPreviewCode.textContent = code;
   els.ocrPreviewCode.classList.toggle('empty', !code || code.startsWith('等待') || code.startsWith('未'));
@@ -414,37 +424,34 @@ function setCaptchaPreviewContent(code, meta, details = '') {
 }
 
 function renderCurrentCaptchaPanel() {
-  if (currentCaptchaPage === 'auth') {
+  const mode = captchaTestCapability.mode;
+  const visible = mode === 'legacy-ocr' || mode === 'click-mark';
+  els.captchaTools.hidden = !visible;
+  if (!visible) return;
+
+  if (mode === 'legacy-ocr') {
     els.currentCaptchaTitle.textContent = '验证码测试';
-    els.currentCaptchaNote.textContent = '当前：统一认证页。可按需查看或重新识别登录验证码。';
+    els.currentCaptchaNote.textContent = '仅重新识别并填入当前图形验证码，不会提交登录。';
     setBadge(els.currentCaptchaBadge, authPreviewReady ? '验证码就绪' : authPreviewConnected ? '认证页已连接' : '未连接', authPreviewReady ? 'success' : authPreviewConnected ? 'info' : 'warning');
     els.recognizeAgainBtn.textContent = previewRunning ? '识别中...' : '重新识别';
     els.recognizeAgainBtn.disabled = !authPreviewReady || previewRunning;
     return;
   }
 
-  if (currentCaptchaPage === 'grab') {
+  if (mode === 'click-mark') {
     const state = clickCaptchaSolverState;
     const running = Boolean(state?.running);
     const orderCount = Array.isArray(state?.order) ? state.order.length : 0;
     els.currentCaptchaTitle.textContent = '验证码测试';
-    els.currentCaptchaNote.textContent = '当前：选课页。手动识别只标出顺序，不会自动点击或提交。';
+    els.currentCaptchaNote.textContent = '仅标出点击顺序，不会自动点击或提交。';
     setBadge(els.currentCaptchaBadge, !clickCaptchaSolverConnected ? '未连接' : running ? '识别中' : '选课页已连接', !clickCaptchaSolverConnected ? 'warning' : running ? 'info' : 'success');
     setCaptchaPreviewContent(
       orderCount ? `已识别 ${orderCount} 个点击点` : running ? '正在识别' : '等待点击验证码',
       state?.status || '验证码加载完成后可重新识别。'
     );
-    els.recognizeAgainBtn.textContent = running ? '识别中...' : '重新识别';
-    els.recognizeAgainBtn.disabled = !clickCaptchaSolverConnected || running;
-    return;
+    els.recognizeAgainBtn.textContent = running ? '识别中...' : '识别并标点';
+    els.recognizeAgainBtn.disabled = !captchaTestCapability.ready || running;
   }
-
-  els.currentCaptchaTitle.textContent = '验证码测试';
-  els.currentCaptchaNote.textContent = '打开认证页或选课页后，可按需查看识别状态。';
-  setBadge(els.currentCaptchaBadge, '未连接', 'warning');
-  setCaptchaPreviewContent('等待打开页面', '请在统一认证页或选课页面打开面板。');
-  els.recognizeAgainBtn.textContent = '重新识别';
-  els.recognizeAgainBtn.disabled = true;
 }
 
 function renderOcrPreview(response) {
@@ -468,9 +475,42 @@ async function syncOcrPreviewStatus() {
   const result = await sendActiveTabMessage({ action: 'getCaptchaPreviewStatus' });
   if (!result.connected) {
     setPreviewConnection(false);
+    setCaptchaTestCapability();
     return;
   }
-  setPreviewConnection(true, Boolean(result.response?.ready));
+  const response = result.response || {};
+  setPreviewConnection(true, Boolean(response.ready));
+  setCaptchaTestCapability({
+    mode: response.mode === 'legacy-ocr' ? 'legacy-ocr' : 'none',
+    ready: response.ready
+  });
+}
+
+async function syncCurrentCaptchaTestCapability() {
+  if (currentCaptchaPage === 'auth') {
+    await syncOcrPreviewStatus();
+    return;
+  }
+
+  if (currentCaptchaPage !== 'grab') {
+    setCaptchaTestCapability();
+    return;
+  }
+
+  const result = await sendActiveTabMessage({ action: 'getClickCaptchaManualStatus' });
+  if (!result.connected) {
+    clickCaptchaSolverConnected = false;
+    setCaptchaTestCapability();
+    return;
+  }
+
+  const response = result.response || {};
+  clickCaptchaSolverConnected = true;
+  clickCaptchaSolverState = response.state || null;
+  setCaptchaTestCapability({
+    mode: response.mode === 'click-mark' ? 'click-mark' : 'none',
+    ready: response.ready
+  });
 }
 
 function applyGrabSnapshot(state) {
@@ -627,16 +667,19 @@ function syncTabToCurrentPage() {
       currentCaptchaPage = 'grab';
       activateTab('grab', false);
       renderCurrentCaptchaPanel();
+      syncCurrentCaptchaTestCapability();
       return;
     }
     if (url.includes('authserver.nju.edu.cn')) {
       currentCaptchaPage = 'auth';
       activateTab('login', false);
       renderCurrentCaptchaPanel();
+      syncCurrentCaptchaTestCapability();
       return;
     }
     currentCaptchaPage = 'other';
     renderCurrentCaptchaPanel();
+    syncCurrentCaptchaTestCapability();
     chrome.storage.local.get(['nju_popup_tab'], data => {
       activateTab(data.nju_popup_tab === 'grab' ? 'grab' : 'login', false);
     });
@@ -733,14 +776,14 @@ function initLoginEvents() {
   });
 
   els.recognizeAgainBtn.addEventListener('click', async () => {
-    if (currentCaptchaPage === 'grab') {
+    if (captchaTestCapability.mode === 'click-mark') {
       els.recognizeAgainBtn.disabled = true;
       els.recognizeAgainBtn.textContent = '识别中...';
-      const result = await sendGrabMessage({ action: 'runClickCaptchaSolver' });
+      const result = await sendActiveTabMessage({ action: 'runClickCaptchaSolver' });
       if (!result.connected) {
         clickCaptchaSolverConnected = false;
         clickCaptchaSolverState = null;
-        renderClickCaptchaSolverState();
+        setCaptchaTestCapability();
         showToast('请切换到选课页面后重试');
         return;
       }
@@ -751,7 +794,7 @@ function initLoginEvents() {
       return;
     }
 
-    if (currentCaptchaPage !== 'auth') return;
+    if (captchaTestCapability.mode !== 'legacy-ocr') return;
     if (previewRunning) return;
 
     previewRunning = true;
@@ -1012,6 +1055,5 @@ initTabs();
 initSettings();
 initLoginEvents();
 initGrabEvents();
-syncOcrPreviewStatus();
 syncClickCaptchaCaptureStatus();
 syncClickCaptchaSolverStatus();
