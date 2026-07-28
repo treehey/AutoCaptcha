@@ -4414,8 +4414,13 @@ async function recognizeCaptchaCode(imgElement, options = {}) {
     }
 }
 
+function shouldPrewarmLegacyCaptchaRuntime() {
+    if (!isAuthserverLoginPage()) return false;
+    return !window.NjuAuthLoginFastPath?.getSnapshot?.().sliderDetected;
+}
+
 chrome.storage.local.get(['nju_enabled', 'nju_template_rerank']).then(settings => {
-    if (settings.nju_enabled !== false) {
+    if (settings.nju_enabled !== false && shouldPrewarmLegacyCaptchaRuntime()) {
         if (settings.nju_template_rerank !== false && window.NjuCaptchaCnn) {
             window.NjuCaptchaCnn.loadModel()
                 .catch(err => console.warn('NJU 助手：预热 CNN 模型失败:', err));
@@ -4753,6 +4758,42 @@ async function solveSliderAuthentication(settings, context) {
     await submitAuthenticatedPassword(context);
 }
 
+async function consumeFastAuthLogin(settings, context) {
+    const fastPath = window.NjuAuthLoginFastPath;
+    if (!fastPath?.getResult || !isSliderCaptchaPage()) return false;
+
+    const snapshot = fastPath.getSnapshot?.();
+    if (snapshot?.phase && !['ready', 'failed', 'error', 'not-slider', 'skipped'].includes(snapshot.phase)) {
+        showCaptchaStatus('正在完成安全验证...', 'loading');
+    }
+
+    const outcome = await fastPath.getResult();
+    if (!outcome || ['ignored', 'skipped', 'not-slider', 'error'].includes(outcome.kind)) return false;
+
+    const hasCredentials = fillPasswordLoginContext(context, settings);
+    if (!hasCredentials || settings.nju_auto_click === false) return false;
+    if (outcome.username && context.username.value.trim() !== outcome.username) return false;
+
+    if (outcome.kind === 'no-captcha') {
+        showCaptchaStatus('无需安全验证，正在登录...', 'success');
+        await submitAuthenticatedPassword(context);
+        return true;
+    }
+
+    if (outcome.kind === 'slider') {
+        if (!outcome.sliderResult?.ok) {
+            console.warn('NJU 助手：快速滑块验证未通过:', outcome.sliderResult?.error);
+            openManualSliderFallback(context, '自动安全验证未通过，已打开官方滑块');
+            return true;
+        }
+        showCaptchaStatus('安全验证通过，正在登录...', 'success');
+        await submitAuthenticatedPassword(context);
+        return true;
+    }
+
+    return false;
+}
+
 async function _solveCaptchaImpl() {
     // --- 新增：检查插件是否启用 ---
     const settings = await chrome.storage.local.get(['nju_enabled', 'nju_user', 'nju_pass', 'nju_force', 'nju_auto_click']);
@@ -4764,6 +4805,7 @@ async function _solveCaptchaImpl() {
 
     const passwordLoginContext = findPasswordLoginContext();
     if (passwordLoginContext && isSliderCaptchaPage()) {
+        if (await consumeFastAuthLogin(settings, passwordLoginContext)) return;
         await solveSliderAuthentication(settings, passwordLoginContext);
         return;
     }

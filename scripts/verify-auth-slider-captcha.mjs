@@ -110,9 +110,13 @@ assert.equal(tracks.at(-1).a, 132);
 assert.ok(tracks.every(track => Number.isInteger(track.a) && Number.isInteger(track.b) && Number.isInteger(track.c)));
 
 const manifest = JSON.parse(manifestText);
-const authScripts = manifest.content_scripts.find(entry => entry.matches.includes('https://authserver.nju.edu.cn/*')).js;
-assert.ok(authScripts.indexOf('auth-slider-captcha.js') >= 0, 'The auth slider runtime must be injected on authserver pages.');
-assert.ok(authScripts.indexOf('auth-slider-captcha.js') < authScripts.indexOf('content.js'), 'The auth slider runtime must load before the login controller.');
+const authEntries = manifest.content_scripts.filter(entry => entry.matches.includes('https://authserver.nju.edu.cn/*'));
+const authFastEntry = authEntries.find(entry => entry.js.includes('auth-slider-captcha.js'));
+const authControllerEntry = authEntries.find(entry => entry.js.includes('content.js'));
+assert.ok(authFastEntry, 'The auth slider runtime must be injected on authserver pages.');
+assert.equal(authFastEntry.run_at, 'document_start', 'The slider runtime must start before the page reaches document_idle.');
+assert.ok(authControllerEntry, 'The auth login controller must be injected on authserver pages.');
+assert.equal(authControllerEntry.run_at, 'document_idle', 'The legacy controller must wait until the form is available.');
 assert.match(buildScript, /'auth-slider-captcha\.js'/, 'The release package must include the auth slider runtime.');
 assert.match(
   contentSource,

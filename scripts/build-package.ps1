@@ -23,6 +23,7 @@ New-Item -ItemType Directory -Path $staging -Force | Out-Null
 $files = @(
   'manifest.json',
   'auth-slider-captcha.js',
+  'auth-login-fast.js',
   'captcha-cnn.js',
   'content.js',
   'content-grab.js',
