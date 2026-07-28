@@ -76,6 +76,16 @@ if (-not (Test-Path (Join-Path $verify 'manifest.json'))) {
   throw 'Package verification failed: manifest.json is not at the zip root.'
 }
 
+$packageManifest = Get-Content -Raw -LiteralPath (Join-Path $verify 'manifest.json') | ConvertFrom-Json
+if ($packageManifest.permissions -contains 'unlimitedStorage') {
+  throw 'Package verification failed: release packages must not request unlimitedStorage.'
+}
+
+$releasePopup = Get-Content -Raw -LiteralPath (Join-Path $verify 'popup.html')
+if (($releasePopup -notmatch 'data-build="release"') -or ($releasePopup -notmatch 'body\[data-build="release"\] \[data-dev-only\]')) {
+  throw 'Package verification failed: release build must hide development-only tools.'
+}
+
 if (-not (Test-Path (Join-Path $verify 'assets/captcha-template-model.json'))) {
   throw 'Package verification failed: captcha template model is missing.'
 }
