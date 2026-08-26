@@ -33,7 +33,14 @@ assert.match(html, /连续失效或入口不可用则转人工/, 'The popup must
 assert.doesNotMatch(html, /断网或掉线会自动恢复任务，无需人工干预/, 'The popup must not promise recovery without manual handoff conditions.');
 assert.match(html, /浏览器重启后不会自行恢复真实提交/, 'The popup must make the high-risk restart behavior explicit.');
 assert.match(html, /不会自动退掉保底课程/, 'Course-group help must explain the no-auto-withdraw safety rule.');
-assert.match(html, /二次验证后记录成功/, 'The feature overview must describe verified selection success.');
+const featureGuideStart = html.indexOf('<section class="feature-guide"');
+const featureGuideEnd = html.indexOf('</section>', featureGuideStart);
+const featureGuideMarkup = html.slice(featureGuideStart, featureGuideEnd);
+assert.match(featureGuideMarkup, /它能帮你做什么？/, 'The feature overview should start from the user\'s question.');
+assert.match(featureGuideMarkup, /自动登录、识别验证码/, 'The feature overview should explain the main benefit in plain language.');
+assert.match(featureGuideMarkup, /确认真的选上后才提示成功/, 'The feature overview must explain verified success without implementation jargon.');
+assert.match(featureGuideMarkup, /只保存在你的浏览器中/, 'The feature overview should explain local storage in plain language.');
+assert.doesNotMatch(featureGuideMarkup, /明确边界|原生流程|二次验证|检查点/, 'The feature overview should avoid internal implementation language.');
 assert.doesNotMatch(html, /无感秒登|任何校内系统|毫秒内自动捡漏/, 'The feature overview must not overpromise unsupported sites or selection speed.');
 assert.match(html, /<script src="grab-task-model\.js"><\/script>\s*<script src="grab-auth-presentation\.js"><\/script>\s*<script src="popup\.js"><\/script>/, 'Shared grab presentation modules must load before the popup controller.');
 assert.match(html, /tabindex="-1"/, 'Inactive tabs need a roving tabindex.');
