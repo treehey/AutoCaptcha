@@ -38,6 +38,7 @@ $files = @(
   'grab-course-provider.js',
   'grab-network-bridge.js',
   'grab-task-session.js',
+  'grab-login-shield.js',
   'content-grab.js',
   'grab-page-ui.css',
   'click-captcha-worker.js',
@@ -133,6 +134,7 @@ if ((-not (Test-Path (Join-Path $verify 'grab-task-model.js'))) -or
     (-not (Test-Path (Join-Path $verify 'grab-course-provider.js'))) -or
     (-not (Test-Path (Join-Path $verify 'grab-network-bridge.js'))) -or
     (-not (Test-Path (Join-Path $verify 'grab-task-session.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-login-shield.js'))) -or
     (-not (Test-Path (Join-Path $verify 'content-grab.js'))) -or
     (-not (Test-Path (Join-Path $verify 'grab-page-ui.css')))) {
   throw 'Package verification failed: course grab runtime is missing.'

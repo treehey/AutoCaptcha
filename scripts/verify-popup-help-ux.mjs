@@ -19,7 +19,8 @@ assert.match(html, /data-help-target="help-auth-prewarm"/, 'Prewarm needs contex
 assert.match(html, /data-help-target="help-course-login"/, 'Course-system login needs contextual help.');
 assert.match(html, /data-help-target="help-course-names"/, 'Course-name matching needs contextual help.');
 assert.match(html, /data-help-target="help-grab-interval"/, 'Refresh interval needs contextual help.');
-assert.match(html, /提前准备统一认证/, 'The prewarm control should use user-facing language.');
+assert.match(html, /无感登录/, 'The prewarm control should use plain user-facing language.');
+assert.doesNotMatch(html, /提前准备统一认证|启动时预认证/, 'The popup should not expose implementation-oriented prewarm terminology.');
 assert.match(html, /value="5000" selected/, 'Five seconds should be the visible default interval.');
 assert.match(html, /id="grabSteps"/, 'Disconnected course monitoring needs a guided next step.');
 assert.match(html, /id="exactTargets"/, 'The popup must list exact teaching-class targets.');
