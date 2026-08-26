@@ -1,6 +1,6 @@
 {
   "name": "nju-login-pro",
-  "version": "6.2.0",
+  "version": "6.2.1",
   "private": true,
   "description": "Offline verification commands for the NJU Login Pro browser extension.",
   "license": "MIT",
