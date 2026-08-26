@@ -496,11 +496,11 @@ function renderAuthPrewarmState() {
   if (!els.authPrewarm || !els.authPrewarmDesc) return;
   const configured = Boolean(els.username.value.trim() && els.password.value);
   if (!els.authPrewarm.checked) {
-    els.authPrewarmDesc.textContent = '默认关闭；开启后在扩展后台准备会话，不新增标签页。';
+    els.authPrewarmDesc.textContent = '默认关闭；开启后，浏览器启动时会在后台先登录一次。';
     return;
   }
   if (!els.isEnabled.checked || !els.autoClick.checked) {
-    els.authPrewarmDesc.textContent = '等待开启统一认证自动提交后生效。';
+    els.authPrewarmDesc.textContent = '需要先开启上方的统一认证“访问时自动登录”。';
     return;
   }
   if (!configured) {
@@ -510,15 +510,15 @@ function renderAuthPrewarmState() {
 
   const phase = authPrewarmState?.phase;
   const copy = {
-    running: '正在后台建立统一认证会话。',
-    ready: '本次浏览器会话的统一认证已准备。',
-    attention: authPrewarmState?.reason || '后台认证需要人工处理，本次不会重试。',
-    failed: authPrewarmState?.reason || '本次后台认证未完成，不会自动重试。',
-    cancelled: authPrewarmState?.reason || '后台认证已取消。',
-    disabled: '默认关闭；开启后在扩展后台准备会话，不新增标签页。',
-    idle: authPrewarmState?.reason || '将在满足条件时从扩展后台准备认证会话。'
+    running: '正在后台准备无感登录。',
+    ready: '无感登录已准备好，之后打开认证页面通常更快。',
+    attention: authPrewarmState?.reason || '无感登录需要人工处理，本次不会重试。',
+    failed: authPrewarmState?.reason || '本次无感登录未完成，不会自动重试。',
+    cancelled: authPrewarmState?.reason || '无感登录已取消。',
+    disabled: '默认关闭；开启后，浏览器启动时会在后台先登录一次。',
+    idle: authPrewarmState?.reason || '条件满足后会在后台准备无感登录。'
   };
-  els.authPrewarmDesc.textContent = copy[phase] || '将在浏览器启动后从扩展后台准备认证会话。';
+  els.authPrewarmDesc.textContent = copy[phase] || '浏览器启动后会在后台准备无感登录。';
 }
 
 async function syncAuthPrewarmStatus() {
@@ -1276,7 +1276,7 @@ function initLoginEvents() {
       authPrewarmState = null;
       renderAuthPrewarmState();
       syncAuthPrewarmStatus();
-      showToast(enabled ? '启动时预认证已开启' : '启动时预认证已关闭');
+      showToast(enabled ? '无感登录已开启' : '无感登录已关闭');
     });
   });
 

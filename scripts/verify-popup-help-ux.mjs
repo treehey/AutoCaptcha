@@ -19,7 +19,8 @@ assert.match(html, /data-help-target="help-auth-prewarm"/, 'Prewarm needs contex
 assert.match(html, /data-help-target="help-course-login"/, 'Course-system login needs contextual help.');
 assert.match(html, /data-help-target="help-course-names"/, 'Course-name matching needs contextual help.');
 assert.match(html, /data-help-target="help-grab-interval"/, 'Refresh interval needs contextual help.');
-assert.match(html, /提前准备统一认证/, 'The prewarm control should use user-facing language.');
+assert.match(html, /无感登录/, 'The prewarm control should use plain user-facing language.');
+assert.doesNotMatch(html, /提前准备统一认证|启动时预认证/, 'The popup should not expose implementation-oriented prewarm terminology.');
 assert.match(html, /value="5000" selected/, 'Five seconds should be the visible default interval.');
 assert.match(html, /id="grabSteps"/, 'Disconnected course monitoring needs a guided next step.');
 assert.match(html, /id="exactTargets"/, 'The popup must list exact teaching-class targets.');
@@ -33,7 +34,14 @@ assert.match(html, /连续失效或入口不可用则转人工/, 'The popup must
 assert.doesNotMatch(html, /断网或掉线会自动恢复任务，无需人工干预/, 'The popup must not promise recovery without manual handoff conditions.');
 assert.match(html, /浏览器重启后不会自行恢复真实提交/, 'The popup must make the high-risk restart behavior explicit.');
 assert.match(html, /不会自动退掉保底课程/, 'Course-group help must explain the no-auto-withdraw safety rule.');
-assert.match(html, /二次验证后记录成功/, 'The feature overview must describe verified selection success.');
+const featureGuideStart = html.indexOf('<section class="feature-guide"');
+const featureGuideEnd = html.indexOf('</section>', featureGuideStart);
+const featureGuideMarkup = html.slice(featureGuideStart, featureGuideEnd);
+assert.match(featureGuideMarkup, /它能帮你做什么？/, 'The feature overview should start from the user\'s question.');
+assert.match(featureGuideMarkup, /自动登录、识别验证码/, 'The feature overview should explain the main benefit in plain language.');
+assert.match(featureGuideMarkup, /确认真的选上后才提示成功/, 'The feature overview must explain verified success without implementation jargon.');
+assert.match(featureGuideMarkup, /只保存在你的浏览器中/, 'The feature overview should explain local storage in plain language.');
+assert.doesNotMatch(featureGuideMarkup, /明确边界|原生流程|二次验证|检查点/, 'The feature overview should avoid internal implementation language.');
 assert.doesNotMatch(html, /无感秒登|任何校内系统|毫秒内自动捡漏/, 'The feature overview must not overpromise unsupported sites or selection speed.');
 assert.match(html, /<script src="grab-task-model\.js"><\/script>\s*<script src="grab-auth-presentation\.js"><\/script>\s*<script src="popup\.js"><\/script>/, 'Shared grab presentation modules must load before the popup controller.');
 assert.match(html, /tabindex="-1"/, 'Inactive tabs need a roving tabindex.');
