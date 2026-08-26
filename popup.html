@@ -97,6 +97,13 @@
       gap: 12px;
     }
 
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex: 0 0 auto;
+    }
+
     .brand-title {
       font-size: 15px;
       font-weight: 700;
@@ -118,6 +125,45 @@
       color: rgba(255, 255, 255, 0.94);
       font-size: 11px;
       font-weight: 600;
+    }
+
+    .header-help,
+    .guide-close,
+    .help-button {
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .header-help {
+      width: 28px;
+      height: 28px;
+      color: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.36);
+      font-size: 16px;
+    }
+
+    .header-help:hover,
+    .header-help[aria-expanded="true"] {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
 
     .status-grid {
@@ -186,6 +232,71 @@
 
     .tab-panel.active {
       display: block;
+    }
+
+    .feature-guide {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid rgba(99, 71, 152, 0.28);
+      border-radius: 10px;
+      background: linear-gradient(135deg, #fff 0%, #f6f1ff 100%);
+      box-shadow: 0 8px 20px rgba(60, 43, 99, 0.08);
+    }
+
+    .guide-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .guide-title {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .guide-copy {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .guide-close {
+      width: 26px;
+      height: 26px;
+      color: var(--muted);
+      background: #fff;
+      border-color: var(--border);
+      font-family: inherit;
+      font-size: 17px;
+    }
+
+    .guide-grid {
+      display: grid;
+      gap: 7px;
+      margin-top: 11px;
+    }
+
+    .guide-item {
+      padding: 9px 10px;
+      border-left: 3px solid var(--primary);
+      border-radius: 0 7px 7px 0;
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .guide-item-title {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .guide-item-copy {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
     }
 
     .card {
@@ -313,6 +424,20 @@
       color: var(--muted);
       font-size: 11px;
       line-height: 1.45;
+    }
+
+    .setting-group + .setting-group {
+      margin-top: 12px;
+      padding-top: 11px;
+      border-top: 1px solid var(--border);
+    }
+
+    .setting-group-title {
+      margin-bottom: 2px;
+      color: var(--primary-strong);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
     }
 
     .badge {
@@ -493,6 +618,12 @@
       background: #fbf9ff;
     }
 
+    .setting-row.nested {
+      margin-left: 12px;
+      padding-left: 10px;
+      border-left: 2px solid rgba(99, 71, 152, 0.22);
+    }
+
     .setting-row:first-child {
       border-top: 0;
       padding-top: 0;
@@ -556,6 +687,66 @@
       font-weight: 700;
     }
 
+    .setting-title-row,
+    .field-title-with-help {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .help-button {
+      width: 20px;
+      height: 20px;
+      color: var(--primary);
+      background: #fff;
+      border-color: rgba(99, 71, 152, 0.35);
+      font-size: 12px;
+    }
+
+    .help-button:hover,
+    .help-button[aria-expanded="true"] {
+      color: #fff;
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+
+    .help-panel {
+      margin: -1px 0 8px;
+      padding: 9px 10px;
+      border: 1px solid rgba(99, 71, 152, 0.22);
+      border-radius: 7px;
+      background: var(--primary-soft);
+    }
+
+    .help-panel[hidden] {
+      display: none;
+    }
+
+    .help-list {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+    }
+
+    .help-list div {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 6px;
+    }
+
+    .help-list dt {
+      color: var(--primary-strong);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .help-list dd {
+      margin: 0;
+      color: #554d66;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
     .setting-desc {
       margin-top: 2px;
       color: var(--muted);
@@ -566,21 +757,29 @@
     .switch {
       position: relative;
       flex: 0 0 auto;
-      width: 38px;
-      height: 22px;
+      width: 42px;
+      height: 32px;
     }
 
     .switch input {
+      position: absolute;
+      inset: 0;
       opacity: 0;
-      width: 0;
-      height: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      cursor: pointer;
     }
 
     .slider {
       position: absolute;
-      inset: 0;
+      top: 3px;
+      right: 0;
+      bottom: 3px;
+      left: 0;
       border-radius: 999px;
       background: #c5cad6;
+      pointer-events: none;
       transition: background 0.18s ease;
     }
 
@@ -589,8 +788,8 @@
       position: absolute;
       left: 3px;
       top: 3px;
-      width: 16px;
-      height: 16px;
+      width: 20px;
+      height: 20px;
       border-radius: 50%;
       background: #fff;
       box-shadow: 0 1px 3px rgba(15, 23, 42, 0.24);
@@ -603,6 +802,36 @@
 
     .switch input:checked + .slider::before {
       transform: translateX(16px);
+    }
+
+    .switch input:focus-visible + .slider {
+      outline: 3px solid rgba(99, 71, 152, 0.38);
+      outline-offset: 2px;
+    }
+
+    .monitor-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .monitor-step {
+      min-height: 52px;
+      padding: 7px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.35;
+    }
+
+    .monitor-step strong {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--text);
+      font-size: 11px;
     }
 
     .course-meta {
@@ -797,7 +1026,10 @@
         <div class="brand-title">NJU Login Pro</div>
         <div class="brand-subtitle">本地智能识别 · 自动登录 · 选课监控</div>
       </div>
-      <span class="version-badge" id="versionBadge">v...</span>
+      <div class="header-actions">
+        <button class="header-help" id="featureGuideBtn" type="button" aria-label="查看功能说明" aria-expanded="false" aria-controls="featureGuide">?</button>
+        <span class="version-badge" id="versionBadge">v...</span>
+      </div>
     </div>
     <div class="status-grid">
       <span class="pill" id="loginStatePill"><span class="dot"></span><span>读取设置中</span></span>
@@ -806,10 +1038,34 @@
   </div>
 
   <div class="shell">
+    <section class="feature-guide" id="featureGuide" aria-labelledby="featureGuideTitle" hidden>
+      <div class="guide-head">
+        <div>
+          <div class="guide-title" id="featureGuideTitle">怎么选择功能？</div>
+          <div class="guide-copy">按你想达到的结果开启即可，不必理解验证码处理细节。</div>
+        </div>
+        <button class="guide-close" id="featureGuideCloseBtn" type="button" aria-label="关闭功能说明">×</button>
+      </div>
+      <div class="guide-grid">
+        <div class="guide-item">
+          <div class="guide-item-title">更快进入接入统一认证的网站</div>
+          <div class="guide-item-copy">开启“访问时自动登录”；需要提前准备会话时，再开启可选功能。认证会在扩展后台完成，不新增标签页。</div>
+        </div>
+        <div class="guide-item">
+          <div class="guide-item-title">自动进入选课系统</div>
+          <div class="guide-item-copy">开启“选课系统”下的“访问时自动登录”。它只负责登录，不会自动开始监控或抢课。</div>
+        </div>
+        <div class="guide-item">
+          <div class="guide-item-title">等待课程有空位时自动选择</div>
+          <div class="guide-item-copy">打开选课页面后，在“选课监控”里填写课程关键词并开始监控。</div>
+        </div>
+      </div>
+    </section>
+
     <div class="tabs-card">
       <div class="tab-list" role="tablist">
-        <button class="tab-btn active" id="loginTab" data-tab="login" role="tab" aria-controls="tab-login" aria-selected="true">登录助手</button>
-        <button class="tab-btn" id="grabTab" data-tab="grab" role="tab" aria-controls="tab-grab" aria-selected="false">选课监控</button>
+        <button class="tab-btn active" id="loginTab" data-tab="login" role="tab" aria-controls="tab-login" aria-selected="true" tabindex="0">登录助手</button>
+        <button class="tab-btn" id="grabTab" data-tab="grab" role="tab" aria-controls="tab-grab" aria-selected="false" tabindex="-1">选课监控</button>
       </div>
     </div>
 
@@ -858,23 +1114,66 @@
         <div class="section-head">
           <div>
             <div class="section-title">自动登录</div>
-            <div class="section-note">两种登录独立控制；正常使用时保持开启即可。</div>
+            <div class="section-note">两个网站分别控制；提前准备功能依赖统一认证自动登录。</div>
           </div>
           <span class="badge info" id="loginModeBadge">自动登录</span>
         </div>
-        <div class="setting-row emphasis">
-          <div>
-            <div class="setting-title">统一认证自动登录</div>
-            <div class="setting-desc">自动填写、识别验证码并提交统一认证页。</div>
+        <div class="setting-group">
+          <div class="setting-group-title">统一认证</div>
+          <div class="setting-row emphasis">
+            <div>
+              <div class="setting-title-row">
+                <div class="setting-title">访问时自动登录</div>
+                <button class="help-button" type="button" aria-label="了解统一认证访问时自动登录" aria-expanded="false" aria-controls="help-auth-login" data-help-target="help-auth-login">?</button>
+              </div>
+              <div class="setting-desc">访问认证页时，自动完成验证、填写账号并提交。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="isEnabled" aria-label="统一认证访问时自动登录"><span class="slider"></span></label>
           </div>
-          <label class="switch"><input type="checkbox" id="isEnabled" aria-label="统一认证自动登录"><span class="slider"></span></label>
+          <div class="help-panel" id="help-auth-login" role="region" aria-label="统一认证访问时自动登录说明" hidden>
+            <dl class="help-list">
+              <div><dt>作用</dt><dd>需要统一认证时自动登录，之后可继续访问原网站。</dd></div>
+              <div><dt>何时</dt><dd>仅在认证页面出现且已保存账号时触发。</dd></div>
+              <div><dt>影响</dt><dd>关闭后账号仍保存在浏览器本地；选课系统登录不受影响。</dd></div>
+            </dl>
+          </div>
+          <div class="setting-row nested">
+            <div>
+              <div class="setting-title-row">
+                <div class="setting-title">提前准备统一认证 <span class="badge info">可选</span></div>
+                <button class="help-button" type="button" aria-label="了解提前准备统一认证" aria-expanded="false" aria-controls="help-auth-prewarm" data-help-target="help-auth-prewarm">?</button>
+              </div>
+              <div class="setting-desc" id="authPrewarmDesc">默认关闭；开启后在扩展后台准备会话，不新增标签页。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="authPrewarm" aria-label="提前准备统一认证"><span class="slider"></span></label>
+          </div>
+          <div class="help-panel" id="help-auth-prewarm" role="region" aria-label="提前准备统一认证说明" hidden>
+            <dl class="help-list">
+              <div><dt>作用</dt><dd>浏览器启动后直接在扩展后台建立一次会话，后续接入网站通常能更快打开。</dd></div>
+              <div><dt>前提</dt><dd>需保存完整账号，并开启统一认证访问时自动登录。</dd></div>
+              <div><dt>注意</dt><dd>不会创建窗口或标签页；失败时停止本次后台尝试，之后仍可在认证页正常自动登录。</dd></div>
+            </dl>
+          </div>
         </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-title">选课系统自动登录</div>
-            <div class="setting-desc">自动识别点击验证码、按顺序点击并提交。</div>
+        <div class="setting-group">
+          <div class="setting-group-title">选课系统</div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title-row">
+                <div class="setting-title">访问时自动登录</div>
+                <button class="help-button" type="button" aria-label="了解选课系统自动登录" aria-expanded="false" aria-controls="help-course-login" data-help-target="help-course-login">?</button>
+              </div>
+              <div class="setting-desc">自动进入选课系统；不会自动开始监控或抢课。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="clickCaptchaAutoLogin" aria-label="选课系统访问时自动登录"><span class="slider"></span></label>
           </div>
-          <label class="switch"><input type="checkbox" id="clickCaptchaAutoLogin" aria-label="选课系统自动登录"><span class="slider"></span></label>
+          <div class="help-panel" id="help-course-login" role="region" aria-label="选课系统自动登录说明" hidden>
+            <dl class="help-list">
+              <div><dt>作用</dt><dd>本地识别点击验证码并完成选课系统登录。</dd></div>
+              <div><dt>边界</dt><dd>它只负责登录；课程余量监控需要在“选课监控”中单独开始。</dd></div>
+              <div><dt>控制</dt><dd>与统一认证自动登录独立，可按你的使用场景分别开启。</dd></div>
+            </dl>
+          </div>
         </div>
       </div>
 
@@ -922,7 +1221,7 @@
       </details>
     </div>
 
-    <div class="tab-panel" id="tab-grab" role="tabpanel" aria-labelledby="grabTab">
+    <div class="tab-panel" id="tab-grab" role="tabpanel" aria-labelledby="grabTab" hidden>
       <div class="card">
         <div class="section-head">
           <div class="section-title">选课监控</div>
@@ -935,9 +1234,14 @@
           </div>
           <span class="badge info" id="grabRoundBadge">0 轮</span>
         </div>
+        <div class="monitor-steps" id="grabSteps" aria-label="开始选课监控的步骤">
+          <div class="monitor-step"><strong>1. 打开页面</strong>先进入选课系统，让扩展连接当前页面。</div>
+          <div class="monitor-step"><strong>2. 填写课程</strong>每行一个课程关键词，尽量写得唯一。</div>
+          <div class="monitor-step"><strong>3. 开始监控</strong>有空位时自动选择并确认，可随时停止。</div>
+        </div>
         <div class="field">
           <div class="field-head">
-            <span>目标课程名称</span>
+            <span class="field-title-with-help">目标课程名称 <button class="help-button" type="button" aria-label="了解目标课程名称填写方式" aria-expanded="false" aria-controls="help-course-names" data-help-target="help-course-names">?</button></span>
             <span id="courseCount">0 门</span>
           </div>
           <textarea id="courseNames" placeholder="每行一个课程名，支持模糊匹配"></textarea>
@@ -945,27 +1249,39 @@
             <span>建议填写能唯一定位课程的关键词。</span>
             <button class="tiny-btn" id="openGrabPageBtn" type="button">打开选课页</button>
           </div>
+          <div class="help-panel" id="help-course-names" role="region" aria-label="目标课程名称填写说明" hidden>
+            <dl class="help-list">
+              <div><dt>填写</dt><dd>每行一门课程，支持模糊匹配，例如“仙林游泳初级”。</dd></div>
+              <div><dt>建议</dt><dd>使用能唯一定位课程的关键词，避免相近课程被误匹配。</dd></div>
+            </dl>
+          </div>
         </div>
         <div class="field">
           <div class="field-head">
-            <span>刷新间隔</span>
-            <span id="intervalLabel">3s</span>
+            <span class="field-title-with-help">刷新间隔 <button class="help-button" type="button" aria-label="了解刷新间隔" aria-expanded="false" aria-controls="help-grab-interval" data-help-target="help-grab-interval">?</button></span>
+            <span id="intervalLabel">5s</span>
           </div>
           <select class="hidden-select" id="grabInterval" aria-label="刷新间隔">
             <option value="1000">1s</option>
             <option value="2000">2s</option>
-            <option value="3000" selected>3s</option>
-            <option value="5000">5s</option>
+            <option value="3000">3s</option>
+            <option value="5000" selected>5s</option>
             <option value="10000">10s</option>
             <option value="30000">30s</option>
           </select>
           <div class="interval-grid" id="intervalGrid">
             <button class="interval-option" data-value="1000" type="button">1s</button>
             <button class="interval-option" data-value="2000" type="button">2s</button>
-            <button class="interval-option active" data-value="3000" type="button">3s</button>
-            <button class="interval-option" data-value="5000" type="button">5s</button>
+            <button class="interval-option" data-value="3000" type="button">3s</button>
+            <button class="interval-option active" data-value="5000" type="button">5s</button>
             <button class="interval-option" data-value="10000" type="button">10s</button>
             <button class="interval-option" data-value="30000" type="button">30s</button>
+          </div>
+          <div class="help-panel" id="help-grab-interval" role="region" aria-label="刷新间隔说明" hidden>
+            <dl class="help-list">
+              <div><dt>推荐</dt><dd>默认 5 秒，适合持续监控时的日常使用。</dd></div>
+              <div><dt>取舍</dt><dd>间隔越短检查越快，请求也越频繁；请按实际需要选择。</dd></div>
+            </dl>
           </div>
         </div>
         <div class="sticky-action">

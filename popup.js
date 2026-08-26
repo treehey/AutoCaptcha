@@ -1,10 +1,11 @@
-const AUTH_URL = 'https://authserver.nju.edu.cn/';
+const AUTH_URL = 'https://authserver.nju.edu.cn/authserver/login';
 const GRAB_URL = 'https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do';
 const CLICK_CAPTCHA_SAMPLE_COUNT_KEY = 'nju_click_captcha_v1_count';
 const CLICK_CAPTCHA_SAMPLE_KEY_PREFIX = 'nju_click_captcha_v1_';
 const CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY = 'nju_click_captcha_v1_skipped_three_count';
 const CLICK_CAPTCHA_SOLVER_ENABLED_KEY = 'nju_click_captcha_solver_enabled';
 const CLICK_CAPTCHA_AUTO_CLICK_KEY = 'nju_click_captcha_auto_click';
+const AUTH_PREWARM_ENABLED_KEY = 'nju_auth_prewarm_enabled';
 
 const storageKeys = [
   'nju_user',
@@ -12,6 +13,7 @@ const storageKeys = [
   'nju_enabled',
   'nju_force',
   'nju_auto_click',
+  AUTH_PREWARM_ENABLED_KEY,
   CLICK_CAPTCHA_SOLVER_ENABLED_KEY,
   CLICK_CAPTCHA_AUTO_CLICK_KEY,
   'nju_grab_courses',
@@ -20,6 +22,9 @@ const storageKeys = [
 
 const els = {
   versionBadge: document.getElementById('versionBadge'),
+  featureGuide: document.getElementById('featureGuide'),
+  featureGuideBtn: document.getElementById('featureGuideBtn'),
+  featureGuideCloseBtn: document.getElementById('featureGuideCloseBtn'),
   loginStatePill: document.getElementById('loginStatePill'),
   grabStatePill: document.getElementById('grabStatePill'),
   credentialBadge: document.getElementById('credentialBadge'),
@@ -34,6 +39,8 @@ const els = {
   togglePassword: document.getElementById('togglePassword'),
   saveBtn: document.getElementById('saveBtn'),
   isEnabled: document.getElementById('isEnabled'),
+  authPrewarm: document.getElementById('authPrewarm'),
+  authPrewarmDesc: document.getElementById('authPrewarmDesc'),
   forceFill: document.getElementById('forceFill'),
   autoClick: document.getElementById('autoClick'),
   clickCaptchaAutoLogin: document.getElementById('clickCaptchaAutoLogin'),
@@ -51,6 +58,7 @@ const els = {
   grabSummaryTitle: document.getElementById('grabSummaryTitle'),
   grabSummarySub: document.getElementById('grabSummarySub'),
   grabRoundBadge: document.getElementById('grabRoundBadge'),
+  grabSteps: document.getElementById('grabSteps'),
   courseNames: document.getElementById('courseNames'),
   courseCount: document.getElementById('courseCount'),
   grabInterval: document.getElementById('grabInterval'),
@@ -98,6 +106,7 @@ let currentCaptchaPage = 'other';
 let authPreviewConnected = false;
 let authPreviewReady = false;
 let captchaTestCapability = { mode: 'none', ready: false };
+let authPrewarmState = null;
 
 function setVersion() {
   if (els.versionBadge && chrome.runtime && chrome.runtime.getManifest) {
@@ -194,15 +203,56 @@ function renderLoginState() {
   }
 
   setBadge(els.loginModeBadge, enabled ? '已开启' : '已暂停', enabled ? 'success' : 'warning');
+  renderAuthPrewarmState();
+}
+
+function renderAuthPrewarmState() {
+  if (!els.authPrewarm || !els.authPrewarmDesc) return;
+  const configured = Boolean(els.username.value.trim() && els.password.value);
+  if (!els.authPrewarm.checked) {
+    els.authPrewarmDesc.textContent = '默认关闭；开启后在扩展后台准备会话，不新增标签页。';
+    return;
+  }
+  if (!els.isEnabled.checked || !els.autoClick.checked) {
+    els.authPrewarmDesc.textContent = '等待开启统一认证自动提交后生效。';
+    return;
+  }
+  if (!configured) {
+    els.authPrewarmDesc.textContent = '等待保存完整账号和密码后生效。';
+    return;
+  }
+
+  const phase = authPrewarmState?.phase;
+  const copy = {
+    running: '正在后台建立统一认证会话。',
+    ready: '本次浏览器会话的统一认证已准备。',
+    attention: authPrewarmState?.reason || '后台认证需要人工处理，本次不会重试。',
+    failed: authPrewarmState?.reason || '本次后台认证未完成，不会自动重试。',
+    cancelled: authPrewarmState?.reason || '后台认证已取消。',
+    disabled: '默认关闭；开启后在扩展后台准备会话，不新增标签页。',
+    idle: authPrewarmState?.reason || '将在满足条件时从扩展后台准备认证会话。'
+  };
+  els.authPrewarmDesc.textContent = copy[phase] || '将在浏览器启动后从扩展后台准备认证会话。';
+}
+
+async function syncAuthPrewarmStatus() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getAuthPrewarmStatus' });
+    authPrewarmState = response?.ok ? response.state : null;
+  } catch {
+    authPrewarmState = null;
+  }
+  renderAuthPrewarmState();
 }
 
 function renderGrabState() {
   const round = grabState?.round || 0;
   const successCount = grabState?.successCourses?.length || 0;
   const targetCount = grabState?.courseNames?.length || getCourseNames().length;
-  const interval = grabState?.interval || Number(els.grabInterval.value || 3000);
+  const interval = grabState?.interval || Number(els.grabInterval.value || 5000);
 
   els.grabRoundBadge.textContent = `${round} 轮`;
+  if (els.grabSteps) els.grabSteps.hidden = grabConnected || grabRunning;
 
   if (!grabConnected) {
     setBadge(els.grabBadge, '未连接', 'warning');
@@ -642,10 +692,15 @@ function activateTab(tabName, persist = true) {
     const active = btn.dataset.tab === tabName;
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-selected', String(active));
+    btn.tabIndex = active ? 0 : -1;
   });
   document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.classList.toggle('active', panel.id === `tab-${tabName}`);
+    const active = panel.id === `tab-${tabName}`;
+    panel.classList.toggle('active', active);
+    panel.hidden = !active;
   });
+  closeContextualHelp();
+  setFeatureGuideOpen(false);
   if (persist) chrome.storage.local.set({ nju_popup_tab: tabName });
   if (tabName === 'grab') {
     syncGrabStatus();
@@ -655,8 +710,80 @@ function activateTab(tabName, persist = true) {
 }
 
 function initTabs() {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
+  const tabs = Array.from(document.querySelectorAll('.tab-btn'));
+  tabs.forEach(btn => {
     btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+    btn.addEventListener('keydown', event => {
+      const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+      if (!keys.includes(event.key)) return;
+      const currentIndex = tabs.indexOf(btn);
+      let nextIndex = currentIndex;
+      if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+      if (event.key === 'Home') nextIndex = 0;
+      if (event.key === 'End') nextIndex = tabs.length - 1;
+      event.preventDefault();
+      const nextTab = tabs[nextIndex];
+      activateTab(nextTab.dataset.tab);
+      nextTab.focus();
+    });
+  });
+}
+
+function closeContextualHelp({ restoreFocus = false } = {}) {
+  let activeTrigger = null;
+  document.querySelectorAll('[data-help-target]').forEach(trigger => {
+    const panel = document.getElementById(trigger.dataset.helpTarget);
+    if (trigger.getAttribute('aria-expanded') === 'true') activeTrigger = trigger;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (panel) panel.hidden = true;
+  });
+  if (restoreFocus && activeTrigger) activeTrigger.focus();
+}
+
+function setFeatureGuideOpen(open, { restoreFocus = false } = {}) {
+  if (!els.featureGuide || !els.featureGuideBtn) return;
+  els.featureGuide.hidden = !open;
+  els.featureGuideBtn.setAttribute('aria-expanded', String(open));
+  if (restoreFocus && !open) els.featureGuideBtn.focus();
+}
+
+function initHelpEvents() {
+  document.querySelectorAll('[data-help-target]').forEach(trigger => {
+    trigger.addEventListener('click', event => {
+      event.stopPropagation();
+      const panel = document.getElementById(trigger.dataset.helpTarget);
+      if (!panel) return;
+      const open = trigger.getAttribute('aria-expanded') !== 'true';
+      closeContextualHelp();
+      setFeatureGuideOpen(false);
+      trigger.setAttribute('aria-expanded', String(open));
+      panel.hidden = !open;
+    });
+  });
+
+  els.featureGuideBtn?.addEventListener('click', event => {
+    event.stopPropagation();
+    const open = els.featureGuideBtn.getAttribute('aria-expanded') !== 'true';
+    closeContextualHelp();
+    setFeatureGuideOpen(open);
+  });
+  els.featureGuideCloseBtn?.addEventListener('click', () => setFeatureGuideOpen(false, { restoreFocus: true }));
+
+  document.addEventListener('click', event => {
+    if (!event.target.closest('.help-panel, [data-help-target], .feature-guide, #featureGuideBtn')) {
+      closeContextualHelp();
+      setFeatureGuideOpen(false);
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const guideOpen = els.featureGuideBtn?.getAttribute('aria-expanded') === 'true';
+    const hasContextualHelp = Boolean(document.querySelector('[data-help-target][aria-expanded="true"]'));
+    if (!guideOpen && !hasContextualHelp) return;
+    event.preventDefault();
+    closeContextualHelp({ restoreFocus: hasContextualHelp });
+    setFeatureGuideOpen(false, { restoreFocus: guideOpen });
   });
 }
 
@@ -693,17 +820,19 @@ function initSettings() {
     initialCredentials = { user: els.username.value, pass: els.password.value };
 
     els.isEnabled.checked = data.nju_enabled !== false && data.nju_auto_click !== false;
+    els.authPrewarm.checked = data[AUTH_PREWARM_ENABLED_KEY] === true;
     els.forceFill.checked = Boolean(data.nju_force);
     els.autoClick.checked = data.nju_auto_click !== false;
     clickCaptchaAutoLoginEnabled = data[CLICK_CAPTCHA_SOLVER_ENABLED_KEY] !== false
       && data[CLICK_CAPTCHA_AUTO_CLICK_KEY] !== false;
     els.clickCaptchaAutoLogin.checked = clickCaptchaAutoLoginEnabled;
     els.courseNames.value = data.nju_grab_courses || '';
-    setIntervalValue(data.nju_grab_interval || '3000');
+    setIntervalValue(data.nju_grab_interval || '5000');
 
     renderCredentialState();
     updateCourseCount();
     renderLoginState();
+    syncAuthPrewarmStatus();
     syncGrabStatus();
     syncTabToCurrentPage();
   });
@@ -736,6 +865,16 @@ function initLoginEvents() {
     chrome.storage.local.set({ nju_enabled: enabled, nju_auto_click: enabled }, () => {
       renderLoginState();
       showToast(enabled ? '统一认证自动登录已开启' : '统一认证自动登录已暂停');
+    });
+  });
+
+  els.authPrewarm.addEventListener('change', event => {
+    const enabled = event.target.checked;
+    chrome.storage.local.set({ [AUTH_PREWARM_ENABLED_KEY]: enabled }, () => {
+      authPrewarmState = null;
+      renderAuthPrewarmState();
+      syncAuthPrewarmStatus();
+      showToast(enabled ? '启动时预认证已开启' : '启动时预认证已关闭');
     });
   });
 
@@ -1047,13 +1186,18 @@ chrome.runtime.onMessage.addListener(msg => {
     clickCaptchaSolverConnected = true;
     clickCaptchaSolverState = msg.state;
     renderClickCaptchaSolverState();
+  } else if (msg.action === 'authPrewarmStatusChanged' && msg.state) {
+    authPrewarmState = msg.state;
+    renderAuthPrewarmState();
   }
 });
 
 setVersion();
 initTabs();
+initHelpEvents();
 initSettings();
 initLoginEvents();
 initGrabEvents();
 syncClickCaptchaCaptureStatus();
 syncClickCaptchaSolverStatus();
+syncAuthPrewarmStatus();

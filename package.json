@@ -1,0 +1,23 @@
+{
+  "name": "nju-login-pro",
+  "version": "6.1.1",
+  "private": true,
+  "description": "Offline verification commands for the NJU Login Pro browser extension.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/treehey/AutoCaptcha.git"
+  },
+  "scripts": {
+    "test": "npm run verify",
+    "verify": "npm run verify:repository && npm run verify:auth && npm run verify:popup && npm run verify:click-captcha",
+    "verify:repository": "node scripts/verify-repository.mjs",
+    "verify:auth": "node scripts/verify-auth-login-fast-path.mjs && node scripts/verify-auth-slider-captcha.mjs && node scripts/verify-auth-session-prewarm.mjs",
+    "verify:popup": "node scripts/verify-popup-help-ux.mjs",
+    "verify:click-captcha": "node scripts/verify-captcha-test-context.mjs && node scripts/verify-click-captcha-sampler.mjs && node scripts/verify-click-captcha-solver.mjs",
+    "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-package.ps1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

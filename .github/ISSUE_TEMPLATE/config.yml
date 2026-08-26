@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 私下报告安全问题
+    url: https://github.com/treehey/AutoCaptcha/security/advisories/new
+    about: 凭证、权限、自动操作绕过或数据泄露问题请勿公开提交。
+  - name: 使用与排查文档
+    url: https://github.com/treehey/AutoCaptcha/blob/main/docs/troubleshooting.md
+    about: 提交问题前先检查安装、开关、页面变化和更新说明。

@@ -1,0 +1,79 @@
+name: Bug 报告
+description: 报告可重复的安装、登录、验证码或课程监控问题。
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先阅读问题排查文档。不要提交账号、密码、Cookie、完整页面源码或未脱敏截图；安全问题请使用私下报告入口。
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: 扩展版本
+      description: 可在 Popup 顶部或扩展管理页查看。
+      placeholder: 例如 6.1.1
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: 浏览器和版本
+      placeholder: 例如 Microsoft Edge 140
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题区域
+      options:
+        - 安装或更新
+        - Popup 与账号配置
+        - 统一身份认证
+        - 提前准备统一认证
+        - 选课系统登录
+        - 课程监控
+        - 开发或打包
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从什么状态开始，依次做了什么。
+      placeholder: |
+        1. 打开……
+        2. 启用……
+        3. 页面显示……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为和脱敏错误
+      description: 可以附脱敏截图；请遮盖身份信息、课程信息和本地用户名路径。
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 信息安全确认
+      options:
+        - label: 我没有提交账号、密码、Cookie、Token、完整页面源码或未脱敏个人信息。
+          required: true
+        - label: 这不是需要私下披露的安全漏洞。
+          required: true

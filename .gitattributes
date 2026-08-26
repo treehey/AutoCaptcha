@@ -1,2 +1,12 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Normalize source and documentation across Windows and CI.
+* text=auto eol=lf
+
+# Runtime and dataset binaries.
+*.bin binary
+*.onnx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wasm binary
+*.traineddata binary
+*.zip binary

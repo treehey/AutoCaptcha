@@ -1,0 +1,41 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-checks:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run offline verification
+        run: npm test
+
+      - name: Build and inspect release package
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-package.ps1
+
+      - name: Upload release-package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-package
+          path: dist/NJU-Login-Pro-v*.zip
+          if-no-files-found: error
+          retention-days: 7

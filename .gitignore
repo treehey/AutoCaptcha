@@ -1,9 +1,34 @@
+# Build, browser automation and local prototypes
 dist/
+output/
+prototypes/
+.playwright-cli/
+
+# Dependencies, environments and caches
+node_modules/
+.venv/
+**/__pycache__/
+*.py[cod]
+*.log
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Captured site pages are local diagnostics, not redistributable fixtures
+/选课.html
+/选课_files/
+
+# Captcha samples: keep normalized fixtures, ignore credentials and outputs
 data/captcha-samples/**/cookies.txt
 data/captcha-samples/**/login.html
 data/regression-results/
 data/recovered-captcha-answers-*/
 data/segmentation-experiments/
 data/click-captcha-experiments/
-.playwright-cli/
-scripts/__pycache__/
+
+# Raw browser exports are an import staging format. Previously tracked exports
+# stay tracked; new exports should be normalized into click-captcha-samples.
+data/click-captcha-exports/*.json
