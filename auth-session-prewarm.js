@@ -99,7 +99,7 @@ if (typeof importScripts === 'function') {
                 attempted: true,
                 runId,
                 startedAt: deps.now(),
-                reason: reason === 'startup' ? '正在后台准备统一认证' : '正在后台建立统一认证会话'
+                reason: reason === 'startup' ? '正在准备无感登录' : '正在后台准备无感登录'
             });
             if (typeof deps.scheduleTimeoutAlarm === 'function') await deps.scheduleTimeoutAlarm();
 

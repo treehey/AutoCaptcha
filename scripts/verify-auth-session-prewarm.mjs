@@ -291,7 +291,7 @@ assert.match(bridgeSource, /authPrewarmPageEvent/);
 assert.match(bridgeSource, /authPrewarmLogout/);
 assert.match(popupSource, /nju_auth_prewarm_enabled/);
 assert.match(popupHtml, /id="authPrewarm"/);
-assert.match(popupHtml, /不新增标签页/);
+assert.match(popupHtml, /不会弹出任何新标签页/);
 assert.match(buildScript, /'auth-background-login\.js'/);
 assert.match(buildScript, /'grab-task-model\.js'/);
 assert.match(buildScript, /'auth-session-prewarm\.js'/);

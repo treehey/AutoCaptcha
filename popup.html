@@ -1576,7 +1576,7 @@
         <div class="section-head">
           <div>
             <div class="section-title">自动登录</div>
-            <div class="section-note">两个网站分别控制；提前准备功能依赖统一认证自动登录。</div>
+            <div class="section-note">两个网站分别控制；“无感登录”需要先开启统一认证自动登录。</div>
           </div>
           <span class="badge info" id="loginModeBadge">自动登录</span>
         </div>
@@ -1607,22 +1607,22 @@
           <div class="setting-row nested">
             <div>
               <div class="setting-title-row">
-                <div class="setting-title">提前准备统一认证 <span class="badge info">可选</span></div>
-                <button class="help-button" type="button" aria-label="了解提前准备统一认证" aria-expanded="false" aria-controls="help-auth-prewarm" data-help-target="help-auth-prewarm">?</button>
+                <div class="setting-title">无感登录 <span class="badge info">可选</span></div>
+                <button class="help-button" type="button" aria-label="了解无感登录" aria-expanded="false" aria-controls="help-auth-prewarm" data-help-target="help-auth-prewarm">?</button>
               </div>
-              <div class="setting-desc" id="authPrewarmDesc">默认关闭；开启后在扩展后台准备会话，不新增标签页。</div>
+              <div class="setting-desc" id="authPrewarmDesc">默认关闭；开启后，浏览器启动时会在后台先登录一次。</div>
             </div>
-            <label class="switch"><input type="checkbox" id="authPrewarm" aria-label="提前准备统一认证"><span class="slider"></span></label>
+            <label class="switch"><input type="checkbox" id="authPrewarm" aria-label="无感登录"><span class="slider"></span></label>
           </div>
-          <div class="help-panel" id="help-auth-prewarm" role="region" aria-label="提前准备统一认证说明" hidden>
+          <div class="help-panel" id="help-auth-prewarm" role="region" aria-label="无感登录说明" hidden>
             <dl class="help-list">
               <div>
                 <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></dt>
-                <dd><strong>加速</strong>：浏览器启动后在后台提前建立会话，后续访问通常能瞬间打开。</dd>
+                <dd><strong>作用</strong>：浏览器启动后先在后台完成一次统一认证，之后打开需要登录的校内页面通常更快。</dd>
               </div>
               <div>
                 <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></dt>
-                <dd><strong>注意</strong>：需开启上方的“自动登录”。不会弹出任何新标签页。</dd>
+                <dd><strong>注意</strong>：需要先开启上方的“访问时自动登录”；整个过程不会弹出任何新标签页。</dd>
               </div>
             </dl>
           </div>

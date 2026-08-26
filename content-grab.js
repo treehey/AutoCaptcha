@@ -6,6 +6,24 @@ const grabModule = globalThis.NjuGrabEngine;
 const grabTaskModel = globalThis.NjuGrabTaskModel;
 const grabAuthPresentation = globalThis.NjuGrabAuthPresentation;
 const grabVerificationModule = globalThis.NjuGrabVerificationEngine;
+const grabLoginShieldModule = globalThis.NjuGrabLoginShield;
+const GRAB_LOGIN_SHIELD_STATUS = grabLoginShieldModule?.STATUS || Object.freeze({
+  PREPARING: 'preparing',
+  LOADING: 'loading',
+  SUCCESS: 'success',
+  ERROR: 'error'
+});
+const grabLoginShield = grabLoginShieldModule?.createLoginShield?.({ documentRef: document }) || Object.freeze({
+  clear() {},
+  resolveAutomation() {},
+  show() { return false; }
+});
+
+// The setting read is asynchronous. Block the official login panel immediately
+// so a stray click cannot interfere with automatic captcha input in that gap.
+if (document.getElementById('loginDiv') && !document.querySelector('.nju-grab-status-panel')) {
+  grabLoginShield.show(GRAB_LOGIN_SHIELD_STATUS.PREPARING, '正在准备自动登录…');
+}
 const COURSE_ROW_SELECTOR = 'table tbody tr, .cv-tbody tr, .ant-table-tbody tr';
 const FEEDBACK_SELECTOR = [
   '.cv-window',
@@ -3440,6 +3458,7 @@ async function dispatchClickCaptchaPoints(target, result, autoClickToken) {
 
 async function runClickCaptchaSolver({ allowAutoClick = false, force = false } = {}) {
   if (clickCaptchaCapture.enabled) {
+    grabLoginShield.clear();
     clickCaptchaSolver.status = '采样进行中，识别已暂停';
     notifyClickCaptchaSolverUpdate();
     return getClickCaptchaSolverState();
@@ -3467,6 +3486,16 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
   clickCaptchaSolver.target = initialTarget;
   clickCaptchaSolver.status = '正在识别点击验证码';
   notifyClickCaptchaSolverUpdate();
+  let loginSubmitted = false;
+  let errorShieldShown = false;
+  const automaticLoginRequested = allowAutoClick
+    && clickCaptchaSolver.enabled
+    && clickCaptchaSolver.autoClick;
+  if (automaticLoginRequested) {
+    grabLoginShield.show(GRAB_LOGIN_SHIELD_STATUS.LOADING, '正在识别验证码…');
+  } else {
+    grabLoginShield.clear();
+  }
   try {
     let target = initialTarget;
     const canAutoClickNow = () => allowAutoClick
@@ -3498,16 +3527,22 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
       if (canAutoClickNow() && autoEligible) {
         const loginContext = await prepareClickCaptchaLogin(target);
         if (!loginContext) {
+          grabLoginShield.clear();
           clickCaptchaSolver.status = `${clickCaptchaSolver.loginStatus}，已标出识别顺序供人工处理`;
           renderClickCaptchaSolverOverlay();
           notifyClickCaptchaSolverUpdate();
           break;
         }
         clickCaptchaSolver.status = '正在按识别顺序点击';
+        grabLoginShield.show(GRAB_LOGIN_SHIELD_STATUS.LOADING, '识别成功，正在登录…');
         renderClickCaptchaSolverOverlay();
         notifyClickCaptchaSolverUpdate();
         await dispatchClickCaptchaPoints(target, result, clickCaptchaSolver.autoClickToken);
         const submitted = await submitClickCaptchaLogin(target, fingerprint, loginContext, clickCaptchaSolver.autoClickToken);
+        if (submitted) {
+          loginSubmitted = true;
+          grabLoginShield.show(GRAB_LOGIN_SHIELD_STATUS.SUCCESS, '登录请求已提交，正在等待页面响应…');
+        }
         clickCaptchaSolver.status = submitted
           ? `已提交登录，等待页面验证（分差 ${result.margin.toFixed(2)}）`
           : `已发送点击，等待页面验证（分差 ${result.margin.toFixed(2)}；${clickCaptchaSolver.loginStatus}）`;
@@ -3528,6 +3563,7 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
         && clickCaptchaSolver.lowConfidenceRefreshes < CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS) {
         clickCaptchaSolver.lowConfidenceRefreshes += 1;
         clickCaptchaSolver.status = `候选顺序接近，正在换图重试（${clickCaptchaSolver.lowConfidenceRefreshes}/${CLICK_CAPTCHA_MAX_LOW_CONFIDENCE_REFRESH_ATTEMPTS}，分差 ${result.margin.toFixed(2)}）`;
+        grabLoginShield.show(GRAB_LOGIN_SHIELD_STATUS.LOADING, '结果不确定，正在换图重试…');
         clickCaptchaSolver.result = null;
         renderClickCaptchaSolverOverlay();
         notifyClickCaptchaSolverUpdate();
@@ -3543,13 +3579,19 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
     renderClickCaptchaSolverOverlay();
   } catch (error) {
     if (error?.code === 'AUTO_CLICK_CANCELLED') {
+      grabLoginShield.clear();
       clickCaptchaSolver.status = '自动点击已取消，已保留标点供人工确认';
       renderClickCaptchaSolverOverlay();
     } else {
       clickCaptchaSolver.status = `识别未执行：${error.message}`;
+      if (automaticLoginRequested) {
+        errorShieldShown = true;
+        grabLoginShield.show(GRAB_LOGIN_SHIELD_STATUS.ERROR, '自动登录未完成，请手动登录');
+      }
       clearClickCaptchaSolverOverlay();
     }
   } finally {
+    if (!loginSubmitted && !errorShieldShown) grabLoginShield.clear();
     clickCaptchaSolver.running = false;
     notifyClickCaptchaSolverUpdate();
   }
@@ -3569,6 +3611,7 @@ function startClickCaptchaSolverMonitor() {
   if (clickCaptchaSolver.monitor) return;
   clickCaptchaSolver.monitor = setInterval(() => {
     pollClickCaptchaSolver().catch(error => {
+      grabLoginShield.clear();
       clickCaptchaSolver.status = `识别监控异常：${error.message}`;
       notifyClickCaptchaSolverUpdate();
     });
@@ -3593,6 +3636,7 @@ async function setClickCaptchaSolverEnabled(enabled) {
   } else {
     clickCaptchaSolver.autoClickToken += 1;
     clickCaptchaSolver.status = '识别已暂停';
+    grabLoginShield.clear();
     clearClickCaptchaSolverOverlay();
   }
   await storageSet({ [CLICK_CAPTCHA_SOLVER_ENABLED_KEY]: enabled });
@@ -3603,6 +3647,7 @@ async function setClickCaptchaSolverEnabled(enabled) {
 async function setClickCaptchaAutoClick(enabled) {
   if (!enabled) clickCaptchaSolver.autoClickToken += 1;
   clickCaptchaSolver.autoClick = enabled;
+  if (!enabled) grabLoginShield.clear();
   await storageSet({ [CLICK_CAPTCHA_AUTO_CLICK_KEY]: enabled });
   clickCaptchaSolver.status = enabled
     ? '自动点击与自动登录已开启，低置信会换图重试'
@@ -3617,11 +3662,13 @@ async function initializeClickCaptchaSolver() {
     // 自动登录是发布版默认行为；只有用户显式关闭时才暂停。
     clickCaptchaSolver.enabled = settings[CLICK_CAPTCHA_SOLVER_ENABLED_KEY] !== false;
     clickCaptchaSolver.autoClick = settings[CLICK_CAPTCHA_AUTO_CLICK_KEY] !== false;
+    grabLoginShield.resolveAutomation(clickCaptchaSolver.enabled && clickCaptchaSolver.autoClick);
     clickCaptchaSolver.status = clickCaptchaSolver.enabled ? '等待点击验证码' : '未启用';
     if (clickCaptchaSolver.enabled) startClickCaptchaSolverMonitor();
     notifyClickCaptchaSolverUpdate();
   } catch {
     clickCaptchaSolver.status = '本地设置读取失败';
+    grabLoginShield.clear();
   }
 }
 
@@ -3709,6 +3756,7 @@ async function saveClickCaptchaSample() {
 }
 
 async function setClickCaptchaCaptureEnabled(enabled) {
+  if (enabled) grabLoginShield.clear();
   if (!enabled) {
     clickCaptchaCapture.enabled = false;
     clickCaptchaCapture.current = null;
