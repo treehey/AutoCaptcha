@@ -31,7 +31,15 @@ $files = @(
   'auth-prewarm-bridge.js',
   'captcha-cnn.js',
   'content.js',
+  'grab-task-model.js',
+  'grab-auth-presentation.js',
+  'grab-verification-engine.js',
+  'grab-engine.js',
+  'grab-course-provider.js',
+  'grab-network-bridge.js',
+  'grab-task-session.js',
   'content-grab.js',
+  'grab-page-ui.css',
   'click-captcha-worker.js',
   'popup.html',
   'popup.js',
@@ -116,6 +124,18 @@ if ((-not (Test-Path (Join-Path $verify 'auth-background-login.js'))) -or
     (-not (Test-Path (Join-Path $verify 'auth-session-prewarm.js'))) -or
     (-not (Test-Path (Join-Path $verify 'auth-prewarm-bridge.js')))) {
   throw 'Package verification failed: auth session prewarm runtime is missing.'
+}
+
+if ((-not (Test-Path (Join-Path $verify 'grab-task-model.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-auth-presentation.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-verification-engine.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-engine.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-course-provider.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-network-bridge.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-task-session.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'content-grab.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-page-ui.css')))) {
+  throw 'Package verification failed: course grab runtime is missing.'
 }
 
 if ((-not (Test-Path (Join-Path $verify 'click-captcha-worker.js'))) -or

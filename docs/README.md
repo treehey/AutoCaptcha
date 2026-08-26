@@ -12,6 +12,7 @@
 - [架构](architecture.md)：运行时模块、数据流和信任边界。
 - [开发环境](development.md)：源码加载、依赖和目录职责。
 - [测试策略](testing.md)：离线检查、浏览器回放和人工验收。
+- [抢课模块改进方案](course-grab-improvement-plan.md)：正确性基线、状态模型、原生请求迁移和分阶段验收。
 - [发布流程](releasing.md)：版本、打包、验收和 Release 清单。
 - [贡献指南](../CONTRIBUTING.md)：Issue、分支、提交和 PR 要求。
 - [安全政策](../SECURITY.md)：私下报告安全问题。

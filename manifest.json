@@ -38,7 +38,14 @@
     },
     {
       "matches": ["https://xk.nju.edu.cn/*"],
-      "js": ["content-grab.js"],
+      "js": ["grab-network-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://xk.nju.edu.cn/*"],
+      "css": ["grab-page-ui.css"],
+      "js": ["grab-task-model.js", "grab-auth-presentation.js", "grab-verification-engine.js", "grab-engine.js", "grab-course-provider.js", "content-grab.js"],
       "run_at": "document_idle"
     }
   ],
