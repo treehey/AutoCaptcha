@@ -4,6 +4,9 @@
 <head>
   <meta charset="UTF-8">
   <style>
+    [hidden] {
+      display: none !important;
+    }
     :root {
       --primary: #634798;
       --primary-strong: #523a80;
@@ -24,6 +27,7 @@
       --info: #2563eb;
       --info-soft: #eaf1ff;
       --radius: 8px;
+      --radius-lg: 16px;
       --shadow: 0 12px 28px rgba(24, 28, 41, 0.10);
     }
 
@@ -32,13 +36,28 @@
     }
 
     body {
-      width: 360px;
-      min-height: 480px;
+      width: 400px;
+      min-height: 520px;
       margin: 0;
       font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg);
       color: var(--text);
       font-size: 13px;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(99, 71, 152, 0.25);
+      border-radius: 6px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(99, 71, 152, 0.45);
     }
 
     button,
@@ -71,17 +90,25 @@
     }
 
     .topbar {
-      padding: 14px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 14px 16px 12px;
       color: #fff;
-      background: #2d2938;
-      border-radius: 0 0 12px 12px;
-      box-shadow: var(--shadow);
+      background: rgba(45, 41, 56, 0.85); /* Dark purple-ish */
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 0.5px solid rgba(255, 255, 255, 0.1);
+      border-radius: 0 0 16px 16px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     }
 
     .brand-row,
     .tab-list,
     .status-grid,
     .section-head,
+    .section-title-row,
+    .setting-title-row,
     .setting-row,
     .field-head,
     .action-row,
@@ -92,9 +119,18 @@
       align-items: center;
     }
 
+
+
     .brand-row {
       justify-content: space-between;
       gap: 12px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex: 0 0 auto;
     }
 
     .brand-title {
@@ -118,6 +154,43 @@
       color: rgba(255, 255, 255, 0.94);
       font-size: 11px;
       font-weight: 600;
+    }
+
+    .header-help,
+    .guide-close {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      flex: 0 0 auto;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .header-help {
+      width: 28px;
+      height: 28px;
+      color: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.36);
+      font-size: 16px;
+    }
+
+    .header-help:hover,
+    .header-help[aria-expanded="true"] {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
 
     .status-grid {
@@ -186,6 +259,164 @@
 
     .tab-panel.active {
       display: block;
+    }
+
+    .feature-guide-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 150;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      animation: fadeIn 0.3s ease;
+    }
+    
+    .feature-guide-backdrop[hidden] {
+      display: none;
+    }
+
+    .feature-guide {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: calc(100% - 24px);
+      max-width: 360px;
+      z-index: 200;
+      padding: 16px;
+      border: 0.5px solid rgba(99, 71, 152, 0.2);
+      border-radius: var(--radius-lg);
+      background: rgba(250, 250, 255, 0.85);
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.05);
+      animation: popIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    
+    @keyframes popIn {
+      from { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
+      to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+
+    .guide-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .guide-title {
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .guide-copy {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .guide-close {
+      width: 28px;
+      height: 28px;
+      color: var(--muted);
+      background: rgba(0, 0, 0, 0.04);
+      border: none;
+      border-radius: 50%;
+      font-family: inherit;
+      font-size: 18px;
+      line-height: 1;
+      display: grid;
+      place-items: center;
+      transition: background 0.2s ease, transform 0.2s ease;
+    }
+    
+    .guide-close:hover {
+      background: rgba(0, 0, 0, 0.08);
+    }
+    
+    .guide-close:active {
+      transform: scale(0.92);
+    }
+
+    .bento-grid {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .bento-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .bento-card {
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8), 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+    
+    .bento-wide {
+      flex-direction: row;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .bento-icon-box {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+      box-shadow: 0 4px 12px rgba(99, 71, 152, 0.25);
+    }
+    
+    .bento-wide .bento-icon-box {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+    }
+    
+    .bento-icon-box svg {
+      width: 18px;
+      height: 18px;
+    }
+    
+    .bento-wide .bento-icon-box svg {
+      width: 22px;
+      height: 22px;
+    }
+    
+    .bento-content {
+      margin-top: 12px;
+    }
+    
+    .bento-wide .bento-content {
+      margin-top: 0;
+    }
+
+    .bento-title {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .bento-copy {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.45;
     }
 
     .card {
@@ -315,6 +546,20 @@
       line-height: 1.45;
     }
 
+    .setting-group + .setting-group {
+      margin-top: 12px;
+      padding-top: 11px;
+      border-top: 1px solid var(--border);
+    }
+
+    .setting-group-title {
+      margin-bottom: 2px;
+      color: var(--primary-strong);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+
     .badge {
       display: inline-flex;
       align-items: center;
@@ -388,6 +633,79 @@
 
     input.with-action {
       padding-right: 55px;
+    }
+
+    /* 药丸标签输入框 */
+    .tag-input-container {
+      min-height: 44px;
+      padding: 6px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+      cursor: text;
+    }
+    .tag-input-container:focus-within {
+      background: #fff;
+      border-color: rgba(99, 71, 152, 0.4);
+      box-shadow: 0 0 0 3px rgba(99, 71, 152, 0.1);
+    }
+    
+    .tags-wrapper {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    
+    .course-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      background: #f0ebfa;
+      color: #55358b;
+      border: 1px solid rgba(99, 71, 152, 0.15);
+      border-radius: 16px;
+      font-size: 13px;
+      font-weight: 500;
+      animation: popIn 0.2s ease;
+    }
+    
+    .course-tag button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      background: rgba(99, 71, 152, 0.1);
+      color: #55358b;
+      border: none;
+      border-radius: 50%;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    
+    .course-tag button:hover {
+      background: var(--danger);
+      color: #fff;
+    }
+    
+    .tag-input {
+      flex: 1;
+      min-width: 120px;
+      padding: 4px 6px;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .tag-input::placeholder {
+      color: var(--faint);
     }
 
     textarea {
@@ -493,6 +811,12 @@
       background: #fbf9ff;
     }
 
+    .setting-row.nested {
+      margin-left: 12px;
+      padding-left: 10px;
+      border-left: 2px solid rgba(99, 71, 152, 0.22);
+    }
+
     .setting-row:first-child {
       border-top: 0;
       padding-top: 0;
@@ -556,6 +880,93 @@
       font-weight: 700;
     }
 
+    .setting-title-row,
+    .field-title-with-help {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .help-button {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 20px;
+      height: 20px;
+      color: var(--primary);
+      background: rgba(99, 71, 152, 0.08);
+      border: none;
+      border-radius: 50%;
+      font-size: 13px;
+      font-weight: 700;
+      transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
+      cursor: pointer;
+    }
+
+    .help-button:hover,
+    .help-button[aria-expanded="true"] {
+      color: #fff;
+      background: var(--primary);
+    }
+    
+    .help-button:active {
+      transform: scale(0.92);
+    }
+
+    .help-panel {
+      margin: 4px 0 12px;
+      padding: 12px 14px;
+      border: 0.5px solid rgba(99, 71, 152, 0.2);
+      border-radius: var(--radius);
+      background: rgba(99, 71, 152, 0.04);
+      animation: fadeInDown 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    
+    @keyframes fadeInDown {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .help-panel[hidden] {
+      display: none;
+    }
+
+    .help-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+    }
+
+    .help-list div {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+    }
+
+    .help-list dt {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      color: #fff;
+      background: var(--primary);
+    }
+
+    .help-list dd {
+      margin: 0;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    
+    .help-list dd strong {
+      font-weight: 600;
+      color: var(--primary-strong);
+    }
+
     .setting-desc {
       margin-top: 2px;
       color: var(--muted);
@@ -566,21 +977,29 @@
     .switch {
       position: relative;
       flex: 0 0 auto;
-      width: 38px;
-      height: 22px;
+      width: 42px;
+      height: 32px;
     }
 
     .switch input {
+      position: absolute;
+      inset: 0;
       opacity: 0;
-      width: 0;
-      height: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      cursor: pointer;
     }
 
     .slider {
       position: absolute;
-      inset: 0;
+      top: 3px;
+      right: 0;
+      bottom: 3px;
+      left: 0;
       border-radius: 999px;
       background: #c5cad6;
+      pointer-events: none;
       transition: background 0.18s ease;
     }
 
@@ -589,8 +1008,8 @@
       position: absolute;
       left: 3px;
       top: 3px;
-      width: 16px;
-      height: 16px;
+      width: 20px;
+      height: 20px;
       border-radius: 50%;
       background: #fff;
       box-shadow: 0 1px 3px rgba(15, 23, 42, 0.24);
@@ -605,11 +1024,54 @@
       transform: translateX(16px);
     }
 
+    .switch input:focus-visible + .slider {
+      outline: 3px solid rgba(99, 71, 152, 0.38);
+      outline-offset: 2px;
+    }
+
+    .monitor-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .monitor-step {
+      min-height: 52px;
+      padding: 7px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.35;
+    }
+
+    .monitor-step strong {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--text);
+      font-size: 11px;
+    }
+
     .course-meta {
       justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 7px;
       margin-top: 7px;
       color: var(--muted);
       font-size: 11px;
+    }
+
+    .course-meta-actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 5px;
+      margin-left: auto;
+    }
+
+    .course-meta-actions .tiny-btn {
+      white-space: nowrap;
     }
 
     .interval-grid {
@@ -696,6 +1158,205 @@
       border-color: rgba(99, 71, 152, 0.24);
     }
 
+    .exact-targets {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(0, 0, 0, 0.05);
+      border-radius: 12px;
+      background: rgba(245, 246, 251, 0.5);
+    }
+
+    .exact-targets-title {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      user-select: none;
+      outline: none;
+    }
+    
+    .exact-targets[open] .exact-targets-title {
+      margin-bottom: 8px;
+    }
+
+    .exact-target-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--surface);
+      border: 1px solid rgba(0,0,0,0.03);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+
+    .exact-target-item + .exact-target-item {
+      margin-top: 6px;
+    }
+
+    .exact-target-label {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .target-title-line {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .target-details-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .detail-pill {
+      display: inline-block;
+      padding: 2px 6px;
+      background: rgba(0,0,0,0.04);
+      color: var(--muted);
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .exact-target-remove {
+      flex: 0 0 auto;
+      padding: 4px 8px;
+      color: var(--danger);
+      background: var(--danger-soft);
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    .exact-target-remove:hover:not(:disabled) {
+      background: rgba(180, 35, 24, 0.15);
+    }
+
+    .course-groups {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid rgba(99, 71, 152, 0.1);
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(99, 71, 152, 0.03), rgba(99, 71, 152, 0.01));
+    }
+
+    .course-groups-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      outline: none;
+    }
+    
+    .course-groups[open] .course-groups-head {
+      margin-bottom: 10px;
+    }
+
+    .course-groups-title {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .course-groups-note {
+      max-width: 220px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+      text-align: right;
+    }
+
+    #courseGroupList {
+      max-height: 280px;
+      overflow-y: auto;
+      padding-right: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .course-group-card {
+      padding: 10px;
+      border: 1px solid rgba(0,0,0,0.05);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+      margin-top: 6px;
+    }
+
+    .course-group-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 82px;
+      gap: 7px;
+      margin-bottom: 6px;
+    }
+
+    .strategy-field-label {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+    }
+
+    .strategy-input,
+    .strategy-select {
+      width: 100%;
+      height: 27px;
+      padding: 0 7px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      font-size: 10px;
+      outline: none;
+    }
+
+    .strategy-input:focus,
+    .strategy-select:focus {
+      border-color: rgba(99, 71, 152, 0.48);
+      box-shadow: 0 0 0 3px rgba(99, 71, 152, 0.1);
+    }
+
+    .course-group-target {
+      padding: 8px 0 0;
+      border-top: 1px dashed rgba(0, 0, 0, 0.08);
+      margin-top: 8px;
+    }
+
+    .course-group-target-name {
+      margin-bottom: 8px;
+    }
+
+    .course-group-target-controls {
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr);
+      gap: 7px;
+    }
+
+    .course-target-filter-title {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+    }
+
+    .course-target-filters {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+      margin-top: 4px;
+    }
+
     #grabStatus {
       min-height: 130px;
       max-height: 190px;
@@ -738,9 +1399,18 @@
     .sticky-action {
       position: sticky;
       bottom: 0;
-      z-index: 2;
-      padding: 12px 0 2px;
-      background: linear-gradient(to bottom, rgba(245, 246, 251, 0), var(--bg) 34%);
+      z-index: 10;
+      margin-top: 16px;
+    }
+    
+    .glass-sticky {
+      margin: 16px -16px 0;
+      padding: 12px 16px;
+      background: rgba(245, 246, 251, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid rgba(0,0,0,0.04);
+      border-radius: 0 0 12px 12px;
     }
 
     .secondary-link {
@@ -797,7 +1467,10 @@
         <div class="brand-title">NJU Login Pro</div>
         <div class="brand-subtitle">本地智能识别 · 自动登录 · 选课监控</div>
       </div>
-      <span class="version-badge" id="versionBadge">v...</span>
+      <div class="header-actions">
+        <button class="header-help" id="featureGuideBtn" type="button" aria-label="查看功能说明" aria-expanded="false" aria-controls="featureGuide">?</button>
+        <span class="version-badge" id="versionBadge">v...</span>
+      </div>
     </div>
     <div class="status-grid">
       <span class="pill" id="loginStatePill"><span class="dot"></span><span>读取设置中</span></span>
@@ -806,25 +1479,70 @@
   </div>
 
   <div class="shell">
+    <div class="feature-guide-backdrop" id="featureGuideBackdrop" hidden></div>
+    <section class="feature-guide" id="featureGuide" aria-labelledby="featureGuideTitle" hidden>
+      <div class="guide-head">
+        <div>
+          <div class="guide-title" id="featureGuideTitle">核心能力概览</div>
+          <div class="guide-copy">本地处理验证码与登录流程，并在明确边界内辅助监控课程余量。</div>
+        </div>
+        <button class="guide-close" id="featureGuideCloseBtn" type="button" aria-label="关闭功能说明">×</button>
+      </div>
+      <div class="bento-grid">
+        <div class="bento-card bento-wide">
+          <div class="bento-icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </div>
+          <div class="bento-content">
+            <div class="bento-title">本地登录辅助</div>
+            <div class="bento-copy">仅在已支持的统一认证与选课页面按开关处理验证码和登录；无法确认时保留官方流程供人工完成。</div>
+          </div>
+        </div>
+        <div class="bento-row">
+          <div class="bento-card">
+            <div class="bento-icon-box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+            </div>
+            <div class="bento-content">
+              <div class="bento-title">课程余量监控</div>
+              <div class="bento-copy">按设定周期检查目标；发现余量后通过页面原生流程提交，并在二次验证后记录成功。</div>
+            </div>
+          </div>
+          <div class="bento-card">
+            <div class="bento-icon-box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            </div>
+            <div class="bento-content">
+              <div class="bento-title">隐私与安全</div>
+              <div class="bento-copy">数据仅保留在本地。断网或掉线会保存检查点；登录失效按安全恢复流程处理，必要时转人工。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div class="tabs-card">
       <div class="tab-list" role="tablist">
-        <button class="tab-btn active" id="loginTab" data-tab="login" role="tab" aria-controls="tab-login" aria-selected="true">登录助手</button>
-        <button class="tab-btn" id="grabTab" data-tab="grab" role="tab" aria-controls="tab-grab" aria-selected="false">选课监控</button>
+        <button class="tab-btn active" id="loginTab" data-tab="login" role="tab" aria-controls="tab-login" aria-selected="true" tabindex="0">登录助手</button>
+        <button class="tab-btn" id="grabTab" data-tab="grab" role="tab" aria-controls="tab-grab" aria-selected="false" tabindex="-1">选课监控</button>
       </div>
     </div>
 
     <div class="tab-panel active" id="tab-login" role="tabpanel" aria-labelledby="loginTab">
       <div class="card status-card">
-        <div class="status-main">
-          <div>
+        <div class="status-main" style="align-items: center;">
+          <div class="setting-title-row">
             <div class="status-title" id="loginStatusTitle">自动登录准备中</div>
-            <div class="status-copy" id="loginStatusSub">配置账号后，认证页与选课页都会自动登录。</div>
+            <button class="help-button" type="button" aria-label="了解自动登录安全说明" aria-expanded="false" aria-controls="help-login-status" data-help-target="help-login-status">?</button>
           </div>
           <span class="badge info" id="loginStatusBadge">读取中</span>
         </div>
-        <div class="feature-list">
-          <div class="feature-line"><span class="feature-check">✓</span><span>本地智能识别默认开启，低置信时自动回退 OCR。</span></div>
-          <div class="feature-line"><span class="feature-check">✓</span><span>验证码图片和账号只在浏览器本地处理。</span></div>
+        <div class="help-panel" id="help-login-status" role="region" aria-label="自动登录安全说明" hidden>
+          <div class="status-copy" id="loginStatusSub">配置账号后，认证页与选课页都会自动登录。</div>
+          <div class="feature-list" style="margin-top: 8px;">
+            <div class="feature-line"><span class="feature-check">✓</span><span>本地智能识别默认开启，低置信时自动回退 OCR。</span></div>
+            <div class="feature-line"><span class="feature-check">✓</span><span>验证码图片和账号只在浏览器本地处理。</span></div>
+          </div>
         </div>
       </div>
 
@@ -858,23 +1576,85 @@
         <div class="section-head">
           <div>
             <div class="section-title">自动登录</div>
-            <div class="section-note">两种登录独立控制；正常使用时保持开启即可。</div>
+            <div class="section-note">两个网站分别控制；提前准备功能依赖统一认证自动登录。</div>
           </div>
           <span class="badge info" id="loginModeBadge">自动登录</span>
         </div>
-        <div class="setting-row emphasis">
-          <div>
-            <div class="setting-title">统一认证自动登录</div>
-            <div class="setting-desc">自动填写、识别验证码并提交统一认证页。</div>
+        <div class="setting-group">
+          <div class="setting-group-title">全校统一身份认证</div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title-row">
+                <div class="setting-title">访问时自动登录</div>
+                <button class="help-button" type="button" aria-label="了解统一认证访问时自动登录" aria-expanded="false" aria-controls="help-auth-login" data-help-target="help-auth-login">?</button>
+              </div>
+              <div class="setting-desc">打开统一认证页面时触发自动登录。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="isEnabled" aria-label="统一认证访问时自动登录"><span class="slider"></span></label>
           </div>
-          <label class="switch"><input type="checkbox" id="isEnabled" aria-label="统一认证自动登录"><span class="slider"></span></label>
+          <div class="help-panel" id="help-auth-login" role="region" aria-label="统一认证访问时自动登录说明" hidden>
+            <dl class="help-list">
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></dt>
+                <dd><strong>作用</strong>：需要统一认证时自动登录，之后可继续访问原网站。</dd>
+              </div>
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></dt>
+                <dd><strong>影响</strong>：关闭后账号仍保存在本地，且选课系统登录不受影响。</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="setting-row nested">
+            <div>
+              <div class="setting-title-row">
+                <div class="setting-title">提前准备统一认证 <span class="badge info">可选</span></div>
+                <button class="help-button" type="button" aria-label="了解提前准备统一认证" aria-expanded="false" aria-controls="help-auth-prewarm" data-help-target="help-auth-prewarm">?</button>
+              </div>
+              <div class="setting-desc" id="authPrewarmDesc">默认关闭；开启后在扩展后台准备会话，不新增标签页。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="authPrewarm" aria-label="提前准备统一认证"><span class="slider"></span></label>
+          </div>
+          <div class="help-panel" id="help-auth-prewarm" role="region" aria-label="提前准备统一认证说明" hidden>
+            <dl class="help-list">
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></dt>
+                <dd><strong>加速</strong>：浏览器启动后在后台提前建立会话，后续访问通常能瞬间打开。</dd>
+              </div>
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></dt>
+                <dd><strong>注意</strong>：需开启上方的“自动登录”。不会弹出任何新标签页。</dd>
+              </div>
+            </dl>
+          </div>
         </div>
-        <div class="setting-row">
-          <div>
-            <div class="setting-title">选课系统自动登录</div>
-            <div class="setting-desc">自动识别点击验证码、按顺序点击并提交。</div>
+        <div class="setting-group">
+          <div class="setting-group-title">选课系统</div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title-row">
+                <div class="setting-title">访问时自动登录</div>
+                <button class="help-button" type="button" aria-label="了解选课系统自动登录" aria-expanded="false" aria-controls="help-course-login" data-help-target="help-course-login">?</button>
+              </div>
+              <div class="setting-desc">自动进入选课系统；不会自动开始监控或抢课。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="clickCaptchaAutoLogin" aria-label="选课系统访问时自动登录"><span class="slider"></span></label>
           </div>
-          <label class="switch"><input type="checkbox" id="clickCaptchaAutoLogin" aria-label="选课系统自动登录"><span class="slider"></span></label>
+          <div class="help-panel" id="help-course-login" role="region" aria-label="选课系统自动登录说明" hidden>
+            <dl class="help-list">
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></dt>
+                <dd><strong>作用</strong>：本地识别点击验证码并完成选课系统登录。</dd>
+              </div>
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></dt>
+                <dd><strong>边界</strong>：它只负责登录；课程余量监控需要在“选课监控”中单独开始。</dd>
+              </div>
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></dt>
+                <dd><strong>控制</strong>：与统一认证自动登录独立，可按你的使用场景分别开启。</dd>
+              </div>
+            </dl>
+          </div>
         </div>
       </div>
 
@@ -922,11 +1702,32 @@
       </details>
     </div>
 
-    <div class="tab-panel" id="tab-grab" role="tabpanel" aria-labelledby="grabTab">
-      <div class="card">
+    <div class="tab-panel" id="tab-grab" role="tabpanel" aria-labelledby="grabTab" hidden>
+      
+      <!-- 卡片 A: 状态仪表盘 -->
+      <div class="card status-card">
         <div class="section-head">
-          <div class="section-title">选课监控</div>
+          <div class="section-title-row">
+            <div class="section-title">选课监控</div>
+            <button class="help-button" type="button" aria-label="了解选课监控步骤与安全说明" aria-expanded="false" aria-controls="help-grab-guide" data-help-target="help-grab-guide">?</button>
+          </div>
           <span class="badge warning" id="grabBadge">未连接</span>
+        </div>
+        <div class="help-panel" id="help-grab-guide" role="region" aria-label="选课监控说明" hidden>
+          <dl class="help-list">
+            <div>
+              <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></dt>
+              <dd><strong>精确锁定</strong>：在教务网页面点击“加入监控”，系统自动绑定唯一课程，避免误选同名班级。</dd>
+            </div>
+            <div>
+              <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></dt>
+              <dd><strong>安全恢复：</strong>登录失效会保存任务检查点；完成登录并进入当前选课轮次后自动恢复并先验证，连续失效或入口不可用则转人工。</dd>
+            </div>
+            <div>
+              <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20"/></svg></dt>
+              <dd><strong>边界</strong>：不会自动退掉保底课程；浏览器重启后不会自行恢复真实提交，需重新开启监控。</dd>
+            </div>
+          </dl>
         </div>
         <div class="grab-summary">
           <div>
@@ -935,45 +1736,131 @@
           </div>
           <span class="badge info" id="grabRoundBadge">0 轮</span>
         </div>
+
+        <div class="monitor-steps" id="grabSteps" aria-label="开始选课监控的步骤">
+          <div class="monitor-step"><strong>1. 打开页面</strong>先进入选课系统，让扩展连接当前页面。</div>
+          <div class="monitor-step"><strong>2. 加入目标</strong>优先点“加入监控”，也可填写关键词。</div>
+          <div class="monitor-step"><strong>3. 开始监控</strong>有空位时自动选择并确认，可随时停止。</div>
+        </div>
+      </div>
+
+      <!-- 卡片 B: 核心目标配置 -->
+      <div class="card core-target-card">
         <div class="field">
           <div class="field-head">
-            <span>目标课程名称</span>
+            <span class="field-title-with-help">课程目标 <button class="help-button" type="button" aria-label="了解课程目标添加方式" aria-expanded="false" aria-controls="help-course-names" data-help-target="help-course-names">?</button></span>
             <span id="courseCount">0 门</span>
           </div>
-          <textarea id="courseNames" placeholder="每行一个课程名，支持模糊匹配"></textarea>
+          <div class="tag-input-container" id="courseTagContainer">
+            <div class="tags-wrapper" id="courseTagsWrapper">
+              <!-- <span class="course-tag">仙林游泳初级 <button>&times;</button></span> -->
+              <input type="text" id="courseNamesInput" class="tag-input" placeholder="输入课程名后按回车键添加...">
+            </div>
+          </div>
+          <textarea id="courseNames" hidden></textarea>
           <div class="course-meta">
-            <span>建议填写能唯一定位课程的关键词。</span>
-            <button class="tiny-btn" id="openGrabPageBtn" type="button">打开选课页</button>
+            <span>关键词用于兼容搜索；精确教学班更安全。</span>
+            <div class="course-meta-actions">
+              <button class="tiny-btn" id="importFavoriteCoursesBtn" type="button" aria-label="导入当前收藏页已加载的教学班" title="导入当前收藏页">导入收藏</button>
+              <button class="tiny-btn" id="openGrabPageBtn" type="button">打开选课系统</button>
+            </div>
+          </div>
+          <details class="exact-targets" id="exactTargets" hidden>
+            <summary class="exact-targets-title">已从选课页加入的精确教学班</summary>
+            <div id="exactTargetList"></div>
+          </details>
+          <details class="course-groups" id="courseGroups" hidden>
+            <summary class="course-groups-head">
+              <div class="course-groups-title">目标策略与过滤</div>
+              <div class="course-groups-note">多目标优先级与保底组设置</div>
+            </summary>
+            <div id="courseGroupList"></div>
+          </details>
+          <div class="help-panel" id="help-course-names" role="region" aria-label="目标课程名称填写说明" hidden>
+            <dl class="help-list">
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></dt>
+                <dd><strong>填写</strong>：输入课程名后按回车添加，支持模糊匹配（如“仙林游泳”）。</dd>
+              </div>
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></dt>
+                <dd><strong>精确目标</strong>：在选课页面点击“加入监控”，系统自动绑定教学班 ID，避免同名误判。</dd>
+              </div>
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></dt>
+                <dd><strong>收藏导入</strong>：先在选课页面打开“收藏”，再点击“导入收藏”；只导入当前已加载的教学班。</dd>
+              </div>
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></dt>
+                <dd><strong>筛选条件</strong>：教师、时间和校区均为包含匹配；多条件需同时满足，无信息则跳过。</dd>
+              </div>
+              <div>
+                <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></dt>
+                <dd><strong>课程组</strong>：替代目标放同组并设数量；高优先级先试，成功后自动停止后续，不会自动退掉保底课程。</dd>
+              </div>
+            </dl>
           </div>
         </div>
-        <div class="field">
-          <div class="field-head">
-            <span>刷新间隔</span>
-            <span id="intervalLabel">3s</span>
+      </div>
+
+      <!-- 卡片 C: 高级设置 -->
+      <details class="card advanced-settings-card">
+        <summary>
+          <div class="section-title">高级设置</div>
+          <span class="badge info">可选</span>
+        </summary>
+        <div class="details-content">
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">选课页增强控件</div>
+              <div class="setting-desc">显示课程状态面板和课程行内“加入监控”按钮；关闭后保持学校原始页面。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="grabPageEnhancementsEnabled" aria-label="选课页增强控件" checked><span class="slider"></span></label>
           </div>
-          <select class="hidden-select" id="grabInterval" aria-label="刷新间隔">
-            <option value="1000">1s</option>
-            <option value="2000">2s</option>
-            <option value="3000" selected>3s</option>
-            <option value="5000">5s</option>
-            <option value="10000">10s</option>
-            <option value="30000">30s</option>
-          </select>
-          <div class="interval-grid" id="intervalGrid">
-            <button class="interval-option" data-value="1000" type="button">1s</button>
-            <button class="interval-option" data-value="2000" type="button">2s</button>
-            <button class="interval-option active" data-value="3000" type="button">3s</button>
-            <button class="interval-option" data-value="5000" type="button">5s</button>
-            <button class="interval-option" data-value="10000" type="button">10s</button>
-            <button class="interval-option" data-value="30000" type="button">30s</button>
+          <div class="field">
+            <div class="field-head">
+              <span class="field-title-with-help">刷新间隔 <button class="help-button" type="button" aria-label="了解刷新间隔" aria-expanded="false" aria-controls="help-grab-interval" data-help-target="help-grab-interval">?</button></span>
+              <span id="intervalLabel">5s</span>
+            </div>
+            <select class="hidden-select" id="grabInterval" aria-label="刷新间隔">
+              <option value="1000">1s</option>
+              <option value="2000">2s</option>
+              <option value="3000">3s</option>
+              <option value="5000" selected>5s</option>
+              <option value="10000">10s</option>
+              <option value="30000">30s</option>
+            </select>
+            <div class="interval-grid" id="intervalGrid">
+              <button class="interval-option" data-value="1000" type="button">1s</button>
+              <button class="interval-option" data-value="2000" type="button">2s</button>
+              <button class="interval-option" data-value="3000" type="button">3s</button>
+              <button class="interval-option active" data-value="5000" type="button">5s</button>
+              <button class="interval-option" data-value="10000" type="button">10s</button>
+              <button class="interval-option" data-value="30000" type="button">30s</button>
+            </div>
+            <div class="help-panel" id="help-grab-interval" role="region" aria-label="刷新间隔说明" hidden>
+              <dl class="help-list">
+                <div>
+                  <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg></dt>
+                  <dd><strong>推荐</strong>：默认 5 秒，兼顾刷新速度与请求频率。</dd>
+                </div>
+                <div>
+                  <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></dt>
+                  <dd><strong>取舍</strong>：间隔越短检查越快，请求也越频繁；请按实际需要选择。</dd>
+                </div>
+              </dl>
+            </div>
           </div>
         </div>
-        <div class="sticky-action">
+      </details>
+
+      <!-- 悬浮操作区 -->
+      <div class="sticky-action glass-sticky">
         <div class="action-row" style="margin-top:0">
           <button class="primary-btn" id="grabBtn" disabled>开始监控</button>
         </div>
-        </div>
       </div>
+    </div>
 
       <details class="card dev-tools" data-dev-only>
         <summary><div class="section-title">点击验证码采样</div><span class="badge warning" id="clickCaptchaCaptureBadge">未连接</span></summary>
@@ -1036,6 +1923,8 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="grab-task-model.js"></script>
+  <script src="grab-auth-presentation.js"></script>
   <script src="popup.js"></script>
 </body>
 

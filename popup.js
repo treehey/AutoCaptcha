@@ -1,10 +1,15 @@
-const AUTH_URL = 'https://authserver.nju.edu.cn/';
-const GRAB_URL = 'https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do';
+const AUTH_URL = 'https://authserver.nju.edu.cn/authserver/login';
+const GRAB_ENTRY_URL = 'https://xk.nju.edu.cn/';
 const CLICK_CAPTCHA_SAMPLE_COUNT_KEY = 'nju_click_captcha_v1_count';
 const CLICK_CAPTCHA_SAMPLE_KEY_PREFIX = 'nju_click_captcha_v1_';
 const CLICK_CAPTCHA_SKIPPED_THREE_COUNT_KEY = 'nju_click_captcha_v1_skipped_three_count';
 const CLICK_CAPTCHA_SOLVER_ENABLED_KEY = 'nju_click_captcha_solver_enabled';
 const CLICK_CAPTCHA_AUTO_CLICK_KEY = 'nju_click_captcha_auto_click';
+const AUTH_PREWARM_ENABLED_KEY = 'nju_auth_prewarm_enabled';
+const GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY = 'nju_grab_page_enhancements_enabled';
+const grabTaskModel = globalThis.NjuGrabTaskModel;
+const grabAuthPresentation = globalThis.NjuGrabAuthPresentation;
+const GRAB_TASK_CONFIG_KEY = grabTaskModel.STORAGE_KEY;
 
 const storageKeys = [
   'nju_user',
@@ -12,14 +17,21 @@ const storageKeys = [
   'nju_enabled',
   'nju_force',
   'nju_auto_click',
+  AUTH_PREWARM_ENABLED_KEY,
+  GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY,
   CLICK_CAPTCHA_SOLVER_ENABLED_KEY,
   CLICK_CAPTCHA_AUTO_CLICK_KEY,
   'nju_grab_courses',
-  'nju_grab_interval'
+  'nju_grab_interval',
+  GRAB_TASK_CONFIG_KEY
 ];
 
 const els = {
   versionBadge: document.getElementById('versionBadge'),
+  featureGuide: document.getElementById('featureGuide'),
+  featureGuideBackdrop: document.getElementById('featureGuideBackdrop'),
+  featureGuideBtn: document.getElementById('featureGuideBtn'),
+  featureGuideCloseBtn: document.getElementById('featureGuideCloseBtn'),
   loginStatePill: document.getElementById('loginStatePill'),
   grabStatePill: document.getElementById('grabStatePill'),
   credentialBadge: document.getElementById('credentialBadge'),
@@ -34,6 +46,8 @@ const els = {
   togglePassword: document.getElementById('togglePassword'),
   saveBtn: document.getElementById('saveBtn'),
   isEnabled: document.getElementById('isEnabled'),
+  authPrewarm: document.getElementById('authPrewarm'),
+  authPrewarmDesc: document.getElementById('authPrewarmDesc'),
   forceFill: document.getElementById('forceFill'),
   autoClick: document.getElementById('autoClick'),
   clickCaptchaAutoLogin: document.getElementById('clickCaptchaAutoLogin'),
@@ -51,12 +65,22 @@ const els = {
   grabSummaryTitle: document.getElementById('grabSummaryTitle'),
   grabSummarySub: document.getElementById('grabSummarySub'),
   grabRoundBadge: document.getElementById('grabRoundBadge'),
+  grabSteps: document.getElementById('grabSteps'),
+  grabPageEnhancementsEnabled: document.getElementById('grabPageEnhancementsEnabled'),
   courseNames: document.getElementById('courseNames'),
+  courseTagContainer: document.getElementById('courseTagContainer'),
+  courseTagsWrapper: document.getElementById('courseTagsWrapper'),
+  courseNamesInput: document.getElementById('courseNamesInput'),
   courseCount: document.getElementById('courseCount'),
+  exactTargets: document.getElementById('exactTargets'),
+  exactTargetList: document.getElementById('exactTargetList'),
+  courseGroups: document.getElementById('courseGroups'),
+  courseGroupList: document.getElementById('courseGroupList'),
   grabInterval: document.getElementById('grabInterval'),
   intervalLabel: document.getElementById('intervalLabel'),
   intervalGrid: document.getElementById('intervalGrid'),
   grabBtn: document.getElementById('grabBtn'),
+  importFavoriteCoursesBtn: document.getElementById('importFavoriteCoursesBtn'),
   openGrabPageBtn: document.getElementById('openGrabPageBtn'),
   clickCaptchaCaptureBadge: document.getElementById('clickCaptchaCaptureBadge'),
   clickCaptchaCaptureTitle: document.getElementById('clickCaptchaCaptureTitle'),
@@ -98,6 +122,9 @@ let currentCaptchaPage = 'other';
 let authPreviewConnected = false;
 let authPreviewReady = false;
 let captchaTestCapability = { mode: 'none', ready: false };
+let authPrewarmState = null;
+let grabTaskConfig = grabTaskModel.normalizeTaskConfig(null);
+let grabRetryRenderTimer = null;
 
 function setVersion() {
   if (els.versionBadge && chrome.runtime && chrome.runtime.getManifest) {
@@ -133,11 +160,279 @@ function getCourseNames() {
     .filter(Boolean);
 }
 
-function updateCourseCount() {
-  const count = getCourseNames().length;
-  els.courseCount.textContent = `${count} 门`;
+function getExactTargets() {
+  return grabTaskConfig.targets.filter(target => target.kind === grabTaskModel.TARGET_KIND.TEACHING_CLASS);
+}
+
+function getConfiguredTaskConfig() {
+  const withKeywords = grabTaskModel.replaceKeywordTargets(
+    grabTaskConfig,
+    grabTaskModel.keywordTargetsFromText(els.courseNames.value)
+  );
+  return grabTaskModel.normalizeTaskConfig({
+    ...withKeywords,
+    intervalMs: Number(els.grabInterval.value) || withKeywords.intervalMs || 5000
+  });
+}
+
+function getConfiguredTargets() {
+  return getConfiguredTaskConfig().targets;
+}
+
+function persistGrabTaskConfig() {
+  grabTaskConfig = {
+    ...getConfiguredTaskConfig(),
+    updatedAt: Date.now()
+  };
+  chrome.storage.local.set({
+    [GRAB_TASK_CONFIG_KEY]: grabTaskConfig,
+    nju_grab_courses: els.courseNames.value,
+    nju_grab_interval: String(grabTaskConfig.intervalMs)
+  });
+}
+
+function createTargetLabelElement(target) {
+  const container = document.createElement('div');
+  container.className = 'exact-target-label'; // reused for both places
+  
+  const titleLine = document.createElement('div');
+  titleLine.className = 'target-title-line';
+  titleLine.textContent = target.name || '教学班';
+
+  const detailsLine = document.createElement('div');
+  detailsLine.className = 'target-details-line';
+  
+  let details = [];
+  if (target.kind === grabTaskModel.TARGET_KIND.KEYWORD) {
+    const filters = target.filters || {};
+    details = [
+      filters.teacher ? `教师 ${filters.teacher}` : '',
+      filters.time ? `时间 ${filters.time}` : '',
+      filters.campus ? `校区 ${filters.campus}` : ''
+    ].filter(Boolean);
+  } else {
+    details = [
+      target.teacher,
+      target.teachingClassNo || target.teachingClassId,
+      target.courseNumber,
+      target.campus,
+      target.time
+    ].filter(Boolean);
+  }
+  
+  if (details.length > 0) {
+    detailsLine.innerHTML = details.map(d => `<span class="detail-pill">${d}</span>`).join('');
+    container.append(titleLine, detailsLine);
+  } else {
+    container.append(titleLine);
+  }
+  
+  return container;
+}
+
+function renderExactTargets() {
+  const targets = getExactTargets();
+  els.exactTargets.hidden = targets.length === 0;
+  els.exactTargetList.textContent = '';
+  for (const target of targets) {
+    const item = document.createElement('div');
+    item.className = 'exact-target-item';
+    
+    const label = createTargetLabelElement(target);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'exact-target-remove';
+    remove.textContent = '移除';
+    remove.disabled = grabRunning;
+    remove.setAttribute('aria-label', `移除精确目标：${grabTaskModel.targetLabel(target)}`);
+    remove.addEventListener('click', () => {
+      if (grabRunning) return;
+      grabTaskConfig = grabTaskModel.removeTargetFromTaskConfig(grabTaskConfig, target.targetId);
+      persistGrabTaskConfig();
+      updateCourseCount({ persist: false });
+      showToast('已移除教学班目标');
+    });
+    item.append(label, remove);
+    els.exactTargetList.appendChild(item);
+  }
+}
+
+function renderCourseGroups(configValue = getConfiguredTaskConfig()) {
+  if (!els.courseGroups || !els.courseGroupList) return;
+  const config = grabTaskModel.normalizeTaskConfig(configValue);
+  const hasKeywordTarget = config.targets.some(target => target.kind === grabTaskModel.TARGET_KIND.KEYWORD);
+  const showStrategy = config.targets.length >= 2 || hasKeywordTarget;
+  els.courseGroups.hidden = !showStrategy;
+  els.courseGroupList.textContent = '';
+  if (!showStrategy) return;
+
+  const updateStrategy = (nextConfig, message) => {
+    grabTaskConfig = nextConfig;
+    persistGrabTaskConfig();
+    updateCourseCount({ persist: false });
+    showToast(message);
+  };
+
+  for (const group of config.groups) {
+    const card = document.createElement('div');
+    card.className = 'course-group-card';
+    card.dataset.groupId = group.groupId;
+
+    const head = document.createElement('div');
+    head.className = 'course-group-head';
+
+    const labelField = document.createElement('label');
+    labelField.className = 'strategy-field-label';
+    labelField.append('组名');
+    const labelInput = document.createElement('input');
+    labelInput.className = 'strategy-input';
+    labelInput.type = 'text';
+    labelInput.maxLength = 200;
+    labelInput.value = group.label;
+    labelInput.disabled = grabRunning;
+    labelInput.setAttribute('aria-label', `课程组名称：${group.label}`);
+    labelInput.addEventListener('change', () => {
+      updateStrategy(
+        grabTaskModel.updateCourseGroup(getConfiguredTaskConfig(), group.groupId, { label: labelInput.value }),
+        '课程组名称已更新'
+      );
+    });
+    labelField.appendChild(labelInput);
+
+    const requiredField = document.createElement('label');
+    requiredField.className = 'strategy-field-label';
+    requiredField.append('要求数量');
+    const requiredInput = document.createElement('input');
+    requiredInput.className = 'strategy-input';
+    requiredInput.type = 'number';
+    requiredInput.min = '1';
+    requiredInput.max = String(group.targets.length);
+    requiredInput.step = '1';
+    requiredInput.value = String(group.requiredCount);
+    requiredInput.disabled = grabRunning;
+    requiredInput.setAttribute('aria-label', `课程组“${group.label}”的要求数量`);
+    requiredInput.addEventListener('change', () => {
+      updateStrategy(
+        grabTaskModel.updateCourseGroup(getConfiguredTaskConfig(), group.groupId, {
+          requiredCount: Number(requiredInput.value)
+        }),
+        '要求数量已更新'
+      );
+    });
+    requiredField.appendChild(requiredInput);
+    head.append(labelField, requiredField);
+    card.appendChild(head);
+
+    for (const target of group.targets) {
+      const targetRow = document.createElement('div');
+      targetRow.className = 'course-group-target';
+      const targetName = createTargetLabelElement(target);
+      targetName.className = 'course-group-target-name';
+
+      const controls = document.createElement('div');
+      controls.className = 'course-group-target-controls';
+      const priorityField = document.createElement('label');
+      priorityField.className = 'strategy-field-label';
+      priorityField.append('优先级');
+      const priorityInput = document.createElement('input');
+      priorityInput.className = 'strategy-input';
+      priorityInput.type = 'number';
+      priorityInput.min = '-1000';
+      priorityInput.max = '1000';
+      priorityInput.step = '1';
+      priorityInput.value = String(target.priority || 0);
+      priorityInput.disabled = grabRunning;
+      priorityInput.setAttribute('aria-label', `${grabTaskModel.targetLabel(target)}的优先级`);
+      priorityInput.addEventListener('change', () => {
+        updateStrategy(
+          grabTaskModel.updateTargetPriority(getConfiguredTaskConfig(), target.targetId, priorityInput.value),
+          '目标优先级已更新'
+        );
+      });
+      priorityField.appendChild(priorityInput);
+
+      const groupField = document.createElement('label');
+      groupField.className = 'strategy-field-label';
+      groupField.append('归属课程组');
+      const groupSelect = document.createElement('select');
+      groupSelect.className = 'strategy-select';
+      groupSelect.disabled = grabRunning;
+      groupSelect.setAttribute('aria-label', `${grabTaskModel.targetLabel(target)}的课程组`);
+      for (const optionGroup of config.groups) {
+        const option = document.createElement('option');
+        option.value = optionGroup.groupId;
+        option.textContent = `${optionGroup.label}（${optionGroup.targets.length} 项）`;
+        option.selected = optionGroup.groupId === group.groupId;
+        groupSelect.appendChild(option);
+      }
+      if (group.targets.length > 1) {
+        const standalone = document.createElement('option');
+        standalone.value = '__standalone__';
+        standalone.textContent = '单独成组';
+        groupSelect.appendChild(standalone);
+      }
+      groupSelect.addEventListener('change', () => {
+        const destination = groupSelect.value === '__standalone__' ? '' : groupSelect.value;
+        updateStrategy(
+          grabTaskModel.moveTargetToGroup(getConfiguredTaskConfig(), target.targetId, destination),
+          destination ? '目标已移入课程组' : '目标已单独成组'
+        );
+      });
+      groupField.appendChild(groupSelect);
+      controls.append(priorityField, groupField);
+      targetRow.append(targetName, controls);
+
+      if (target.kind === grabTaskModel.TARGET_KIND.KEYWORD) {
+        const filterTitle = document.createElement('div');
+        filterTitle.className = 'course-target-filter-title';
+        filterTitle.textContent = '候选过滤（包含匹配，多个条件同时生效）';
+        const filters = document.createElement('div');
+        filters.className = 'course-target-filters';
+        const filterFields = [
+          ['teacher', '教师', '如：王老师'],
+          ['time', '时间', '如：周一 3-4节'],
+          ['campus', '校区', '如：仙林']
+        ];
+        for (const [key, label, placeholder] of filterFields) {
+          const field = document.createElement('label');
+          field.className = 'strategy-field-label';
+          field.append(label);
+          const input = document.createElement('input');
+          input.className = 'strategy-input';
+          input.type = 'text';
+          input.maxLength = key === 'campus' ? 100 : key === 'time' ? 300 : 200;
+          input.placeholder = placeholder;
+          input.value = target.filters?.[key] || '';
+          input.disabled = grabRunning;
+          input.setAttribute('aria-label', `${target.name}的${label}过滤条件`);
+          input.addEventListener('change', () => {
+            updateStrategy(
+              grabTaskModel.updateTargetFilters(getConfiguredTaskConfig(), target.targetId, {
+                ...target.filters,
+                [key]: input.value
+              }),
+              `${label}过滤已更新`
+            );
+          });
+          field.appendChild(input);
+          filters.appendChild(field);
+        }
+        targetRow.append(filterTitle, filters);
+      }
+      card.appendChild(targetRow);
+    }
+    els.courseGroupList.appendChild(card);
+  }
+}
+
+function updateCourseCount({ persist = true } = {}) {
+  const config = getConfiguredTaskConfig();
+  const count = config.targets.length;
+  els.courseCount.textContent = `${count} 项 · ${config.groups.length} 组`;
+  renderExactTargets();
+  renderCourseGroups(config);
   renderGrabControls();
-  chrome.storage.local.set({ nju_grab_courses: els.courseNames.value });
+  if (persist) persistGrabTaskConfig();
 }
 
 function credentialsDirty() {
@@ -194,38 +489,167 @@ function renderLoginState() {
   }
 
   setBadge(els.loginModeBadge, enabled ? '已开启' : '已暂停', enabled ? 'success' : 'warning');
+  renderAuthPrewarmState();
+}
+
+function renderAuthPrewarmState() {
+  if (!els.authPrewarm || !els.authPrewarmDesc) return;
+  const configured = Boolean(els.username.value.trim() && els.password.value);
+  if (!els.authPrewarm.checked) {
+    els.authPrewarmDesc.textContent = '默认关闭；开启后在扩展后台准备会话，不新增标签页。';
+    return;
+  }
+  if (!els.isEnabled.checked || !els.autoClick.checked) {
+    els.authPrewarmDesc.textContent = '等待开启统一认证自动提交后生效。';
+    return;
+  }
+  if (!configured) {
+    els.authPrewarmDesc.textContent = '等待保存完整账号和密码后生效。';
+    return;
+  }
+
+  const phase = authPrewarmState?.phase;
+  const copy = {
+    running: '正在后台建立统一认证会话。',
+    ready: '本次浏览器会话的统一认证已准备。',
+    attention: authPrewarmState?.reason || '后台认证需要人工处理，本次不会重试。',
+    failed: authPrewarmState?.reason || '本次后台认证未完成，不会自动重试。',
+    cancelled: authPrewarmState?.reason || '后台认证已取消。',
+    disabled: '默认关闭；开启后在扩展后台准备会话，不新增标签页。',
+    idle: authPrewarmState?.reason || '将在满足条件时从扩展后台准备认证会话。'
+  };
+  els.authPrewarmDesc.textContent = copy[phase] || '将在浏览器启动后从扩展后台准备认证会话。';
+}
+
+async function syncAuthPrewarmStatus() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getAuthPrewarmStatus' });
+    authPrewarmState = response?.ok ? response.state : null;
+  } catch {
+    authPrewarmState = null;
+  }
+  renderAuthPrewarmState();
+}
+
+function formatGrabScanStatus(scan) {
+  if (!scan || typeof scan !== 'object') return '';
+  const queried = Math.max(0, Number(scan.queriedTargetCount) || 0);
+  const deferred = Math.max(0, Number(scan.deferredTargetCount) || 0);
+  const scopeDeferred = Math.max(0, Number(scan.scopeDeferredTargetCount) || 0);
+  const materialized = Math.max(0, Number(scan.materializedQueryCount) || 0);
+  const shadowCompared = Math.max(0, Number(scan.shadowComparison?.comparisonCount) || 0);
+  const shadowMismatched = Math.max(0, Number(scan.shadowComparison?.mismatchedComparisonCount) || 0);
+  const shadowSuffix = shadowCompared > 0
+    ? `；累计核对 ${shadowCompared} 次${shadowMismatched > 0 ? `，${shadowMismatched} 次有差异` : '，结果一致'}`
+    : '';
+  if (scan.mode === 'NETWORK') {
+    const waits = [
+      deferred > 0 ? `${deferred} 个下轮分批查询` : '',
+      scopeDeferred > 0 ? `${scopeDeferred} 个等待对应分类` : ''
+    ].filter(Boolean);
+    const base = `接口查询 ${queried} 个目标${waits.length > 0 ? `，${waits.join('，')}` : ''}`;
+    return `${base}${shadowSuffix}`;
+  }
+  if (scan.mode === 'NETWORK_WITH_DOM') {
+    return materialized > 0
+      ? `接口发现候选，已精确物化 ${materialized} 次${shadowSuffix}`
+      : `接口查询后已用当前页面校验${shadowSuffix}`;
+  }
+  if (scan.mode === 'DOM_FALLBACK') return '接口模板未就绪，已用 DOM 兼容扫描';
+  if (scan.mode === 'ERROR') {
+    return {
+      AUTH_EXPIRED: '查询发现登录失效',
+      RATE_LIMITED: '查询触发限流',
+      NETWORK_ERROR: '查询遇到网络异常',
+      SERVER_ERROR: '查询遇到服务端异常'
+    }[scan.outcome] || '本轮查询未完成';
+  }
+  return '';
 }
 
 function renderGrabState() {
+  if (grabRetryRenderTimer) clearTimeout(grabRetryRenderTimer);
+  grabRetryRenderTimer = null;
   const round = grabState?.round || 0;
-  const successCount = grabState?.successCourses?.length || 0;
-  const targetCount = grabState?.courseNames?.length || getCourseNames().length;
-  const interval = grabState?.interval || Number(els.grabInterval.value || 3000);
+  const selectedCount = grabState?.successTargets?.length
+    ?? grabState?.successCourses?.length
+    ?? 0;
+  const completedCount = grabState?.completedGroups ?? selectedCount;
+  const groupCount = grabState?.totalGroups
+    ?? grabState?.initialTargetCount
+    ?? grabState?.configuredCourseNames?.length
+    ?? grabState?.courseNames?.length
+    ?? getCourseNames().length;
+  const authRecoveryView = grabAuthPresentation.present(grabState, { groupCount });
+  const progressText = `已完成 ${completedCount}/${groupCount || 0} 个课程组，确认 ${selectedCount} 门课程`;
+  const interval = grabState?.interval || Number(els.grabInterval.value || 5000);
+  const currentTime = Date.now();
+  const globalRetryMs = Math.max(0, Number(grabState?.globalRetryAt || 0) - currentTime);
+  const nextRetryMs = Math.max(0, Number(grabState?.nextRetryAt || 0) - currentTime);
+  const retryingTargetCount = nextRetryMs > 0 ? Number(grabState?.retryingTargetCount || 0) : 0;
+  const retrySeconds = Math.max(1, Math.ceil((globalRetryMs || nextRetryMs) / 1000));
+  const scanStatusText = formatGrabScanStatus(grabState?.lastScan);
+  if (grabRunning && (globalRetryMs > 0 || nextRetryMs > 0)) {
+    grabRetryRenderTimer = setTimeout(renderGrabState, Math.min(1000, globalRetryMs || nextRetryMs));
+  }
 
   els.grabRoundBadge.textContent = `${round} 轮`;
+  if (els.grabSteps) els.grabSteps.hidden = grabConnected || grabRunning;
 
   if (!grabConnected) {
     setBadge(els.grabBadge, '未连接', 'warning');
     setPill(els.grabStatePill, '选课页未连接');
     els.grabSummaryTitle.textContent = '等待连接选课页面';
     els.grabSummarySub.textContent = '打开选课系统后可同步监控状态。';
+  } else if (authRecoveryView) {
+    setBadge(els.grabBadge, authRecoveryView.badge, authRecoveryView.badgeTone);
+    setPill(els.grabStatePill, authRecoveryView.pill);
+    els.grabSummaryTitle.textContent = authRecoveryView.title;
+    els.grabSummarySub.textContent = authRecoveryView.subtitle;
   } else if (grabRunning) {
-    setBadge(els.grabBadge, '监控中', 'success');
-    setPill(els.grabStatePill, `监控中 · ${round} 轮`);
-    els.grabSummaryTitle.textContent = `监控中，已完成 ${round} 轮`;
-    els.grabSummarySub.textContent = `已抢到 ${successCount}/${targetCount || 0}，间隔 ${Math.round(interval / 1000)}s`;
+    if (globalRetryMs > 0) {
+      const reason = {
+        RATE_LIMITED: '触发限流',
+        SERVER_ERROR: '服务端暂时异常',
+        NETWORK_ERROR: '网络暂时异常'
+      }[grabState?.lastTransientOutcome] || '请求暂时异常';
+      setBadge(els.grabBadge, '退避中', 'warning');
+      setPill(els.grabStatePill, `退避中 · ${retrySeconds}s`);
+      els.grabSummaryTitle.textContent = `${reason}，${retrySeconds} 秒后恢复`;
+      els.grabSummarySub.textContent = `${progressText}；退避期间不会继续提交请求。`;
+    } else {
+      setBadge(els.grabBadge, retryingTargetCount > 0 ? '部分退避' : '监控中', retryingTargetCount > 0 ? 'warning' : 'success');
+      setPill(els.grabStatePill, `监控中 · ${round} 轮`);
+      els.grabSummaryTitle.textContent = `监控中，已完成 ${round} 轮`;
+      els.grabSummarySub.textContent = retryingTargetCount > 0
+        ? `${progressText}；${retryingTargetCount} 个目标等待重试，其余目标继续监控${scanStatusText ? `；${scanStatusText}` : ''}。`
+        : `${progressText}${scanStatusText ? `；${scanStatusText}` : ''}；间隔 ${Math.round(interval / 1000)}s`;
+    }
+  } else if (grabState?.phase === 'COMPLETED') {
+    setBadge(els.grabBadge, '已完成', 'success');
+    setPill(els.grabStatePill, '课程组已满足');
+    els.grabSummaryTitle.textContent = `已完成 ${completedCount}/${groupCount || 0} 个课程组`;
+    els.grabSummarySub.textContent = `已二次确认 ${selectedCount} 门课程${scanStatusText ? `；${scanStatusText}` : ''}，任务已自动停止。`;
+  } else if (grabState?.phase === 'FAILED') {
+    setBadge(els.grabBadge, '需处理', 'warning');
+    setPill(els.grabStatePill, '任务未完成');
+    els.grabSummaryTitle.textContent = '课程组存在不可恢复限制';
+    els.grabSummarySub.textContent = `${progressText}；请查看日志并调整目标。`;
   } else {
     setBadge(els.grabBadge, '已连接', 'info');
     setPill(els.grabStatePill, '选课已连接');
-    els.grabSummaryTitle.textContent = successCount > 0 ? `已抢到 ${successCount} 门课程` : '选课页面已连接';
-    els.grabSummarySub.textContent = '填写目标课程后即可开始监控。';
+    els.grabSummaryTitle.textContent = selectedCount > 0 ? `已确认 ${selectedCount} 门课程` : '选课页面已连接';
+    els.grabSummarySub.textContent = scanStatusText
+      ? `最近一次：${scanStatusText}。填写目标课程后可重新开始。`
+      : '填写目标课程后即可开始监控。';
   }
 
   renderGrabControls();
 }
 
 function renderGrabControls() {
-  const courseCount = getCourseNames().length;
+  const courseCount = getConfiguredTargets().length;
+  els.importFavoriteCoursesBtn.disabled = grabRunning;
 
   if (grabRunning) {
     els.grabBtn.textContent = '停止监控';
@@ -315,14 +739,14 @@ function renderClickCaptchaSolverState() {
   renderCurrentCaptchaPanel();
 }
 
-function setIntervalValue(value) {
+function setIntervalValue(value, { persist = true } = {}) {
   const normalized = String(value || '3000');
   els.grabInterval.value = normalized;
   els.intervalLabel.textContent = `${Number(normalized) / 1000}s`;
   document.querySelectorAll('.interval-option').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.value === normalized);
   });
-  chrome.storage.local.set({ nju_grab_interval: normalized });
+  if (persist) persistGrabTaskConfig();
 }
 
 function appendLog(message) {
@@ -360,11 +784,27 @@ function renderLogs(logs) {
 }
 
 async function getGrabTab() {
-  return new Promise(resolve => {
+  const tabs = await new Promise(resolve => {
     chrome.tabs.query({ url: 'https://xk.nju.edu.cn/*' }, tabs => {
-      resolve(tabs && tabs.length > 0 ? tabs[0] : null);
+      resolve(tabs || []);
     });
   });
+  let connectedFallback = null;
+  for (const tab of tabs) {
+    const response = await new Promise(resolve => {
+      chrome.tabs.sendMessage(tab.id, { action: 'getGrabStatus' }, result => {
+        if (chrome.runtime.lastError || !result?.state) {
+          resolve(null);
+          return;
+        }
+        resolve(result);
+      });
+    });
+    if (!response) continue;
+    connectedFallback ||= tab;
+    if (response.state.running || response.state.authRecovery?.pending) return tab;
+  }
+  return connectedFallback || tabs[0] || null;
 }
 
 async function sendGrabMessage(message) {
@@ -515,14 +955,11 @@ async function syncCurrentCaptchaTestCapability() {
 
 function applyGrabSnapshot(state) {
   grabState = state || null;
-  grabRunning = Boolean(state?.running);
-  if (state?.courseNames?.length) {
-    els.courseNames.value = state.courseNames.join('\n');
-    updateCourseCount();
-  }
+  grabRunning = Boolean(state?.running || state?.authRecovery?.pending);
   if (state?.interval) {
-    setIntervalValue(state.interval);
+    setIntervalValue(state.interval, { persist: false });
   }
+  updateCourseCount({ persist: false });
   renderGrabState();
   if (state?.log && state.log.length > 0) {
     renderLogs(state.log);
@@ -638,14 +1075,22 @@ async function saveCredentials() {
 }
 
 function activateTab(tabName, persist = true) {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
+  document.querySelectorAll('.tab-btn').forEach((btn, index) => {
     const active = btn.dataset.tab === tabName;
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-selected', String(active));
+    btn.tabIndex = active ? 0 : -1;
+    if (active) {
+      btn.closest('.tab-list').dataset.activeIndex = index;
+    }
   });
   document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.classList.toggle('active', panel.id === `tab-${tabName}`);
+    const active = panel.id === `tab-${tabName}`;
+    panel.classList.toggle('active', active);
+    panel.hidden = !active;
   });
+  closeContextualHelp();
+  setFeatureGuideOpen(false);
   if (persist) chrome.storage.local.set({ nju_popup_tab: tabName });
   if (tabName === 'grab') {
     syncGrabStatus();
@@ -655,8 +1100,81 @@ function activateTab(tabName, persist = true) {
 }
 
 function initTabs() {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
+  const tabs = Array.from(document.querySelectorAll('.tab-btn'));
+  tabs.forEach(btn => {
     btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+    btn.addEventListener('keydown', event => {
+      const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+      if (!keys.includes(event.key)) return;
+      const currentIndex = tabs.indexOf(btn);
+      let nextIndex = currentIndex;
+      if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+      if (event.key === 'Home') nextIndex = 0;
+      if (event.key === 'End') nextIndex = tabs.length - 1;
+      event.preventDefault();
+      const nextTab = tabs[nextIndex];
+      activateTab(nextTab.dataset.tab);
+      nextTab.focus();
+    });
+  });
+}
+
+function closeContextualHelp({ restoreFocus = false } = {}) {
+  let activeTrigger = null;
+  document.querySelectorAll('[data-help-target]').forEach(trigger => {
+    const panel = document.getElementById(trigger.dataset.helpTarget);
+    if (trigger.getAttribute('aria-expanded') === 'true') activeTrigger = trigger;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (panel) panel.hidden = true;
+  });
+  if (restoreFocus && activeTrigger) activeTrigger.focus();
+}
+
+function setFeatureGuideOpen(open, { restoreFocus = false } = {}) {
+  if (!els.featureGuide || !els.featureGuideBtn) return;
+  els.featureGuide.hidden = !open;
+  if (els.featureGuideBackdrop) els.featureGuideBackdrop.hidden = !open;
+  els.featureGuideBtn.setAttribute('aria-expanded', String(open));
+  if (restoreFocus && !open) els.featureGuideBtn.focus();
+}
+
+function initHelpEvents() {
+  document.querySelectorAll('[data-help-target]').forEach(trigger => {
+    trigger.addEventListener('click', event => {
+      event.stopPropagation();
+      const panel = document.getElementById(trigger.dataset.helpTarget);
+      if (!panel) return;
+      const open = trigger.getAttribute('aria-expanded') !== 'true';
+      closeContextualHelp();
+      setFeatureGuideOpen(false);
+      trigger.setAttribute('aria-expanded', String(open));
+      panel.hidden = !open;
+    });
+  });
+
+  els.featureGuideBtn?.addEventListener('click', event => {
+    event.stopPropagation();
+    const open = els.featureGuideBtn.getAttribute('aria-expanded') !== 'true';
+    closeContextualHelp();
+    setFeatureGuideOpen(open);
+  });
+  els.featureGuideCloseBtn?.addEventListener('click', () => setFeatureGuideOpen(false, { restoreFocus: true }));
+
+  document.addEventListener('click', event => {
+    if (!event.target.closest('.help-panel, [data-help-target], .feature-guide, #featureGuideBtn')) {
+      closeContextualHelp();
+      setFeatureGuideOpen(false);
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const guideOpen = els.featureGuideBtn?.getAttribute('aria-expanded') === 'true';
+    const hasContextualHelp = Boolean(document.querySelector('[data-help-target][aria-expanded="true"]'));
+    if (!guideOpen && !hasContextualHelp) return;
+    event.preventDefault();
+    closeContextualHelp({ restoreFocus: hasContextualHelp });
+    setFeatureGuideOpen(false, { restoreFocus: guideOpen });
   });
 }
 
@@ -668,6 +1186,11 @@ function syncTabToCurrentPage() {
       activateTab('grab', false);
       renderCurrentCaptchaPanel();
       syncCurrentCaptchaTestCapability();
+      
+      const accountCard = document.getElementById('accountCard');
+      if (accountCard && els.username.value && els.password.value) {
+        accountCard.open = false;
+      }
       return;
     }
     if (url.includes('authserver.nju.edu.cn')) {
@@ -693,17 +1216,25 @@ function initSettings() {
     initialCredentials = { user: els.username.value, pass: els.password.value };
 
     els.isEnabled.checked = data.nju_enabled !== false && data.nju_auto_click !== false;
+    els.authPrewarm.checked = data[AUTH_PREWARM_ENABLED_KEY] === true;
     els.forceFill.checked = Boolean(data.nju_force);
     els.autoClick.checked = data.nju_auto_click !== false;
     clickCaptchaAutoLoginEnabled = data[CLICK_CAPTCHA_SOLVER_ENABLED_KEY] !== false
       && data[CLICK_CAPTCHA_AUTO_CLICK_KEY] !== false;
     els.clickCaptchaAutoLogin.checked = clickCaptchaAutoLoginEnabled;
-    els.courseNames.value = data.nju_grab_courses || '';
-    setIntervalValue(data.nju_grab_interval || '3000');
+    els.grabPageEnhancementsEnabled.checked = data[GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY] !== false;
+    grabTaskConfig = grabTaskModel.normalizeTaskConfig(data[GRAB_TASK_CONFIG_KEY], {
+      legacyCourseText: data.nju_grab_courses,
+      intervalMs: data.nju_grab_interval
+    });
+    els.courseNames.value = grabTaskModel.keywordTextFromTargets(grabTaskConfig.targets);
+    renderCourseTags();
+    setIntervalValue(grabTaskConfig.intervalMs || data.nju_grab_interval || '5000', { persist: false });
 
     renderCredentialState();
     updateCourseCount();
     renderLoginState();
+    syncAuthPrewarmStatus();
     syncGrabStatus();
     syncTabToCurrentPage();
   });
@@ -736,6 +1267,16 @@ function initLoginEvents() {
     chrome.storage.local.set({ nju_enabled: enabled, nju_auto_click: enabled }, () => {
       renderLoginState();
       showToast(enabled ? '统一认证自动登录已开启' : '统一认证自动登录已暂停');
+    });
+  });
+
+  els.authPrewarm.addEventListener('change', event => {
+    const enabled = event.target.checked;
+    chrome.storage.local.set({ [AUTH_PREWARM_ENABLED_KEY]: enabled }, () => {
+      authPrewarmState = null;
+      renderAuthPrewarmState();
+      syncAuthPrewarmStatus();
+      showToast(enabled ? '启动时预认证已开启' : '启动时预认证已关闭');
     });
   });
 
@@ -826,6 +1367,7 @@ function initLoginEvents() {
     showToast(response.code ? `识别结果：${response.code}` : '未得到四位结果');
   });
 
+
   els.githubBtn.addEventListener('click', () => {
     window.open('https://github.com/treehey/AutoCaptcha', '_blank');
   });
@@ -835,8 +1377,91 @@ function initLoginEvents() {
   });
 }
 
+function renderCourseTags() {
+  // Clear existing tags but keep the input element
+  const inputEl = els.courseNamesInput;
+  els.courseTagsWrapper.innerHTML = '';
+  
+  const text = els.courseNames.value.trim();
+  const names = text ? text.split('\n').map(n => n.trim()).filter(Boolean) : [];
+  
+  names.forEach(name => {
+    const tag = document.createElement('span');
+    tag.className = 'course-tag';
+    tag.textContent = name;
+    
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.innerHTML = '&times;';
+    delBtn.onclick = (e) => {
+      e.stopPropagation();
+      // Remove this name from textarea and re-render
+      const currentNames = els.courseNames.value.split('\n').map(n => n.trim()).filter(Boolean);
+      const newNames = currentNames.filter(n => n !== name);
+      els.courseNames.value = newNames.join('\n');
+      els.courseNames.dispatchEvent(new Event('input', { bubbles: true }));
+      renderCourseTags();
+    };
+    
+    tag.appendChild(delBtn);
+    els.courseTagsWrapper.appendChild(tag);
+  });
+  
+  els.courseTagsWrapper.appendChild(inputEl);
+  updateCourseCount();
+}
+
+function initCourseTagsEvents() {
+  els.courseTagContainer.addEventListener('click', () => {
+    els.courseNamesInput.focus();
+  });
+
+  const commitTag = () => {
+    const val = els.courseNamesInput.value.trim();
+    if (val) {
+      const currentNames = els.courseNames.value.split('\n').map(n => n.trim()).filter(Boolean);
+      if (!currentNames.includes(val)) {
+        currentNames.push(val);
+        els.courseNames.value = currentNames.join('\n');
+        els.courseNames.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      els.courseNamesInput.value = '';
+      renderCourseTags();
+    }
+  };
+
+  els.courseNamesInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      commitTag();
+    } else if (e.key === 'Backspace' && els.courseNamesInput.value === '') {
+      // Remove last tag on backspace if input is empty
+      const currentNames = els.courseNames.value.split('\n').map(n => n.trim()).filter(Boolean);
+      if (currentNames.length > 0) {
+        currentNames.pop();
+        els.courseNames.value = currentNames.join('\n');
+        els.courseNames.dispatchEvent(new Event('input', { bubbles: true }));
+        renderCourseTags();
+      }
+    }
+  });
+
+  els.courseNamesInput.addEventListener('blur', commitTag);
+  
+  // To handle manual or external updates to courseNames (like imports)
+  els.courseNames.addEventListener('input', renderCourseTags);
+}
+
 function initGrabEvents() {
+  initCourseTagsEvents();
   els.courseNames.addEventListener('input', updateCourseCount);
+
+  els.grabPageEnhancementsEnabled.addEventListener('change', event => {
+    const enabled = event.target.checked;
+    chrome.storage.local.set({ [GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY]: enabled }, () => {
+      showToast(enabled ? '选课页增强控件已开启' : '选课页增强控件已隐藏');
+    });
+  });
 
   els.intervalGrid.addEventListener('click', event => {
     const btn = event.target.closest('.interval-option');
@@ -845,13 +1470,57 @@ function initGrabEvents() {
   });
 
   els.openGrabPageBtn.addEventListener('click', () => {
-    window.open(GRAB_URL, '_blank');
+    window.open(GRAB_ENTRY_URL, '_blank');
+  });
+
+  els.importFavoriteCoursesBtn.addEventListener('click', async () => {
+    if (grabRunning) {
+      showToast('请先停止当前监控');
+      return;
+    }
+    const button = els.importFavoriteCoursesBtn;
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = '正在导入…';
+    try {
+      const result = await sendActiveTabMessage({ action: 'importFavoriteCourses' });
+      if (!result.connected) {
+        showToast('请切换到已打开“收藏”的选课页面');
+        return;
+      }
+      const response = result.response || {};
+      if (!response.ok) {
+        showToast(response.message || '未能导入收藏课程');
+        return;
+      }
+      const stored = await chrome.storage.local.get([GRAB_TASK_CONFIG_KEY]);
+      grabTaskConfig = grabTaskModel.normalizeTaskConfig(stored[GRAB_TASK_CONFIG_KEY]);
+      els.courseNames.value = grabTaskModel.keywordTextFromTargets(grabTaskConfig.targets);
+      renderCourseTags();
+      updateCourseCount({ persist: false });
+      if (response.capacitySkippedCount > 0) {
+        showToast(`已导入 ${response.addedCount} 门，${response.capacitySkippedCount} 门超过目标上限`);
+      } else if (response.addedCount > 0 && response.enrichedCount > 0) {
+        showToast(`已导入 ${response.addedCount} 门，并更新 ${response.enrichedCount} 门收藏课程`);
+      } else if (response.addedCount > 0) {
+        showToast(`已导入 ${response.addedCount} 门收藏课程`);
+      } else if (response.enrichedCount > 0) {
+        showToast(`已更新 ${response.enrichedCount} 门收藏课程的查询分类`);
+      } else {
+        showToast(`当前 ${response.existingCount} 门收藏课程均已加入`);
+      }
+    } catch (error) {
+      showToast(error?.message || '导入收藏课程失败');
+    } finally {
+      button.textContent = originalText;
+      renderGrabControls();
+    }
   });
 
   els.grabBtn.addEventListener('click', async () => {
     if (!grabConnected && !grabRunning) {
-      window.open(GRAB_URL, '_blank');
-      showToast('已打开选课页面');
+      window.open(GRAB_ENTRY_URL, '_blank');
+      showToast('已打开选课系统入口');
       return;
     }
 
@@ -870,14 +1539,21 @@ function initGrabEvents() {
       return;
     }
 
-    const courseNames = getCourseNames();
-    if (courseNames.length === 0) {
-      showToast('请先输入课程名称');
+    const taskConfig = getConfiguredTaskConfig();
+    const targets = taskConfig.targets;
+    if (targets.length === 0) {
+      showToast('请先添加课程目标');
       return;
     }
 
     const interval = Number(els.grabInterval.value) || 3000;
-    const result = await sendGrabMessage({ action: 'startGrab', courseNames, interval });
+    const result = await sendGrabMessage({
+      action: 'startGrab',
+      taskConfig,
+      targets,
+      courseNames: getCourseNames(),
+      interval
+    });
     if (!result.connected) {
       grabConnected = false;
       appendLog('无法连接页面脚本，请刷新选课页面后重试');
@@ -888,7 +1564,7 @@ function initGrabEvents() {
     grabConnected = true;
     applyGrabSnapshot(result.response.state);
     renderLogs([]);
-    appendLog(`已连接到选课页面，监控 ${courseNames.length} 门课程`);
+    appendLog(`已连接到选课页面，监控 ${taskConfig.groups.length} 个课程组、${targets.length} 个课程目标`);
     showToast('监控已启动');
   });
 
@@ -1039,6 +1715,8 @@ chrome.runtime.onMessage.addListener(msg => {
   } else if (msg.action === 'grabStopped') {
     grabConnected = true;
     applyGrabSnapshot(msg.state);
+  } else if (msg.action === 'grabTargetAdded') {
+    showToast('已加入精确教学班');
   } else if ((msg.action === 'clickCaptchaCaptureUpdate' || msg.action === 'clickCaptchaSampleSaved') && msg.state) {
     clickCaptchaCaptureConnected = true;
     clickCaptchaCaptureState = msg.state;
@@ -1047,13 +1725,25 @@ chrome.runtime.onMessage.addListener(msg => {
     clickCaptchaSolverConnected = true;
     clickCaptchaSolverState = msg.state;
     renderClickCaptchaSolverState();
+  } else if (msg.action === 'authPrewarmStatusChanged' && msg.state) {
+    authPrewarmState = msg.state;
+    renderAuthPrewarmState();
   }
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes[GRAB_TASK_CONFIG_KEY]) return;
+  grabTaskConfig = grabTaskModel.normalizeTaskConfig(changes[GRAB_TASK_CONFIG_KEY].newValue);
+  els.courseNames.value = grabTaskModel.keywordTextFromTargets(grabTaskConfig.targets);
+  updateCourseCount({ persist: false });
 });
 
 setVersion();
 initTabs();
+initHelpEvents();
 initSettings();
 initLoginEvents();
 initGrabEvents();
 syncClickCaptchaCaptureStatus();
 syncClickCaptchaSolverStatus();
+syncAuthPrewarmStatus();

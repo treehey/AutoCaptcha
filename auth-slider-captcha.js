@@ -396,8 +396,8 @@
         return new Promise(resolve => global.setTimeout(resolve, milliseconds));
     }
 
-    function authUrl(path) {
-        return new URL(path, global.location?.origin || 'https://authserver.nju.edu.cn').href;
+    function authUrl(path, origin) {
+        return new URL(path, origin || global.location?.origin || 'https://authserver.nju.edu.cn').href;
     }
 
     async function ensureOk(response, action) {
@@ -415,6 +415,7 @@
         const attempts = Math.max(1, Math.min(options.attempts || DEFAULT_ATTEMPTS, 5));
         const minScore = options.minScore ?? MIN_MATCH_SCORE;
         const minMargin = options.minMargin ?? MIN_MATCH_MARGIN;
+        const origin = options.origin || global.location?.origin || 'https://authserver.nju.edu.cn';
         const headers = { 'X-Requested-With': 'XMLHttpRequest' };
         let lastError = null;
         let lastMatch = null;
@@ -422,11 +423,11 @@
         for (let attempt = 1; attempt <= attempts; attempt++) {
             try {
                 onStatus({ phase: 'opening', attempt, attempts });
-                await ensureOk(await fetchImpl(authUrl(`${AUTH_PATH}/common/toSliderCaptcha.htl`), {
+                await ensureOk(await fetchImpl(authUrl(`${AUTH_PATH}/common/toSliderCaptcha.htl`, origin), {
                     method: 'GET', credentials: 'include', headers
                 }), 'Opening slider challenge');
                 const openedAt = now();
-                const response = await ensureOk(await fetchImpl(authUrl(`${AUTH_PATH}/common/openSliderCaptcha.htl?_=${Date.now()}`), {
+                const response = await ensureOk(await fetchImpl(authUrl(`${AUTH_PATH}/common/openSliderCaptcha.htl?_=${Date.now()}`, origin), {
                     method: 'GET', credentials: 'include', headers
                 }), 'Loading slider challenge');
                 const payload = await response.json();
@@ -454,7 +455,7 @@
                 if (remaining > 0) await sleep(remaining);
                 const sign = await encryptForPage(JSON.stringify(proof), key);
                 onStatus({ phase: 'verifying', attempt, attempts, match });
-                const verification = await ensureOk(await fetchImpl(authUrl(`${AUTH_PATH}/common/verifySliderCaptcha.htl`), {
+                const verification = await ensureOk(await fetchImpl(authUrl(`${AUTH_PATH}/common/verifySliderCaptcha.htl`, origin), {
                     method: 'POST',
                     credentials: 'include',
                     headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },

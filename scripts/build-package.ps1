@@ -21,16 +21,30 @@ Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
 $files = @(
+  'LICENSE',
+  'THIRD_PARTY_NOTICES.md',
   'manifest.json',
   'auth-slider-captcha.js',
+  'auth-background-login.js',
   'auth-login-fast.js',
+  'auth-session-prewarm.js',
+  'auth-prewarm-bridge.js',
   'captcha-cnn.js',
   'content.js',
+  'grab-task-model.js',
+  'grab-auth-presentation.js',
+  'grab-verification-engine.js',
+  'grab-engine.js',
+  'grab-course-provider.js',
+  'grab-network-bridge.js',
+  'grab-task-session.js',
   'content-grab.js',
+  'grab-page-ui.css',
   'click-captcha-worker.js',
   'popup.html',
   'popup.js',
   'tesseract.min.js',
+  'tesseract.min.js.LICENSE.txt',
   'icon16.png',
   'icon48.png',
   'icon128.png',
@@ -90,6 +104,12 @@ if (-not (Test-Path (Join-Path $verify 'assets/captcha-template-model.json'))) {
   throw 'Package verification failed: captcha template model is missing.'
 }
 
+if ((-not (Test-Path (Join-Path $verify 'LICENSE'))) -or
+    (-not (Test-Path (Join-Path $verify 'THIRD_PARTY_NOTICES.md'))) -or
+    (-not (Test-Path (Join-Path $verify 'tesseract.min.js.LICENSE.txt')))) {
+  throw 'Package verification failed: project or third-party license notices are missing.'
+}
+
 if ((-not (Test-Path (Join-Path $verify 'captcha-cnn.js'))) -or
     (-not (Test-Path (Join-Path $verify 'assets/captcha-cnn-model.json'))) -or
     (-not (Test-Path (Join-Path $verify 'assets/captcha-cnn-model.bin')))) {
@@ -98,6 +118,24 @@ if ((-not (Test-Path (Join-Path $verify 'captcha-cnn.js'))) -or
 
 if (-not (Test-Path (Join-Path $verify 'auth-slider-captcha.js'))) {
   throw 'Package verification failed: auth slider captcha runtime is missing.'
+}
+
+if ((-not (Test-Path (Join-Path $verify 'auth-background-login.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'auth-session-prewarm.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'auth-prewarm-bridge.js')))) {
+  throw 'Package verification failed: auth session prewarm runtime is missing.'
+}
+
+if ((-not (Test-Path (Join-Path $verify 'grab-task-model.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-auth-presentation.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-verification-engine.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-engine.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-course-provider.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-network-bridge.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-task-session.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'content-grab.js'))) -or
+    (-not (Test-Path (Join-Path $verify 'grab-page-ui.css')))) {
+  throw 'Package verification failed: course grab runtime is missing.'
 }
 
 if ((-not (Test-Path (Join-Path $verify 'click-captcha-worker.js'))) -or

@@ -7,9 +7,10 @@ const __filename = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(__filename), '..');
 const read = relative => readFile(path.join(root, relative), 'utf8');
 
-const [manifestText, fastSource, contentSource, buildScript] = await Promise.all([
+const [manifestText, fastSource, bridgeSource, contentSource, buildScript] = await Promise.all([
   read('manifest.json'),
   read('auth-login-fast.js').catch(() => ''),
+  read('auth-prewarm-bridge.js').catch(() => ''),
   read('content.js'),
   read('scripts/build-package.ps1')
 ]);
@@ -22,8 +23,8 @@ assert.ok(fastEntry, 'Authserver must have a dedicated fast-login content-script
 assert.equal(fastEntry.run_at, 'document_start', 'Fast login must start before document_idle.');
 assert.deepEqual(
   fastEntry.js,
-  ['auth-slider-captcha.js', 'auth-login-fast.js'],
-  'The fast entry must only load the slider runtime and lightweight controller.'
+  ['auth-slider-captcha.js', 'auth-login-fast.js', 'auth-prewarm-bridge.js'],
+  'The fast entry must only load the slider runtime and lightweight auth helpers.'
 );
 assert.match(fastSource, /function checkAuthserverNeedsCaptcha\(username\)/);
 assert.match(fastSource, /await sliderRuntime\.solve\(/);
@@ -31,6 +32,7 @@ assert.match(fastSource, /new (?:global\.)?MutationObserver/);
 assert.match(fastSource, /function waitForSliderCaptchaPage\(\)/);
 assert.match(fastSource, /const needsCaptchaPromise = checkAuthserverNeedsCaptcha\(username\)/);
 assert.match(fastSource, /getResult\(\)/);
+assert.match(bridgeSource, /authPrewarmPageEvent/, 'The optional prewarm bridge must report auth page lifecycle events.');
 assert.match(
   contentSource,
   /consumeFastAuthLogin\(settings, passwordLoginContext\)/,

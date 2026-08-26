@@ -4457,27 +4457,29 @@ function getCaptchaStatusNotice() {
     notice.style.cssText = [
         'position:fixed',
         'top:16px',
-        'right:16px',
+        'right:24px',
         'z-index:2147483647',
         'display:none',
         'align-items:center',
-        'gap:10px',
-        'max-width:min(340px,calc(100vw - 32px))',
-        'padding:11px 14px',
-        'border:1px solid rgba(99,71,152,.24)',
-        'border-radius:8px',
-        'background:#ffffff',
-        'color:#252033',
-        'font:600 13px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif',
-        'box-shadow:0 12px 28px rgba(36,28,55,.20)',
+        'gap:12px',
+        'max-width:min(340px,calc(100vw - 48px))',
+        'padding:12px 16px',
+        'border:0.5px solid rgba(255,255,255,0.4)',
+        'border-radius:999px',
+        'background:rgba(250,251,253,0.75)',
+        '-webkit-backdrop-filter:blur(20px) saturate(180%)',
+        'backdrop-filter:blur(20px) saturate(180%)',
+        'color:#1d1d1f',
+        'font:600 13px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif',
+        'box-shadow:0 10px 30px rgba(0,0,0,0.1),0 1px 3px rgba(0,0,0,0.06),inset 0 1px 0 rgba(255,255,255,0.7)',
         'opacity:0',
-        'transform:translateY(-8px)',
-        'transition:opacity .18s ease,transform .18s ease'
+        'transform:translateY(-16px) scale(0.95)',
+        'transition:opacity .25s ease,transform .4s cubic-bezier(0.2, 0.8, 0.2, 1)'
     ].join(';');
 
     const indicator = document.createElement('span');
     indicator.dataset.njuCaptchaStatusIcon = 'true';
-    indicator.style.cssText = 'flex:0 0 auto;width:18px;height:18px;border:2px solid #c8bedc;border-top-color:#634798;border-radius:50%;animation:njuCaptchaStatusSpin .75s linear infinite';
+    indicator.style.cssText = 'flex:0 0 auto;width:16px;height:16px;border:2px solid rgba(0,122,255,0.2);border-top-color:#007aff;border-radius:50%;animation:njuCaptchaStatusSpin .75s linear infinite';
 
     const text = document.createElement('span');
     text.dataset.njuCaptchaStatusText = 'true';
@@ -4686,6 +4688,7 @@ async function submitPasswordLoginContext(context) {
 }
 
 function openManualSliderFallback(context, reason) {
+    window.NjuAuthLoginFastPath?.unlock?.();
     showCaptchaStatus(reason || '安全验证需要手动完成', 'warning', 5200);
     context.password.removeAttribute('disabled');
     context.submitButton.click();

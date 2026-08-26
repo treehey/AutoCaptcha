@@ -2,15 +2,21 @@
   "manifest_version": 3,
   "name": "NJU 自动登录助手",
   "description": "南大统一身份认证滑块与选课点击验证码本地自动登录助手，无需大模型 API。",
-  "version": "6.0.2",
+  "version": "6.2.0",
   "default_locale": "zh_CN",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
     "128": "icon128.png"
   },
-  "permissions": ["storage"],
-  "host_permissions": ["https://xk.nju.edu.cn/*"],
+  "permissions": ["storage", "alarms"],
+  "background": {
+    "service_worker": "auth-session-prewarm.js"
+  },
+  "host_permissions": [
+    "https://authserver.nju.edu.cn/*",
+    "https://xk.nju.edu.cn/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -22,7 +28,7 @@
   "content_scripts": [
     {
       "matches": ["https://authserver.nju.edu.cn/*"],
-      "js": ["auth-slider-captcha.js", "auth-login-fast.js"],
+      "js": ["auth-slider-captcha.js", "auth-login-fast.js", "auth-prewarm-bridge.js"],
       "run_at": "document_start"
     },
     {
@@ -32,7 +38,14 @@
     },
     {
       "matches": ["https://xk.nju.edu.cn/*"],
-      "js": ["content-grab.js"],
+      "js": ["grab-network-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://xk.nju.edu.cn/*"],
+      "css": ["grab-page-ui.css"],
+      "js": ["grab-task-model.js", "grab-auth-presentation.js", "grab-verification-engine.js", "grab-engine.js", "grab-course-provider.js", "content-grab.js"],
       "run_at": "document_idle"
     }
   ],
