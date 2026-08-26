@@ -26,8 +26,9 @@
 - [点击验证码工作计划](CLICK_CAPTCHA_WORKPLAN.md)：历史开发计划和进度日志。
 - [OCR 改进计划](OCR_IMPROVEMENT_PLAN.md)：旧版图形验证码的历史优化过程。
 
-## 历史发布说明
+## 发布说明
 
+- [v6.2.0](RELEASE_NOTES_v6.2.0.md)
 - [v6.0.0](RELEASE_NOTES_v6.0.0.md)
 - [v5.2.2](RELEASE_NOTES_v5.2.2.md)
 - [v5.2.1](RELEASE_NOTES_v5.2.1.md)
