@@ -4,116 +4,137 @@
 
   # NJU Login Pro
 
-  **南京大学统一身份认证与选课系统的本地自动登录、验证码处理和课程监控扩展**
+  <sub>Microsoft Edge 商店名称：NJU 自动登录助手</sub>
+
+  南京大学统一身份认证与选课系统的本地登录、验证码处理和课程监控扩展
 
   [![Edge Add-ons](https://img.shields.io/badge/Edge_商店-获取扩展-0078D7?style=flat-square&logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/hebfkinlcalfnmeeeaciaghoialpmnfp)
   [![Latest release](https://img.shields.io/github/v/release/treehey/AutoCaptcha?style=flat-square&color=634798)](https://github.com/treehey/AutoCaptcha/releases/latest)
-  [![GitHub Stars](https://img.shields.io/github/stars/treehey/AutoCaptcha?style=flat-square&color=634798&logo=github)](https://github.com/treehey/AutoCaptcha/stargazers)
   [![License](https://img.shields.io/github/license/treehey/AutoCaptcha?style=flat-square&color=634798)](LICENSE)
 
-  [快速开始](#三步开始使用) · [使用指南](docs/user-guide.md) · [问题排查](docs/troubleshooting.md) · [隐私政策](PRIVACY.md)
+  [安装与上手](#安装) · [支持范围](#支持范围) · [隐私与权限](#隐私与权限) · [问题排查](docs/troubleshooting.md)
 
 </div>
 
-<br>
-
 > [!IMPORTANT]
-> 本项目是非官方开源工具，与南京大学无隶属或授权关系。使用者应遵守学校系统规则；页面或验证码变化时，自动化可能失效并回退到人工处理。
+> 本项目是非官方开源工具，与南京大学无隶属或授权关系。使用前请遵守学校系统规则。页面或验证码变化时，自动化可能失效并转为人工处理。
 
-## 核心特性
+## 这是什么
 
-- <img src="https://api.iconify.design/lucide:zap.svg" width="16" style="vertical-align: text-bottom;"> **无感极速登录**：自动接管统一身份认证与选课系统，验证码识别至表单提交一气呵成。
-- <img src="https://api.iconify.design/lucide:target.svg" width="16" style="vertical-align: text-bottom;"> **精准选课监控**：支持教学班精确锁定与关键词模糊匹配，网页右下角全局悬浮窗一键启停。
-- <img src="https://api.iconify.design/lucide:brain-circuit.svg" width="16" style="vertical-align: text-bottom;"> **纯本地 AI 识别**：内置轻量级 CNN 与 ONNX 模型，在浏览器内直接完成图形验证码解析，不依赖云端打码，快如闪电。
-- <img src="https://api.iconify.design/lucide:shield-check.svg" width="16" style="vertical-align: text-bottom;"> **极致隐私保护**：零行为追踪，密码与配置数据全部在扩展本地存储中端到端处理，安全可控。
+NJU Login Pro 面向需要访问南京大学统一身份认证和选课系统的用户，提供两类本地自动化：
 
-<!-- 演示动图将在素材准备完成后补充。 -->
+- 在统一身份认证页处理当前拼图滑块；页面回退为旧版图形验证码时，使用本地 CNN/OCR 兼容路径。
+- 在选课系统处理中文点击验证码，并在登录后按精确教学班或课程关键词监控选课名额。
 
-## 安装指南
+验证码推理在浏览器本地完成，不使用第三方打码服务或大模型 API。自动化是有边界的辅助工具，不保证页面变化后的登录或选课一定成功。
 
-<details open>
-<summary><b>Edge 商店安装（推荐）</b></summary>
-<br>
+## 界面预览
 
-打开 [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/hebfkinlcalfnmeeeaciaghoialpmnfp)，选择“获取”。商店安装可以自动接收最新版本的推送更新。
-</details>
+以下画面均使用空白配置或示例课程，不包含真实账号和教学班信息。
 
-<details>
-<summary><b>Chrome 手动安装</b></summary>
-<br>
+| 登录助手 | 选课监控配置 | 课程页雷达 |
+| --- | --- | --- |
+| <img src="assets/popup-login-preview.png" alt="登录助手界面，账号为空" width="280"> | <img src="assets/popup-grab-preview.png" alt="选课监控配置界面，使用示例课程" width="280"> | <img src="assets/course-radar-preview.png" alt="课程雷达界面，使用示例课程" width="280"> |
 
-1. 从 [GitHub Releases](https://github.com/treehey/AutoCaptcha/releases/latest) 下载 `NJU-Login-Pro-v*.zip`。请注意不要下载 GitHub 自动生成的 `Source code`。
-2. 将 ZIP 解压到固定目录，确认目录根部直接包含 `manifest.json` 文件。
-3. 打开浏览器的扩展管理页 `chrome://extensions`，开启右上角的“开发者模式”。
-4. 点击“加载已解压的扩展程序”，然后选择刚才解压的目录即可。
-5. （可选）在浏览器工具栏的扩展菜单中点击图钉固定 `NJU Login Pro`，方便随时唤出面板。
-</details>
+## 安装
 
-<br>
+### Edge 商店（推荐）
 
-需要从源码调试或自行打包？请参阅[开发指南](docs/development.md)。
+打开 [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/hebfkinlcalfnmeeeaciaghoialpmnfp)，选择“获取”。商店安装可以自动接收已发布版本的更新。
+
+### Chrome 或 Edge 手动安装
+
+1. 从 [GitHub Releases](https://github.com/treehey/AutoCaptcha/releases/latest) 下载 `NJU-Login-Pro-v*.zip`，不要下载 GitHub 自动生成的 `Source code`。
+2. 将 ZIP 解压到固定目录，并确认目录根部直接包含 `manifest.json`。
+3. 打开浏览器扩展管理页（Chrome 为 `chrome://extensions`，Edge 为 `edge://extensions`），开启“开发者模式”。
+4. 选择“加载已解压的扩展程序”，然后选中刚才解压的目录。
+5. （可选）在扩展菜单中固定 NJU Login Pro，方便打开面板。
+
+当前未提供 Firefox 发布包，也未将 Firefox 列入本项目的验收支持范围。
 
 ## 三步开始使用
 
-1. 打开扩展，进入“登录助手”，填写学号或工号与密码并保存。
-2. 按需要启用“统一认证自动登录”和“选课系统自动登录”。（“提前准备统一认证”默认关闭，只有明确需要启动后预先建立 SSO 会话时再开启）。
-3. 访问统一认证或选课系统。登录选课系统后，优先在目标教学班旁点击“加入监控”；也可在扩展的“选课监控”中手动输入课程关键词。扩展会在选课网页右下角生成全局悬浮窗，点击“开始监控”即可。
+1. 打开扩展，在“登录助手”中填写学号或工号与密码并保存。
+2. 按需要分别开启“统一认证自动登录”和“选课系统自动登录”。“提前准备统一认证”默认关闭，仅在明确需要时开启。
+3. 访问支持的学校页面。进入选课页后，优先在目标教学班旁选择“加入监控”，或在扩展的“选课监控”中填写课程关键词，再在选课页的课程雷达中点击“开始监控”。
 
-完整开关说明、手动识别和更新方式见[使用指南](docs/user-guide.md)。
+详细步骤见 [用户使用指南](docs/user-guide.md)。
 
-## 隐私与安全边界
-
-- 账号、密码、课程配置和开关状态均保存在浏览器的扩展本地存储中。
-- 运行中的课程监控快照仅保存在 `storage.session` 中，用于同一标签页刷新后恢复；浏览器会话结束后不会作为长期配置保留。
-- 扩展不会为密码额外加密，**请不要**在公共或不受信任的浏览器配置文件中保存凭证。
-- 验证码图像的推理在浏览器本地完成，绝对不发送给任何第三方打码服务。
-- 扩展不包含任何广告、统计或行为追踪代码。
-
-完整说明请阅读[隐私政策](PRIVACY.md)。如发现安全问题，请不要公开披露凭证、Cookie 或验证码原图，请移步[安全报告流程](SECURITY.md)。
+> [!NOTE]
+> 课程监控需要保持选课页面打开，只会在明确验证教学班已选后记录成功。它不保证一定抢到课程，不会默认退掉保底课程，也不会在浏览器重启后自行恢复真实提交。
 
 ## 支持范围
 
-| 网站 | 当前支持 | 失败时的处理机制 |
+### 浏览器
+
+| 浏览器 | 当前支持方式 | 说明 |
 | --- | --- | --- |
-| `authserver.nju.edu.cn` | 拼图滑块、账号密码填写和提交；兼容旧版四位图形验证码 | 最多尝试有限次数，随后保留官方验证供人工完成 |
-| `xk.nju.edu.cn` 登录页 | 四目标中文点击验证码、账号密码填写和提交 | 遇到三目标、背景变化或置信度不足时换图或转人工 |
-| `xk.nju.edu.cn` 选课页 | 精确教学班或关键词匹配、余量监控、选择、确认和结果验证 | 登录失效时自动保存任务并返回登录页；网络限流时触发自动退避算法 |
+| Microsoft Edge | Edge 商店或加载未打包扩展 | 推荐使用商店版本 |
+| Google Chrome | 手动加载 Release 压缩包 | 解压后通过开发者模式加载 |
+| Firefox | 未列入当前支持范围 | 没有对应发布包和验收承诺 |
 
-> 注：历史回归结果用于防止版本退化，不代表未来验证码的成功率承诺。详细评测口径见[基准与运行结果](docs/benchmarks.md)。
+### 网站
 
-## 常见问题
+| 网站 | 支持内容 | 失败时的处理 |
+| --- | --- | --- |
+| `authserver.nju.edu.cn` | 拼图滑块、账号密码填写和提交；兼容旧版四位图形验证码 | 有界处理，无法完成时保留官方验证供人工完成 |
+| `xk.nju.edu.cn` 登录页 | 中文点击验证码、账号密码填写和提交 | 三目标、背景变化或置信度不足时有限换图重试，之后转人工 |
+| `xk.nju.edu.cn` 选课页 | 精确教学班或关键词匹配、余量监控、选择、确认和结果验证 | 登录失效时保存会话检查点；网络或页面异常时退避或转人工 |
 
-- **安装后没有反应**：请刷新已经打开的南大页面，并确认扩展内部的自动登录开关处于开启状态。
-- **浏览器提示扩展损坏或无法加载**：确认你在“加载已解压的扩展程序”时选择的是解压后的最终目录，而不是 ZIP 文件、源码压缩包或上级目录。
-- **自动登录突然失效**：建议先人工完成一次登录并记录页面是否发生变动，再按[问题排查指南](docs/troubleshooting.md)提供脱敏信息。
-- **想停用或清除数据**：可以直接在面板中关闭相关开关；或者直接卸载扩展，浏览器会自动移除所有相关的扩展本地数据。
+## 自动恢复与人工接管
 
-## 文档导航
+课程监控登录失效时，扩展会先保存当前任务的会话检查点，并暂停监控。完成可见登录、重新识别到当前选课轮次后，扩展才会尝试回到课程页、点击当前轮次入口并先验证任务状态。
 
-- [用户使用指南](docs/user-guide.md)
-- [常见问题与排查](docs/troubleshooting.md)
-- [隐私政策](PRIVACY.md)
-- [更新记录](CHANGELOG.md)
-- [开发、测试与发布文档](docs/README.md)
+自动恢复有明确期限和停止条件：登录超时、入口不可用或变化、连续恢复失败、页面状态无法确认时，会停止自动跳转并提示人工处理。它不会无条件点击登录按钮，也不会绕过验证码或把不确定的页面状态当作成功。浏览器会话结束后，运行快照不会作为长期任务保留。
 
-## 参与开发
+## 隐私与权限
 
-本扩展的运行时代码无需任何编译。只要安装了 Node.js 20 或更高版本，就可以运行全部的无账号离线测试：
+### Manifest 权限
+
+| 声明 | 用途 |
+| --- | --- |
+| `storage` | 在扩展本地保存用户配置，并在当前浏览器会话中保存有限恢复状态 |
+| `alarms` | 限制可选认证预热的等待时间；不用于周期性保活 |
+| `https://authserver.nju.edu.cn/*` | 在统一身份认证页面执行已启用的登录辅助 |
+| `https://xk.nju.edu.cn/*` | 在选课登录和课程页面执行已启用的登录、监控与选课操作 |
+
+### 本地存储
+
+账号、密码、课程配置和运行状态的保存范围如下：
+
+| 项目 | 用途 | 保存位置 |
+| --- | --- | --- |
+| 账号、密码和登录开关 | 在用户开启对应功能时填入学校官方页面 | 扩展 `storage.local` |
+| 课程目标与监控配置 | 保存精确教学班、关键词和监控选项 | 扩展 `storage.local` |
+| 认证预热状态 | 支持用户主动开启的一次性会话预热 | 扩展 `storage.session` |
+| 课程监控运行快照 | 支持同一标签页刷新或登录失效后的有限恢复 | 扩展 `storage.session` |
+
+- 扩展没有 `cookies` 或 `history` 权限，不读取、复制或修改 Cookie 值，也不访问浏览器历史记录。
+- 验证码图像在浏览器本地推理，不上传到第三方打码服务、模型 API 或项目维护者。
+- 密码保存在扩展本地存储中，但**没有额外加密**；不要在公共或不受信任的浏览器配置文件中保存密码。
+- 向学校页面提交登录信息或选课操作仍属于该网站自己的正常请求；扩展不向开发者或第三方转发这些数据。
+
+完整的数据处理、网络请求和用户控制说明见 [隐私政策](PRIVACY.md)；安全问题请参阅 [安全政策](SECURITY.md)。
+
+## 问题排查
+
+- [用户使用指南](docs/user-guide.md)：安装、首次配置、登录和课程监控步骤。
+- [常见问题与排查](docs/troubleshooting.md)：安装无反应、验证码变化、监控找不到目标和登录恢复问题。
+- [更新记录](CHANGELOG.md)：当前版本与历史行为变化。
+
+提交问题时请提供脱敏后的浏览器、页面路径、扩展版本和可复现步骤。不要上传密码、Cookie、完整请求体、未脱敏截图或验证码原图。
+
+## 开发与验证
+
+项目运行时代码无需编译，要求 Node.js 20 或更高版本。常用命令：
 
 ```powershell
 npm test
+npm run package:release
 ```
 
-生成正式发布包：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-package.ps1
-```
-
-提交 Issue 或 Pull Request 前请务必阅读[贡献指南](CONTRIBUTING.md)。仓库结构、验证层级和发布流程分别见[架构](docs/architecture.md)、[测试](docs/testing.md)与[发布](docs/releasing.md)文档。
+开发环境、架构、测试和发布细节见 [开发文档](docs/development.md)、[架构文档](docs/architecture.md)、[测试策略](docs/testing.md) 和 [发布流程](docs/releasing.md)。提交改动前请阅读 [贡献指南](CONTRIBUTING.md)。
 
 ## 许可证
 
-项目源码采用 [MIT License](LICENSE)。随扩展分发的第三方运行时及其许可信息见[第三方软件说明](THIRD_PARTY_NOTICES.md)。
-
-<div align="center"><sub>Made with <img src="https://api.iconify.design/lucide:heart.svg" width="12" style="vertical-align: middle;"> by <a href="https://github.com/treehey">Treehey</a></sub></div>
+项目源码采用 [MIT License](LICENSE)。随扩展分发的第三方运行时及其许可信息见 [第三方软件说明](THIRD_PARTY_NOTICES.md)。
