@@ -284,7 +284,7 @@ assert.ok(manifest.host_permissions.includes('https://authserver.nju.edu.cn/*'),
 const authEntry = manifest.content_scripts.find(entry => entry.matches.includes('https://authserver.nju.edu.cn/*') && entry.js.includes('auth-login-fast.js'));
 assert.ok(authEntry?.js.includes('auth-prewarm-bridge.js'), 'Visible auth pages must be able to preempt background login.');
 assert.equal(authEntry.run_at, 'document_start');
-assert.match(runtimeSource, /importScripts\('auth-slider-captcha\.js', 'auth-background-login\.js'\)/);
+assert.match(runtimeSource, /importScripts\('auth-slider-captcha\.js', 'auth-background-login\.js', 'grab-task-model\.js', 'grab-task-session\.js'\)/);
 assert.doesNotMatch(runtimeSource, /chromeApi\.(?:tabs|windows)/, 'The production controller must not create tabs or windows.');
 assert.match(bridgeSource, /AUTH_LOGIN_PATH/);
 assert.match(bridgeSource, /authPrewarmPageEvent/);
@@ -293,6 +293,7 @@ assert.match(popupSource, /nju_auth_prewarm_enabled/);
 assert.match(popupHtml, /id="authPrewarm"/);
 assert.match(popupHtml, /不新增标签页/);
 assert.match(buildScript, /'auth-background-login\.js'/);
+assert.match(buildScript, /'grab-task-model\.js'/);
 assert.match(buildScript, /'auth-session-prewarm\.js'/);
 assert.match(buildScript, /'auth-prewarm-bridge\.js'/);
 

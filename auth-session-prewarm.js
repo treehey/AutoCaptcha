@@ -1,7 +1,7 @@
 // Optional, once-per-browser-session SSO preparation. Authentication runs
 // entirely in the extension service worker, so no browser tab is created.
 if (typeof importScripts === 'function') {
-    importScripts('auth-slider-captcha.js', 'auth-background-login.js');
+    importScripts('auth-slider-captcha.js', 'auth-background-login.js', 'grab-task-model.js', 'grab-task-session.js');
 }
 
 (function initNjuAuthSessionPrewarmer(global) {

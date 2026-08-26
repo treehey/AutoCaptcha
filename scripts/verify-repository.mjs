@@ -143,6 +143,7 @@ const referencedRuntimeFiles = new Set([
   manifest.action?.default_popup,
   manifest.background?.service_worker,
   ...manifest.content_scripts.flatMap(entry => entry.js || []),
+  ...manifest.content_scripts.flatMap(entry => entry.css || []),
   ...manifest.web_accessible_resources.flatMap(entry => entry.resources || [])
 ].filter(Boolean));
 
@@ -152,6 +153,18 @@ for (const relativePath of referencedRuntimeFiles) {
     true,
     `Manifest references a missing runtime file: ${relativePath}`
   );
+}
+
+const packageScript = await readFile(path.join(repoRoot, 'scripts', 'build-package.ps1'), 'utf8');
+const packageEntries = new Set(Array.from(
+  packageScript.matchAll(/^\s*'([^']+)'\s*,?\s*$/gm),
+  match => match[1].replaceAll('\\', '/')
+));
+for (const relativePath of referencedRuntimeFiles) {
+  const normalizedPath = relativePath.replaceAll('\\', '/');
+  const packaged = packageEntries.has(normalizedPath)
+    || [...packageEntries].some(entry => normalizedPath.startsWith(`${entry}/`));
+  assert.equal(packaged, true, `Manifest runtime file is missing from the package whitelist: ${relativePath}`);
 }
 
 const rootMarkdown = rootEntries

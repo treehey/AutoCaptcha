@@ -1,0 +1,927 @@
+.nju-grab-add-target {
+  --nju-grab-blue: #007aff;
+  --nju-grab-green: #34c759;
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  margin: 4px 6px;
+  padding: 0 14px;
+  border: 1px solid rgba(0, 122, 255, 0.15);
+  border-radius: 999px; /* Capsule */
+  color: var(--nju-grab-blue);
+  background: rgba(0, 122, 255, 0.08);
+  box-shadow: none;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease,
+    transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.nju-grab-add-target.is-exact-removable {
+  display: inline-grid;
+  grid-template-columns: 16px max-content;
+  column-gap: 6px;
+  min-width: 8em;
+}
+
+.nju-grab-add-target.is-exact-removable .nju-grab-state-label,
+.nju-grab-add-target.is-exact-removable .nju-grab-remove-label {
+  grid-column: 2;
+  grid-row: 1;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+}
+
+.nju-grab-add-target.is-exact-removable .nju-grab-state-label {
+  opacity: 1;
+  visibility: visible;
+}
+
+.nju-grab-add-target.is-exact-removable .nju-grab-remove-label {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.nju-grab-add-target.is-exact-removable:hover:not(:disabled) .nju-grab-state-label,
+.nju-grab-add-target.is-exact-removable:focus-visible .nju-grab-state-label {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.nju-grab-add-target.is-exact-removable:hover:not(:disabled) .nju-grab-remove-label,
+.nju-grab-add-target.is-exact-removable:focus-visible .nju-grab-remove-label {
+  opacity: 1;
+  visibility: visible;
+}
+
+.nju-grab-add-target.is-exact-removable:hover:not(:disabled),
+.nju-grab-add-target.is-exact-removable:focus-visible {
+  color: #b42318;
+  border-color: rgba(255, 69, 58, 0.34);
+  background: rgba(255, 241, 240, 0.98);
+}
+
+.nju-grab-add-target.is-exact-removable:hover:not(:disabled)::before,
+.nju-grab-add-target.is-exact-removable:focus-visible::before {
+  content: "−";
+  background: #ff453a;
+  font-size: 14px;
+}
+
+.nju-grab-add-target::before {
+  content: "+";
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--nju-grab-blue);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.nju-grab-add-target:hover:not(:disabled) {
+  background: rgba(0, 122, 255, 0.12);
+  border-color: rgba(0, 122, 255, 0.2);
+}
+
+.nju-grab-add-target:active:not(:disabled) {
+  transform: scale(0.95);
+  background: rgba(0, 122, 255, 0.16);
+}
+
+.nju-grab-add-target:focus-visible {
+  outline: 3px solid rgba(0, 122, 255, 0.3);
+  outline-offset: 2px;
+}
+
+.nju-grab-add-target.is-added {
+  color: #334155;
+  border-color: rgba(71, 85, 105, 0.38);
+  background: rgba(226, 232, 240, 0.96);
+}
+
+.nju-grab-add-target.is-added::before {
+  content: "◉";
+  background: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.nju-grab-add-target.is-active {
+  color: #006bd6;
+  border-color: rgba(10, 132, 255, 0.28);
+  background: rgba(237, 246, 255, 0.96);
+}
+
+.nju-grab-add-target.is-active::before {
+  background: var(--nju-grab-blue);
+}
+
+.nju-grab-add-target.is-selected {
+  color: #187a36;
+  border-color: rgba(48, 209, 88, 0.24);
+  background: rgba(237, 250, 241, 0.96);
+}
+
+.nju-grab-add-target.is-selected::before {
+  background: var(--nju-grab-green);
+}
+
+.nju-grab-add-target.is-warning {
+  color: #986000;
+  border-color: rgba(255, 159, 10, 0.28);
+  background: rgba(255, 248, 235, 0.97);
+}
+
+.nju-grab-add-target.is-warning::before {
+  content: "!";
+  background: #ff9f0a;
+}
+
+.nju-grab-add-target.is-blocked {
+  color: #b42318;
+  border-color: rgba(255, 69, 58, 0.25);
+  background: rgba(255, 241, 240, 0.97);
+}
+
+.nju-grab-add-target.is-blocked::before {
+  content: "!";
+  background: #ff453a;
+}
+
+.nju-grab-add-target.is-muted {
+  color: #6b7280;
+  background: rgba(246, 247, 249, 0.97);
+}
+
+.nju-grab-add-target.is-remove {
+  color: #b42318;
+  border-color: rgba(255, 69, 58, 0.34);
+  background: rgba(255, 241, 240, 0.98);
+}
+
+.nju-grab-add-target.is-remove::before {
+  content: "−";
+  background: #ff453a;
+  font-size: 14px;
+}
+
+.nju-grab-add-target.is-loading::before {
+  content: "";
+  box-sizing: border-box;
+  border: 2px solid rgba(10, 132, 255, 0.22);
+  border-top-color: var(--nju-grab-blue);
+  background: transparent;
+  animation: nju-grab-spin 0.7s linear infinite;
+}
+
+.nju-grab-add-target:disabled {
+  cursor: default;
+}
+
+.course-jxb-container .jxb-item.nju-grab-enhanced {
+  border-color: rgba(60, 60, 67, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 8px 24px rgba(28, 39, 56, 0.09), 0 1px 2px rgba(28, 39, 56, 0.05);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.course-jxb-container .jxb-item.nju-grab-enhanced:hover {
+  border-color: rgba(10, 132, 255, 0.24);
+  box-shadow: 0 14px 34px rgba(28, 39, 56, 0.13), 0 2px 5px rgba(28, 39, 56, 0.06);
+  transform: translateY(-2px);
+}
+
+.course-jxb-container .jxb-item.nju-grab-enhanced .content {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  height: 44px;
+  overflow: hidden;
+  border-top: 1px solid rgba(60, 60, 67, 0.12);
+  background: rgba(248, 248, 250, 0.96);
+}
+
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .cv-btn {
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: #0a84ff;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 44px;
+  letter-spacing: -0.01em;
+}
+
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target {
+  min-width: 104px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 13px;
+  border: 0;
+  border-left: 1px solid rgba(60, 60, 67, 0.12);
+  border-radius: 0;
+  background: rgba(248, 248, 250, 0.96);
+  box-shadow: none;
+}
+
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target:hover:not(:disabled) {
+  background: #edf6ff;
+  box-shadow: none;
+  transform: none;
+}
+
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline-offset: -4px;
+}
+
+/* Card action rules above are intentionally broad; exact removal stays dangerous. */
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target.is-exact-removable,
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target.is-exact-removable:hover:not(:disabled),
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target.is-exact-removable:focus-visible {
+  color: #b42318;
+  border-left-color: rgba(255, 69, 58, 0.34);
+  background: rgba(255, 241, 240, 0.98);
+}
+
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target.is-exact-removable::before,
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target.is-exact-removable:hover:not(:disabled)::before,
+.course-jxb-container .jxb-item .buttons.nju-grab-card-actions > .nju-grab-add-target.is-exact-removable:focus-visible::before {
+  content: "−";
+  background: #ff453a;
+}
+
+.course-tr.nju-grab-enhanced-row .cz .nju-grab-add-target {
+  margin: 4px 0 4px 8px;
+}
+
+.nju-grab-status-panel {
+  --nju-panel-blue: #007aff;
+  --nju-panel-green: #34c759;
+  --nju-panel-orange: #ff9f0a;
+  --nju-panel-red: #ff3b30;
+  --nju-panel-ink: #1d1d1f;
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2147483000;
+  width: min(var(--nju-panel-width, 380px), calc(100vw - 32px));
+  height: var(--nju-panel-height, auto);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 0.5px solid rgba(255, 255, 255, 0.4);
+  border-radius: 24px;
+  color: var(--nju-panel-ink);
+  background: rgba(250, 251, 253, 0.65);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  backdrop-filter: blur(28px) saturate(200%);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-variant-numeric: tabular-nums;
+  transform: translateZ(0);
+  transition: height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.nju-grab-status-panel [hidden] {
+  display: none !important;
+}
+
+.nju-grab-status-panel:not(.is-expanded) {
+  height: auto !important;
+}
+
+.nju-grab-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.nju-grab-status-toggle {
+  flex: 1;
+  min-width: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  display: grid;
+  grid-template-columns: 14px 18px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 11px;
+  min-height: 68px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nju-grab-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 14px;
+}
+
+.nju-grab-control-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid rgba(0, 122, 255, 0.2);
+  border-radius: 999px;
+  background: var(--nju-panel-blue);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0, 122, 255, 0.15);
+}
+
+.nju-grab-control-btn:hover {
+  background: #006ce0;
+  transform: scale(0.96);
+}
+
+.nju-grab-control-btn.is-running {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--nju-panel-red);
+  border-color: rgba(255, 59, 48, 0.2);
+  box-shadow: none;
+}
+
+.nju-grab-control-btn.is-running:hover {
+  background: rgba(255, 59, 48, 0.18);
+}
+
+.nju-grab-status-close {
+  -webkit-appearance: none;
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  align-self: center;
+  justify-self: center;
+  margin: 0;
+  padding: 0 0 2px;
+  border: 0;
+  border-radius: 50%;
+  color: #8e8e93;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font-size: 20px;
+  font-weight: 360;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.16s ease, background-color 0.16s ease;
+}
+
+.nju-grab-status-close:hover {
+  color: #3a3a3c;
+  background: rgba(60, 60, 67, 0.08);
+}
+
+.nju-grab-status-close:focus-visible {
+  outline: 3px solid rgba(0, 122, 255, 0.28);
+  outline-offset: 1px;
+}
+
+.nju-grab-status-toggle:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.nju-grab-status-toggle:focus-visible {
+  outline: 3px solid rgba(0, 122, 255, 0.28);
+  outline-offset: -4px;
+}
+
+.nju-grab-radar-dot,
+.nju-grab-target-dot {
+  position: relative;
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8e8e93;
+  box-shadow: 0 0 0 4px rgba(142, 142, 147, 0.12);
+}
+
+.nju-grab-radar-dot {
+  width: 12px;
+  height: 12px;
+}
+
+.nju-grab-status-panel[data-tone="active"] .nju-grab-radar-dot,
+.nju-grab-status-target[data-tone="active"] .nju-grab-target-dot {
+  background: var(--nju-panel-blue);
+  box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.13);
+}
+
+.nju-grab-status-panel[data-tone="success"] .nju-grab-radar-dot,
+.nju-grab-status-target[data-tone="success"] .nju-grab-target-dot {
+  background: var(--nju-panel-green);
+  box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.13);
+}
+
+.nju-grab-status-panel[data-tone="warning"] .nju-grab-radar-dot,
+.nju-grab-status-target[data-tone="warning"] .nju-grab-target-dot {
+  background: var(--nju-panel-orange);
+  box-shadow: 0 0 0 4px rgba(255, 159, 10, 0.13);
+}
+
+.nju-grab-status-panel[data-tone="danger"] .nju-grab-radar-dot,
+.nju-grab-status-target[data-tone="danger"] .nju-grab-target-dot {
+  background: var(--nju-panel-red);
+  box-shadow: 0 0 0 4px rgba(255, 69, 58, 0.13);
+}
+
+.nju-grab-status-panel.is-scanning .nju-grab-radar-dot::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border: 1px solid rgba(0, 122, 255, 0.34);
+  border-radius: 50%;
+  animation: nju-grab-radar 1.5s ease-out infinite;
+}
+
+.nju-grab-status-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.nju-grab-status-copy strong {
+  overflow: hidden;
+  color: var(--nju-panel-ink);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nju-grab-status-copy > span {
+  overflow: hidden;
+  color: #6e6e73;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nju-grab-status-chevron {
+  width: 8px;
+  height: 8px;
+  justify-self: center;
+  border-right: 1.5px solid #8e8e93;
+  border-bottom: 1.5px solid #8e8e93;
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform 0.18s ease;
+}
+
+.nju-grab-status-panel.is-expanded .nju-grab-status-chevron {
+  transform: rotate(225deg) translate(-1px, -1px);
+}
+
+.nju-grab-status-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 12px 12px;
+  border-top: 1px solid rgba(60, 60, 67, 0.1);
+}
+
+.nju-grab-status-metrics {
+  display: grid;
+  grid-template-columns: 0.8fr 0.8fr 1.4fr;
+  gap: 1px;
+  margin: 10px 0;
+  overflow: hidden;
+  border: 1px solid rgba(60, 60, 67, 0.1);
+  border-radius: 12px;
+  background: rgba(60, 60, 67, 0.1);
+}
+
+.nju-grab-status-metrics > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 8px 9px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.nju-grab-status-metrics strong {
+  overflow: hidden;
+  color: #2c2c2e;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nju-grab-status-metrics small {
+  color: #8e8e93;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.nju-grab-missing-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.nju-grab-quick-jump-btn {
+  flex: 1 1 auto;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--nju-panel-blue, #007aff);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 122, 255, 0.2);
+  transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.nju-grab-quick-jump-btn:hover {
+  transform: translateY(-1px);
+  background: #006bd6;
+  box-shadow: 0 4px 8px rgba(0, 122, 255, 0.3);
+}
+
+.nju-grab-quick-jump-btn:active {
+  transform: translateY(0);
+}
+
+@keyframes nju-grab-pulse-glow {
+  0% { box-shadow: 0 0 0 0 rgba(175, 82, 222, 0.6), inset 0 0 0 2px rgba(175, 82, 222, 1); }
+  70% { box-shadow: 0 0 0 8px rgba(175, 82, 222, 0), inset 0 0 0 2px rgba(175, 82, 222, 0.8); }
+  100% { box-shadow: 0 0 0 0 rgba(175, 82, 222, 0), inset 0 0 0 2px rgba(175, 82, 222, 1); }
+}
+
+.nju-grab-native-glow {
+  position: relative;
+  z-index: 10;
+  border-radius: 6px;
+  animation: nju-grab-pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite !important;
+  transition: all 0.2s ease !important;
+}
+
+.nju-grab-status-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.nju-grab-status-target {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-height: 42px;
+  flex-shrink: 0;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.nju-grab-status-target:active {
+  transform: scale(0.98);
+}
+
+.nju-grab-target-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c7c7cc;
+  margin-top: 4px;
+}
+
+.nju-grab-target-actions {
+  grid-column: 3;
+  display: grid;
+  place-items: center;
+}
+
+.nju-grab-target-remove {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  color: #b42318;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.nju-grab-target-actions:hover .nju-grab-target-remove,
+.nju-grab-target-remove:focus-visible,
+.nju-grab-target-actions:focus-within .nju-grab-target-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nju-grab-remove-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  margin: 10px 12px 12px;
+  color: #2c2c2e;
+  background: #f2f2f7;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.05);
+}
+
+.nju-grab-remove-confirm [data-nju-grab-remove-message] {
+  flex: 1 1 100%;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
+@media (hover: none) {
+  .nju-grab-status-target .nju-grab-target-remove {
+    opacity: 1;
+  }
+}
+
+.nju-grab-remove-confirm button {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(60, 60, 67, 0.15);
+  border-radius: 6px;
+  background: #fff;
+  color: #2c2c2e;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.nju-grab-remove-confirm button:hover {
+  background: #f5f5f5;
+}
+
+.nju-grab-remove-confirm [data-nju-grab-remove-message].is-error {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.nju-grab-remove-confirm button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.nju-grab-remove-confirm [data-nju-grab-remove-stop] {
+  color: #fff;
+  background: #ff3b30;
+  border-color: #ff3b30;
+}
+
+.nju-grab-remove-confirm [data-nju-grab-remove-stop]:hover {
+  background: #e6352b;
+}
+
+.nju-grab-target-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.nju-grab-target-copy strong {
+  color: #2c2c2e;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nju-grab-target-meta {
+  color: #8e8e93;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nju-grab-target-status {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #5b6570;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Tone Colors for Status */
+.nju-grab-status-target[data-tone="active"] .nju-grab-target-status { color: #006bd6; }
+.nju-grab-status-target[data-tone="success"] .nju-grab-target-status { color: #187a36; }
+.nju-grab-status-target[data-tone="warning"] .nju-grab-target-status { color: #986000; }
+.nju-grab-status-target[data-tone="danger"] .nju-grab-target-status { color: #b42318; }
+.nju-grab-status-target[data-tone="remove"] .nju-grab-target-status { color: #8e8e93; }
+
+.nju-grab-target-badge {
+  grid-column: 1;
+  grid-row: 1;
+  max-width: 74px;
+  overflow: hidden;
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #5b6570;
+  background: rgba(142, 142, 147, 0.12);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
+}
+
+.nju-grab-target-actions:hover .nju-grab-target-badge,
+.nju-grab-target-actions:focus-within .nju-grab-target-badge {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nju-grab-status-target[data-tone="active"] .nju-grab-target-badge {
+  color: #006bd6;
+  background: rgba(0, 122, 255, 0.1);
+}
+
+.nju-grab-status-target[data-tone="success"] .nju-grab-target-badge {
+  color: #187a36;
+  background: rgba(52, 199, 89, 0.11);
+}
+
+.nju-grab-status-target[data-tone="warning"] .nju-grab-target-badge {
+  color: #986000;
+  background: rgba(255, 159, 10, 0.12);
+}
+
+.nju-grab-status-target[data-tone="danger"] .nju-grab-target-badge {
+  color: #b42318;
+  background: rgba(255, 69, 58, 0.11);
+}
+
+.nju-grab-status-empty {
+  margin: 0;
+  padding: 9px 4px 3px;
+  color: #6e6e73;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+@keyframes nju-grab-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes nju-grab-radar {
+  from { opacity: 0.72; transform: scale(0.72); }
+  to { opacity: 0; transform: scale(1.45); }
+}
+
+@media (max-width: 720px) {
+  .nju-grab-status-panel {
+    right: 12px;
+    bottom: 12px;
+    width: min(340px, calc(100vw - 24px));
+  }
+
+  .nju-grab-remove-confirm {
+    grid-template-columns: 1fr auto;
+  }
+
+  .nju-grab-remove-confirm [data-nju-grab-remove-message] {
+    grid-column: 1 / -1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nju-grab-add-target,
+  .course-jxb-container .jxb-item.nju-grab-enhanced,
+  .nju-grab-status-chevron,
+  .nju-grab-status-close {
+    transition: none;
+  }
+
+  .nju-grab-add-target.is-loading::before {
+    animation-duration: 1.4s;
+  }
+
+  .nju-grab-status-panel.is-scanning .nju-grab-radar-dot::after {
+    animation: none;
+  }
+}
+/* --- Resize Handles (Apple HIG Style) --- */
+/* --- Premium Apple-Style Resizing --- */
+.nju-grab-pill-grabber {
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 36px; height: 16px;
+  cursor: ns-resize;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.nju-grab-pill-grabber::after {
+  content: '';
+  width: 36px; height: 4px;
+  border-radius: 2px;
+  background: var(--nju-panel-ink);
+  opacity: 0.15;
+  transition: opacity 0.2s, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.nju-grab-pill-grabber:hover::after, .nju-grab-pill-grabber:active::after {
+  opacity: 0.3;
+  transform: scaleY(1.5);
+}
+
+.nju-grab-resize-handle-l {
+  position: absolute;
+  top: 16px; left: 0; bottom: 16px;
+  width: 16px;
+  cursor: ew-resize;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+}
+.nju-grab-resize-handle-l::after {
+  content: '';
+  width: 4px; height: 36px;
+  margin-left: 4px;
+  border-radius: 2px;
+  background: var(--nju-panel-ink);
+  opacity: 0;
+  transform: scaleX(0.2);
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.nju-grab-resize-handle-l:hover::after, .nju-grab-resize-handle-l:active::after {
+  opacity: 0.18;
+  transform: scaleX(1);
+}
