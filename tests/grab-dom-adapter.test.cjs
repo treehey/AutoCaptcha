@@ -86,18 +86,26 @@ class FakeElement {
     }
   }
 
+  keydown(key) {
+    for (const listener of this.listeners.get('keydown') || []) {
+      listener({ key, target: this, preventDefault() {}, stopPropagation() {} });
+    }
+  }
+
   set innerHTML(value) {
     this._innerHTML = String(value || '');
     this.ownText = '';
     this.children = [];
     if (!String(value).includes('data-nju-grab-remove-confirm')) return;
-    const leftResize = new FakeElement('div', { classes: ['nju-grab-resize-handle-l'], attributes: { 'data-resize': 'left' } });
+    const leftResize = new FakeElement('div', { classes: ['nju-grab-resize-handle-l'], attributes: {
+      'data-resize': 'left', role: 'button', tabindex: '0',
+      'aria-label': '连续点按两次收成胶囊，按回车键也可收起'
+    } });
     const head = new FakeElement('div', { classes: ['nju-grab-status-head'] });
     const toggle = new FakeElement('button', { classes: ['nju-grab-status-toggle'], attributes: { 'data-nju-grab-status-toggle': '' } });
     const control = new FakeElement('button', { attributes: { 'data-nju-grab-control': '' } });
-    const mini = new FakeElement('button', { classes: ['nju-grab-minimize-btn'], attributes: { 'data-nju-grab-mini': '', 'aria-label': '收起为胶囊', 'aria-pressed': 'false' } });
     const close = new FakeElement('button', { attributes: { 'data-nju-grab-status-close': '' } });
-    head.append(toggle, control, mini, close);
+    head.append(toggle, control, close);
     const body = new FakeElement('div', { classes: ['nju-grab-status-body'], attributes: { 'data-nju-grab-status-body': '' } });
     body.append(
       new FakeElement('strong', { attributes: { 'data-nju-grab-status-title': '' } }),
@@ -553,27 +561,33 @@ test('labels the running primary action as stop and keeps the header action as h
   assert.equal(close.getAttribute('title'), '隐藏课程监控面板');
 });
 
-test('offers an accessible mini-mode button and restores the panel from its semantic header control', () => {
+test('offers an accessible edge gesture and restores the panel from its semantic header control', () => {
   const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
   adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
   const panel = vm.runInContext('grabPageStatusPanel', adapter);
-  const mini = panel.querySelector('[data-nju-grab-mini]');
+  const edge = panel.querySelector('.nju-grab-resize-handle-l');
   const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
   const body = panel.querySelector('[data-nju-grab-status-body]');
 
-  assert.equal(mini.getAttribute('aria-label'), '收起为胶囊');
-  mini.click();
+  assert.equal(panel.querySelector('[data-nju-grab-mini]'), null);
+  assert.equal(edge.getAttribute('role'), 'button');
+  assert.equal(edge.getAttribute('tabindex'), '0');
+  assert.match(edge.getAttribute('aria-label'), /按回车键/);
+  assert.match(panel.querySelector('.nju-grab-tutorial-tooltip').getAttribute('aria-label'), /连续点按两次左侧边缘/);
+  assert.ok(panel.querySelector('.nju-grab-tutorial-panel-shape'));
+  edge.keydown('Enter');
   assert.equal(panel.classList.contains('is-mini'), true);
-  assert.equal(mini.getAttribute('aria-pressed'), 'true');
   assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(toggle.getAttribute('aria-label'), '展开课程监控面板');
   assert.equal(body.hidden, true);
 
   toggle.click();
   assert.equal(panel.classList.contains('is-mini'), false);
-  assert.equal(mini.getAttribute('aria-pressed'), 'false');
   assert.equal(toggle.getAttribute('aria-label'), '折叠或展开课程监控状态');
   assert.equal(body.hidden, false);
+
+  edge.keydown(' ');
+  assert.equal(panel.classList.contains('is-mini'), true);
 });
 
 test('reopens the ordinary collapsed radar from the header control', () => {
@@ -600,7 +614,7 @@ test('reopens collapsed and mini radar states when pointer capture retargets the
   const panel = vm.runInContext('grabPageStatusPanel', adapter);
   const head = panel.querySelector('.nju-grab-status-head');
   const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
-  const mini = panel.querySelector('[data-nju-grab-mini]');
+  const edge = panel.querySelector('.nju-grab-resize-handle-l');
   const body = panel.querySelector('[data-nju-grab-status-body]');
 
   toggle.click();
@@ -608,7 +622,7 @@ test('reopens collapsed and mini radar states when pointer capture retargets the
   head.click();
   assert.equal(body.hidden, false);
 
-  mini.click();
+  edge.keydown('Enter');
   assert.equal(panel.classList.contains('is-mini'), true);
   head.click();
   assert.equal(panel.classList.contains('is-mini'), false);
@@ -619,8 +633,14 @@ test('reduced-motion styling disables the redesigned panel animations', () => {
   const reducedMotion = pageUiSource.slice(pageUiSource.indexOf('@media (prefers-reduced-motion: reduce)'));
   assert.match(reducedMotion, /\.nju-grab-status-panel,/);
   assert.match(reducedMotion, /\.nju-grab-tutorial-tooltip,/);
+  assert.match(reducedMotion, /\.nju-grab-tutorial-panel-shape,/);
   assert.match(reducedMotion, /animation:\s*none\s*!important/);
   assert.match(reducedMotion, /transition:\s*none\s*!important/);
+});
+
+test('keeps capsule height independent from the ordinary collapsed panel rule', () => {
+  assert.match(pageUiSource, /\.nju-grab-status-panel:not\(\.is-expanded\):not\(\.is-mini\)\s*\{/);
+  assert.match(pageUiSource, /\.nju-grab-status-panel\.is-mini\s*\{[^}]*height:\s*48px\s*!important/s);
 });
 
 test('treats auth recovery as active so the primary action stops recovery instead of starting a task', () => {

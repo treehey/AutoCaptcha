@@ -1332,6 +1332,7 @@ function setGrabPageStatusExpanded(expanded) {
 function dismissGrabPanelMiniTutorial(panel) {
   const tooltip = panel?.querySelector?.('.nju-grab-tutorial-tooltip');
   tooltip?.remove?.();
+  panel?.classList?.remove('has-mini-tutorial');
   panel?.querySelector?.('.nju-grab-resize-handle-l')?.classList.remove('is-tutoring');
   writeGrabPanelPreference(GRAB_PANEL_MINI_TUTORIAL_KEY, '1');
 }
@@ -1342,10 +1343,8 @@ function setGrabPanelMiniMode(panel, mini, { dismissTutorial = false } = {}) {
   panel.classList.toggle('is-mini', enabled);
   const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
   const body = panel.querySelector('[data-nju-grab-status-body]');
-  const miniButton = panel.querySelector('[data-nju-grab-mini]');
   toggle?.setAttribute('aria-expanded', String(!enabled && grabPageStatusExpanded));
   toggle?.setAttribute('aria-label', enabled ? '展开课程监控面板' : '折叠或展开课程监控状态');
-  miniButton?.setAttribute('aria-pressed', String(enabled));
   if (body) body.hidden = enabled || !grabPageStatusExpanded;
   if (dismissTutorial) dismissGrabPanelMiniTutorial(panel);
 }
@@ -1519,7 +1518,7 @@ function ensureGrabPageStatusPanel() {
   panel.setAttribute('aria-label', '课程监控状态');
   panel.innerHTML = `
     <div class="nju-grab-pill-grabber" data-resize="top"></div>
-    <div class="nju-grab-resize-handle-l" data-resize="left" title="双击收起为胶囊"></div>
+    <div class="nju-grab-resize-handle-l" data-resize="left" role="button" tabindex="0" aria-label="连续点按两次收成胶囊，按回车键也可收起" title="连续点按两次收成胶囊"></div>
     <div class="nju-grab-status-head">
       <button class="nju-grab-status-toggle" type="button" data-nju-grab-status-toggle aria-expanded="false">
         <svg class="nju-grab-drag-handle" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="opacity: 0.3; cursor: grab;"><path d="M8 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM8 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM8 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0z"/></svg>
@@ -1532,7 +1531,6 @@ function ensureGrabPageStatusPanel() {
       </button>
       <div class="nju-grab-status-actions">
          <button class="nju-grab-control-btn" type="button" data-nju-grab-control aria-label="开始监控"></button>
-         <button class="nju-grab-minimize-btn" type="button" data-nju-grab-mini aria-label="收起为胶囊" aria-pressed="false" title="收起为胶囊">−</button>
          <button class="nju-grab-more-btn" type="button" data-nju-grab-more aria-expanded="false" aria-haspopup="menu" aria-label="更多课程监控操作" title="更多">•••</button>
          <button class="nju-grab-status-close" type="button" data-nju-grab-status-close aria-label="隐藏面板" title="隐藏课程监控面板">×</button>
          <div class="nju-grab-more-menu" data-nju-grab-more-menu role="menu" hidden>
@@ -1728,7 +1726,8 @@ function ensureGrabPageStatusPanel() {
     // toggle click to the header itself. Keep that no-drag click actionable.
     if (event.target === head) toggleGrabPageStatusPanel(event);
   });
-  panel.querySelector('[data-nju-grab-mini]')?.addEventListener('click', event => {
+  panel.querySelector('.nju-grab-resize-handle-l')?.addEventListener('keydown', event => {
+    if (!['Enter', ' '].includes(event.key)) return;
     event.preventDefault();
     event.stopPropagation();
     setGrabPanelMiniMode(panel, true, { dismissTutorial: true });
@@ -1905,9 +1904,27 @@ function ensureGrabPageStatusPanel() {
     const tooltip = document.createElement('div');
     tooltip.className = 'nju-grab-tutorial-tooltip';
     tooltip.setAttribute('role', 'status');
-    tooltip.textContent = '点“−”或双击边缘收起';
+    tooltip.setAttribute('aria-label', '操作提示：连续点按两次左侧边缘，可以把课程雷达收成胶囊');
+    const gesture = document.createElement('span');
+    gesture.className = 'nju-grab-tutorial-gesture';
+    gesture.setAttribute('aria-hidden', 'true');
+    gesture.append(
+      Object.assign(document.createElement('span'), { className: 'nju-grab-tutorial-panel-shape' }),
+      Object.assign(document.createElement('span'), { className: 'nju-grab-tutorial-taps' })
+    );
+    const copy = document.createElement('span');
+    copy.className = 'nju-grab-tutorial-copy';
+    copy.innerHTML = '<strong>双击左侧边缘</strong><small>面板会收成胶囊</small>';
+    tooltip.append(gesture, copy);
     panel.appendChild(tooltip);
+    panel.classList.add('has-mini-tutorial');
     panel.querySelector('.nju-grab-resize-handle-l')?.classList.add('is-tutoring');
+    tooltip.addEventListener('animationend', event => {
+      if (event.target !== tooltip || event.animationName !== 'nju-grab-tutorial-coach') return;
+      tooltip.remove();
+      panel.classList.remove('has-mini-tutorial');
+      panel.querySelector('.nju-grab-resize-handle-l')?.classList.remove('is-tutoring');
+    });
   }
 
   return panel;

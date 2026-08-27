@@ -34,7 +34,7 @@ NJU Login Pro 面向需要访问南京大学统一身份认证和选课系统的
 
 | 登录助手 | 选课监控配置 | 课程页雷达与胶囊 |
 | --- | --- | --- |
-| <img src="assets/popup-login-preview.png" alt="登录助手界面，账号为空" width="280"> | <img src="assets/popup-grab-preview.png" alt="选课监控配置界面，使用示例课程" width="280"> | <img src="assets/course-radar-preview.png" alt="课程雷达展开状态与胶囊状态，使用示例课程" width="280"> |
+| <img src="assets/popup-login-preview.png" alt="登录助手界面，账号为空" width="280"> | <img src="assets/popup-grab-preview.png" alt="选课监控配置界面，使用示例课程" width="280"> | <img src="assets/course-radar-preview.png" alt="课程雷达边缘手势引导、展开状态与胶囊状态，使用示例课程" width="280"> |
 
 ## 安装
 
