@@ -340,11 +340,74 @@
 }
 
 .nju-grab-status-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   padding-right: 14px;
 }
+
+.nju-grab-more-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 4px 5px;
+  border: 0;
+  border-radius: 8px;
+  color: #6e6e73;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.nju-grab-more-btn:hover,
+.nju-grab-more-btn:focus-visible { background: rgba(60, 60, 67, 0.08); color: #2c2c2e; }
+
+.nju-grab-more-menu {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2147483647;
+  display: grid;
+  min-width: 196px;
+  padding: 5px;
+  border: 1px solid rgba(60, 60, 67, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+}
+
+.nju-grab-more-menu[hidden],
+.nju-grab-target-menu[hidden] { display: none !important; }
+
+.nju-grab-more-menu button,
+.nju-grab-target-menu button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  color: #2c2c2e;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nju-grab-more-menu button:hover,
+.nju-grab-more-menu button:focus-visible,
+.nju-grab-target-menu button:hover,
+.nju-grab-target-menu button:focus-visible { background: rgba(0, 122, 255, 0.1); outline: none; }
+.nju-grab-more-menu button:disabled { opacity: 0.45; cursor: not-allowed; }
+.nju-grab-more-menu .is-destructive { margin-top: 3px; border-top: 1px solid rgba(60, 60, 67, 0.12); color: var(--nju-panel-red, #ff3b30); }
 
 .nju-grab-control-btn {
   -webkit-appearance: none;
@@ -534,6 +597,49 @@
   background: rgba(60, 60, 67, 0.1);
 }
 
+.nju-grab-command-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0 0 10px;
+  padding: 7px 8px;
+  border: 1px solid rgba(60, 60, 67, 0.1);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.65);
+  color: #6e6e73;
+  font-size: 11px;
+}
+.nju-grab-now-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--nju-panel-blue);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.nju-grab-now-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.nju-grab-command-bar label { display: inline-flex; align-items: center; gap: 4px; }
+.nju-grab-command-bar select {
+  min-height: 27px;
+  padding: 0 5px;
+  border: 1px solid rgba(60, 60, 67, 0.14);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #2c2c2e;
+  font: inherit;
+}
+.nju-grab-command-bar select:disabled { opacity: 0.55; }
+.nju-grab-next-check { margin-left: auto; white-space: nowrap; }
+.nju-grab-panel-feedback { padding: 5px 8px; border-radius: 7px; font-size: 11px; background: rgba(0, 122, 255, 0.08); color: #006bd6; }
+.nju-grab-panel-feedback[data-tone="success"] { color: #187a36; background: rgba(52, 199, 89, 0.1); }
+.nju-grab-panel-feedback[data-tone="warning"] { color: #986000; background: rgba(255, 159, 10, 0.12); }
+.nju-grab-panel-feedback[data-tone="danger"] { color: #b42318; background: rgba(255, 59, 48, 0.1); }
+
 .nju-grab-status-metrics > span {
   display: grid;
   min-width: 0;
@@ -643,10 +749,31 @@
 }
 
 .nju-grab-target-actions {
+  position: relative;
   grid-column: 3;
   display: grid;
   place-items: center;
 }
+
+.nju-grab-target-menu-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0 0 4px;
+  border: 0;
+  border-radius: 6px;
+  color: #6e6e73;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.nju-grab-target-menu-trigger:hover,
+.nju-grab-target-menu-trigger:focus-visible { background: rgba(60, 60, 67, 0.08); outline: none; }
+.nju-grab-target-menu { position: fixed; top: 8px; left: 8px; z-index: 2147483647; display: grid; min-width: 132px; padding: 4px; border: 1px solid rgba(60,60,67,.1); border-radius: 10px; background: #fff; box-shadow: 0 8px 20px rgba(0,0,0,.14); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; }
+.nju-grab-target-menu .nju-grab-target-remove { opacity: 1; pointer-events: auto; width: auto; height: 34px; padding: 0 10px; color: var(--nju-panel-red, #ff3b30); text-align: left; }
 
 .nju-grab-target-remove {
   grid-column: 1;

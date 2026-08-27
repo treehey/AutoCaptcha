@@ -539,6 +539,111 @@ test('keeps runtime state visible while exposing an exact-target remove action',
   assert.equal(button.classList.contains('is-active'), false);
 });
 
+test('labels the running primary action as stop and keeps the header action as hide panel', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(grabTaskModel.normalizeTarget('面板测试'))}];`, adapter);
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const control = panel.querySelector('[data-nju-grab-control]');
+  const close = panel.querySelector('[data-nju-grab-status-close]');
+  assert.equal(control.textContent, '停止');
+  assert.equal(close.getAttribute('aria-label'), '隐藏面板');
+  assert.equal(close.getAttribute('title'), '隐藏课程监控面板');
+});
+
+test('treats auth recovery as active so the primary action stops recovery instead of starting a task', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  adapter.renderGrabPageStatus({
+    running: false, phase: 'PAUSED_AUTH', authRecovery: { pending: true, stage: 'WAITING_LOGIN' },
+    configuredTargets: [], targetStates: {}
+  });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const control = panel.querySelector('[data-nju-grab-control]');
+  assert.equal(control.textContent, '停止恢复');
+  assert.equal(control.getAttribute('aria-label'), '停止登录恢复');
+  assert.equal(vm.runInContext('isGrabPanelEditableStopped({ running: false, phase: "PAUSED_AUTH", authRecovery: { pending: true } })', adapter), false);
+});
+
+test('disables the interval control while auth recovery is pending even when running is false', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document);
+  adapter.renderGrabPageStatus({ running: false, phase: 'PAUSED_AUTH', authRecovery: { pending: true }, targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const interval = new FakeElement('select', { attributes: { 'data-nju-grab-interval': '' } });
+  panel.querySelector('[data-nju-grab-status-body]').append(interval);
+  adapter.renderGrabPageStatus({ running: false, phase: 'PAUSED_AUTH', authRecovery: { pending: true }, targetStates: {} });
+  assert.equal(interval.disabled, true);
+});
+
+test('shows the immediate-check action only for a running task and names blocked states truthfully', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document);
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const runNow = new FakeElement('button', { attributes: { 'data-nju-grab-run-now': '' } });
+  panel.querySelector('[data-nju-grab-status-body]').append(runNow);
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', targetStates: {} });
+  assert.equal(runNow.hidden, true);
+
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', inFlight: false, targetStates: {} });
+  assert.equal(runNow.hidden, false);
+  assert.equal(runNow.disabled, false);
+  assert.equal(runNow.textContent, '立即检查');
+
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', inFlight: true, targetStates: {} });
+  assert.equal(runNow.disabled, true);
+  assert.equal(runNow.textContent, '正在检查');
+
+  adapter.renderGrabPageStatus({
+    running: true, phase: 'RUNNING', inFlight: false,
+    globalRetryAt: Date.now() + 5000, targetStates: {}
+  });
+  assert.equal(runNow.disabled, true);
+  assert.equal(runNow.textContent, '退避中');
+});
+
+test('shows the real non-preset interval while running instead of silently changing it to five seconds', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document);
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', interval: 1000, targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const interval = new FakeElement('select', { attributes: { 'data-nju-grab-interval': '' } });
+  panel.querySelector('[data-nju-grab-status-body]').append(interval);
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', interval: 1000, targetStates: {} });
+  assert.equal(interval.value, '1000');
+  assert.equal(interval.disabled, true);
+  assert.match(interval.querySelector('[data-nju-grab-current-interval]').textContent, /1 秒/);
+});
+
+test('diagnostic summary contains aggregate runtime facts but no target content', () => {
+  const adapter = loadAdapter(new FakeDocument([]));
+  const summary = vm.runInContext(`buildGrabDiagnosticSummary({
+    phase: 'RUNNING', running: true, round: 4, initialTargetCount: 1,
+    remainingTargets: [{ name: '绝密课程', targetId: 'class:secret' }],
+    targetStates: { 'class:secret': { phase: 'WATCHING', lastMessage: '查询词不要泄露' } },
+    lastScan: { mode: 'NETWORK', outcome: 'UNKNOWN', durationMs: 12 }, lastRoundDurationMs: 12
+  })`, adapter);
+  assert.match(summary, /phase=RUNNING/);
+  assert.match(summary, /scanMode=NETWORK/);
+  assert.equal(summary.includes('绝密课程'), false);
+  assert.equal(summary.includes('secret'), false);
+  assert.equal(summary.includes('查询词'), false);
+});
+
+test('persists a stopped interval in both versioned task config and legacy storage', async () => {
+  const adapter = loadAdapter(new FakeDocument([]), {
+    storageState: { nju_grab_interval: '5000', nju_grab_courses: '旧关键词' }
+  });
+  await adapter.persistGrabInterval(10000);
+  const write = adapter.storageWritesForTest.at(-1);
+  assert.equal(write.nju_grab_interval, 10000);
+  assert.equal(write.nju_grab_task_v1.intervalMs, 10000);
+  assert.deepEqual(write.nju_grab_task_v1.targets.map(target => target.name), ['旧关键词']);
+});
+
 test('matches an exact target across page metadata changes but not another class or missing batch', () => {
   const adapter = loadAdapter(new FakeDocument([]));
   const pageTarget = grabTaskModel.normalizeTarget({
@@ -693,6 +798,74 @@ test('stopped panel target remove uses a real click and removes the configured k
   const saved = grabTaskModel.normalizeTaskConfig(adapter.storageStateForTest[grabTaskModel.STORAGE_KEY]);
   assert.equal(saved.targets.some(item => item.targetId === keyword.targetId), false);
   assert.equal(adapter.storageWritesForTest.length > 0, true);
+});
+
+test('stopped panel prefers the current configured targets after a removal, not a stale runtime snapshot', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, { grabState: { running: false } });
+  const stale = grabTaskModel.normalizeTarget('已移除的旧课程');
+  vm.runInContext('configuredGrabTargets = []; configuredGrabGroups = []; latestGrabPageState = { running: false, phase: "STOPPED", targetStates: {} };', adapter);
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', configuredTargets: [stale], targetStates: {} });
+  const targetContainer = document.querySelector('[data-nju-grab-status-targets]');
+  assert.equal(targetContainer.textContent.includes('已移除的旧课程'), false);
+});
+
+test('terminal snapshot status does not claim completion after the configured targets changed', () => {
+  const adapter = loadAdapter(new FakeDocument([]));
+  const current = grabTaskModel.normalizeTarget('当前课程');
+  const stale = grabTaskModel.normalizeTarget('已完成但已移除');
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(current)}]; configuredGrabGroups = [];`, adapter);
+  const presentation = adapter.grabPageSummaryPresentation({
+    running: false, phase: 'COMPLETED', completedGroups: 1, totalGroups: 1,
+    configuredTargets: [stale], targetStates: {}
+  });
+  assert.notEqual(presentation.title, '课程组已完成');
+  assert.equal(presentation.title, '已配置 1 门课程');
+});
+
+test('target action portal survives outside-pointer dismissal and its remove item uses the normal confirmation path', async () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, { grabState: { running: false } });
+  const target = grabTaskModel.normalizeTarget({ name: 'portal目标课程', electiveBatchId: 'BATCH-1', teachingClassId: 'portal-1', teachingClassType: 'GG' });
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(target)}]; latestGrabPageState = { running: false, phase: 'STOPPED', targetStates: {} };`, adapter);
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', targetStates: {} });
+  const trigger = new FakeElement('button');
+  adapter.openGrabTargetMenuPortal(target, trigger);
+  const portal = document.querySelector('.nju-grab-target-menu');
+  const remove = portal?.querySelector('.nju-grab-target-remove');
+  assert.ok(portal && remove);
+  vm.runInContext('grabPanelDismissHandlers.pointerdown', adapter)({ target: remove });
+  assert.equal(portal.isConnected, true, 'pointerdown inside the portal must not dismiss it');
+  remove.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const saved = grabTaskModel.normalizeTaskConfig(adapter.storageStateForTest[grabTaskModel.STORAGE_KEY]);
+  assert.equal(saved.targets.some(item => item.targetId === target.targetId), false);
+});
+
+test('hiding the panel closes both floating menus and resets their expanded state', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, { grabState: { running: false } });
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const moreButton = new FakeElement('button');
+  moreButton.setAttribute('aria-expanded', 'true');
+  const moreMenu = new FakeElement('div');
+  moreMenu.hidden = false;
+  document.body.append(moreMenu);
+  adapter.moreButtonFixture = moreButton;
+  adapter.moreMenuFixture = moreMenu;
+  vm.runInContext('grabMoreButton = moreButtonFixture; grabMoreMenu = moreMenuFixture;', adapter);
+  adapter.openGrabTargetMenuPortal(grabTaskModel.normalizeTarget('隐藏时关闭菜单'), new FakeElement('button'));
+  const portal = document.querySelector('.nju-grab-target-menu');
+  assert.ok(portal);
+  vm.runInContext('hideGrabPageStatusPanel();', adapter);
+  assert.equal(portal.isConnected, false);
+  assert.equal(vm.runInContext('openGrabTargetMenu', adapter), null);
+  assert.equal(moreMenu.hidden, true);
+  assert.equal(moreButton.getAttribute('aria-expanded'), 'false');
 });
 
 test('confirm stops before saving, and save failure keeps a stable retry confirmation', async () => {
@@ -1090,6 +1263,11 @@ test('course radar styles are scoped, responsive and motion-safe', () => {
   assert.match(pageUiSource, /@media \(max-width: 720px\)/);
   assert.match(pageUiSource, /\.nju-grab-remove-confirm[\s\S]*grid-template-columns:\s*1fr auto/);
   assert.match(pageUiSource, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(pageUiSource, /\.nju-grab-more-menu\s*\{[\s\S]*z-index:\s*2147483647/);
+  assert.match(pageUiSource, /\.nju-grab-more-menu\[hidden\][\s\S]*display:\s*none\s*!important/);
+  assert.match(pageUiSource, /\.nju-grab-target-menu \.nju-grab-target-remove[\s\S]*var\(--nju-panel-red,\s*#ff3b30\)/);
+  assert.match(pageUiSource, /\.nju-grab-target-menu\s*\{[\s\S]*font-family:/);
+  assert.match(pageUiSource, /\.nju-grab-now-btn[\s\S]*font-family:\s*inherit[\s\S]*font-size:\s*11px[\s\S]*font-weight:\s*600/);
   assert.match(pageUiSource, /\.nju-grab-add-target\.is-exact-removable/);
   assert.match(pageUiSource, /grid-column: 2/);
   assert.match(pageUiSource, /grid-row: 1/);
