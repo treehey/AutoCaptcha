@@ -4,8 +4,8 @@
   const QUERY_EVENT = 'nju-autograb-course-query-v1';
   const RESULT_EVENT = 'nju-autograb-course-result-v1';
   // Keep a hard safety bound, while allowing a normal multi-course task to be
-  // observed completely in one engine round. The bridge replays these queries
-  // sequentially, so this does not create a burst of concurrent requests.
+  // observed completely in one engine round. The bridge replays and paces these
+  // queries sequentially to avoid a short request burst.
   const DEFAULT_MAX_SEARCHES = 12;
   const DEFAULT_MAX_MATERIALIZATIONS = 2;
   const SCAN_MODE = Object.freeze({
@@ -16,8 +16,8 @@
   const QUERY_SCOPE_LABELS = Object.freeze({
     ZY: '专业',
     GG: '公共',
-    GG01: '公共',
-    GG02: '公共',
+    GG01: '公选课',
+    GG02: '导学/研讨/通识',
     KZY: '跨专业',
     TX: '通修',
     TY: '体育',
@@ -25,6 +25,18 @@
     SC: '收藏',
     QB: '课表查询'
   });
+  const LEGACY_QUERY_SCOPE_ALIASES = Object.freeze({
+    TCT1: 'ZY',
+    TCT2: 'KZY',
+    TCT3: 'GG01',
+    TCT4: 'GG02',
+    TCT5: 'TY'
+  });
+
+  function normalizeQueryScope(scope) {
+    const normalized = String(scope || '').trim().toUpperCase();
+    return LEGACY_QUERY_SCOPE_ALIASES[normalized] || normalized;
+  }
 
   function abortError() {
     const error = new Error('Course query aborted');
@@ -199,10 +211,19 @@
       return String(target.courseNumber || target.name || '').trim();
     }
 
+    function normalizeTargetScopes(target) {
+      if (!target || typeof target !== 'object') return target;
+      const normalized = { ...target };
+      for (const key of ['teachingClassType', 'queryScope']) {
+        if (Object.hasOwn(target, key)) normalized[key] = normalizeQueryScope(target[key]);
+      }
+      return normalized;
+    }
+
     function buildNetworkCandidate(entry, target, order) {
       const teachingClassId = String(entry?.teachingClassId || '').trim();
       const electiveBatchId = String(entry?.electiveBatchId || '').trim();
-      const teachingClassType = String(entry?.teachingClassType || '').trim();
+      const teachingClassType = normalizeQueryScope(entry?.teachingClassType);
       const preciseKey = [electiveBatchId, teachingClassType, teachingClassId].filter(Boolean).join(':');
       const courseNumber = String(entry?.courseNumber || '').trim();
       const teacher = String(entry?.teacher || '').trim();
@@ -256,19 +277,19 @@
 
     function currentQueryScope() {
       try {
-        return String(getCurrentQueryScope() || '').trim();
+        return normalizeQueryScope(getCurrentQueryScope());
       } catch {
         return '';
       }
     }
 
     function queryScopeLabel(scope) {
-      const normalized = String(scope || '').trim().toUpperCase();
+      const normalized = normalizeQueryScope(scope);
       return QUERY_SCOPE_LABELS[normalized] || normalized || '对应';
     }
 
     function scopeDeferredCandidate(target, activeScope = '') {
-      const requiredScope = String(target.queryScope || '').trim();
+      const requiredScope = normalizeQueryScope(target.queryScope);
       if (requiredScope) {
         return deferredCandidate(
           target,
@@ -382,8 +403,9 @@
     }
 
     async function scanDomFallback(targets, context, fallbackReason) {
+      const normalizedTargets = targets.map(normalizeTargetScopes);
       if (!hasCurrentQueryScope) {
-        const fallback = await scanDom(targets, context);
+        const fallback = await scanDom(normalizedTargets, context);
         const candidateCount = fallback instanceof Map
           ? [...fallback.values()].reduce((count, candidates) => {
             return count + (Array.isArray(candidates) ? candidates.length : 0);
@@ -391,7 +413,7 @@
           : 0;
         return attachDiagnostics(fallback, {
           mode: SCAN_MODE.DOM_FALLBACK,
-          queriedTargetCount: targets.length,
+          queriedTargetCount: normalizedTargets.length,
           deferredTargetCount: 0,
           materializedQueryCount: 0,
           candidateCount,
@@ -402,7 +424,7 @@
       const activeScope = currentQueryScope();
       const domTargets = [];
       const scopeDeferredTargets = [];
-      for (const target of targets) {
+      for (const target of normalizedTargets) {
         const requiredScope = String(target.queryScope || '').trim();
         if (requiredScope && requiredScope !== activeScope) scopeDeferredTargets.push(target);
         else domTargets.push(target);
@@ -410,7 +432,7 @@
       const fallback = domTargets.length > 0
         ? await scanDom(domTargets, context)
         : new Map();
-      const result = new Map(targets.map(target => [target.targetId, []]));
+      const result = new Map(normalizedTargets.map(target => [target.targetId, []]));
       for (const target of domTargets) {
         const candidates = fallback instanceof Map ? fallback.get(target.targetId) || [] : [];
         result.set(target.targetId, candidates);
@@ -444,9 +466,10 @@
       const targets = taskModel.normalizeTargets(targetValues);
       const result = new Map(targets.map(target => [target.targetId, []]));
       if (targets.length === 0) return result;
-      const selectedTargets = chooseTargets(targets);
+      const normalizedTargets = targets.map(normalizeTargetScopes);
+      const selectedTargets = chooseTargets(normalizedTargets);
       const selectedTargetIds = new Set(selectedTargets.map(target => target.targetId));
-      for (const target of targets) {
+      for (const target of normalizedTargets) {
         if (!selectedTargetIds.has(target.targetId)) {
           result.set(target.targetId, [deferredCandidate(target)]);
         }
@@ -454,8 +477,8 @@
       const searches = selectedTargets.map(target => ({
         searchId: target.targetId,
         query: targetQuery(target),
-        queryScope: target.queryScope || target.teachingClassType || '',
-        teachingClassType: target.teachingClassType || ''
+        queryScope: normalizeQueryScope(target.queryScope || target.teachingClassType),
+        teachingClassType: normalizeQueryScope(target.teachingClassType)
       })).filter(search => search.query);
 
       let networkResults;
@@ -468,7 +491,14 @@
         return scanDomFallback(targets, context, 'NATIVE_QUERY_UNAVAILABLE');
       }
 
-      const bySearchId = new Map(networkResults.map(item => [String(item?.searchId || ''), item]));
+      const bySearchId = new Map(networkResults.map(item => [String(item?.searchId || ''), {
+        ...item,
+        queryScope: normalizeQueryScope(item?.queryScope),
+        candidates: (Array.isArray(item?.candidates) ? item.candidates : []).map(candidate => ({
+          ...candidate,
+          teachingClassType: normalizeQueryScope(candidate?.teachingClassType)
+        }))
+      }]));
       let materializedQueryCount = 0;
       const shadowComparison = {
         comparisonCount: 0,
@@ -479,17 +509,25 @@
         unidentifiableCandidateCount: 0
       };
       const emptyNetworkTargets = [];
+      const outOfScopeExactTargets = [];
       let usedDom = false;
       let scopeDeferredCount = 0;
       for (const target of selectedTargets) {
         const networkResult = bySearchId.get(target.targetId);
         if (!networkResult) continue;
         if (networkResult.outcome === 'OUT_OF_SCOPE') {
-          scopeDeferredCount += 1;
-          result.set(target.targetId, [deferredCandidate(
-            target,
-            networkResult.message || '等待进入对应课程分类查询'
-          )]);
+          if (target.teachingClassId) {
+            outOfScopeExactTargets.push({
+              target,
+              message: networkResult.message || '等待进入对应课程分类查询'
+            });
+          } else {
+            scopeDeferredCount += 1;
+            result.set(target.targetId, [deferredCandidate(
+              target,
+              networkResult.message || '等待进入对应课程分类查询'
+            )]);
+          }
           continue;
         }
         if (networkResult.outcome === 'UNSUPPORTED') {
@@ -500,7 +538,7 @@
         }
         const apiCandidates = candidatesForTarget(networkResult, target);
         if (apiCandidates.some(candidate => candidate.status === candidateStatus.AVAILABLE)) {
-          const observedScope = String(networkResult.queryScope || '').trim();
+          const observedScope = normalizeQueryScope(networkResult.queryScope);
           const activeScope = currentQueryScope();
           if (hasCurrentQueryScope && observedScope && observedScope !== activeScope) {
             scopeDeferredCount += 1;
@@ -520,8 +558,32 @@
           if (apiCandidates.length === 0) {
             emptyNetworkTargets.push({
               target,
-              queryScope: String(networkResult.queryScope || '').trim()
+              queryScope: normalizeQueryScope(networkResult.queryScope)
             });
+          }
+        }
+      }
+      if (outOfScopeExactTargets.length > 0) {
+        try {
+          const domTargets = outOfScopeExactTargets.map(entry => entry.target);
+          const domResult = await scanDom(domTargets, context);
+          usedDom = true;
+          for (const entry of outOfScopeExactTargets) {
+            const domCandidates = domResult instanceof Map
+              ? domResult.get(entry.target.targetId) || []
+              : [];
+            if (domCandidates.length > 0) {
+              result.set(entry.target.targetId, domCandidates);
+              continue;
+            }
+            scopeDeferredCount += 1;
+            result.set(entry.target.targetId, [deferredCandidate(entry.target, entry.message)]);
+          }
+        } catch (error) {
+          if (error?.name === 'AbortError') throw error;
+          for (const entry of outOfScopeExactTargets) {
+            scopeDeferredCount += 1;
+            result.set(entry.target.targetId, [deferredCandidate(entry.target, entry.message)]);
           }
         }
       }

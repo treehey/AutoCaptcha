@@ -10,6 +10,7 @@ const grabVerificationEngine = require('../grab-verification-engine.js');
 const contentSource = readFileSync(resolve(__dirname, '..', 'content-grab.js'), 'utf8');
 const pageUiSource = readFileSync(resolve(__dirname, '..', 'grab-page-ui.css'), 'utf8');
 const adapterSource = contentSource.slice(0, contentSource.indexOf('const grabEngine ='));
+const domUiSource = contentSource.slice(contentSource.indexOf('// DOM UI Interactions'));
 
 function dataKey(attributeName) {
   return attributeName.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -355,7 +356,11 @@ function createCapturedFavoriteDom() {
   });
   const disabledChoice = new FakeElement('a', {
     classes: ['cv-choice', 'sc-add', 'cv-disabled'],
-    attributes: { 'data-tcid': classId, 'data-number': 'FAVORITE-1' },
+    attributes: {
+      'data-tcid': classId,
+      'data-number': 'FAVORITE-1',
+      'data-teachingclasstype': 'GG02'
+    },
     text: '已满'
   });
   const row = new FakeElement('tr', {
@@ -425,12 +430,13 @@ function loadAdapter(document, options = {}) {
         return null;
       }
     },
-    setTimeout
+    clearTimeout: options.clearTimeout || clearTimeout,
+    setTimeout: options.setTimeout || setTimeout
   });
   context.stopGrab = options.stopGrab || (() => ({ running: false, phase: 'STOPPED' }));
   context.globalThis = context;
   context.window = context;
-  vm.runInContext(`${adapterSource}\nglobalThis.grabNetworkMonitorForTest = grabNetworkMonitor;`, context, {
+  vm.runInContext(`${adapterSource}\n${domUiSource}\nglobalThis.grabNetworkMonitorForTest = grabNetworkMonitor;`, context, {
     filename: 'content-grab-adapter.js'
   });
   context.storageWritesForTest = storageWrites;
@@ -801,6 +807,278 @@ test('maps runtime phases to truthful page button and radar states', () => {
     adapter.grabPageScanLabel({ mode: 'NETWORK', deferredTargetCount: 2 }),
     '接口查询 · 2 个下轮分批'
   );
+});
+
+test('maps real NJU course scopes and builds a two-level automatic navigation path', () => {
+  const professional = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'ZY' },
+    text: '专业'
+  });
+  const publicRoot = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG' },
+    text: '公共'
+  });
+  const publicElective = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG01' },
+    text: '公选课'
+  });
+  const generalEducation = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' },
+    text: '导学/研讨/通识'
+  });
+  const adapter = loadAdapter(new FakeDocument([
+    professional,
+    publicRoot,
+    publicElective,
+    generalEducation
+  ]));
+
+  assert.equal(adapter.courseScopeLabel('GG01'), '公选课');
+  assert.equal(adapter.courseScopeLabel('GG02'), '导学/研讨/通识');
+  assert.deepEqual(Array.from(adapter.courseScopeNavigationPath('GG02')), ['GG', 'GG02']);
+  assert.equal(adapter.findCourseTabElement('GG01'), publicElective);
+  assert.equal(adapter.findCourseTabElement('GG02'), generalEducation);
+});
+
+test('automatically navigates to a missing course scope while monitoring', async () => {
+  const timers = [];
+  let clicked = 0;
+  const publicRoot = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG' },
+    text: '公共'
+  });
+  const generalEducation = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' },
+    text: '导学/研讨/通识'
+  });
+  generalEducation.addEventListener('click', () => { clicked += 1; });
+  const root = new FakeElement('main', {
+    classes: ['result-container'],
+    children: [publicRoot, generalEducation]
+  });
+  const adapter = loadAdapter(new FakeDocument([root]), {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '自动跳转通识课',
+    electiveBatchId: 'BATCH-1',
+    teachingClassId: 'class-auto-scope',
+    teachingClassType: 'GG02',
+    queryScope: 'GG02'
+  });
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(target)}];`, adapter);
+
+  adapter.renderGrabPageStatus({
+    running: true,
+    phase: 'RUNNING',
+    configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: {
+        phase: 'WATCHING',
+        lastMessage: '等待打开 GG02 课程分类以建立查询通道'
+      }
+    }
+  });
+
+  const navigationTimer = timers.find(timer => timer.delay === 200);
+  assert.ok(navigationTimer, 'missing scope should schedule automatic navigation');
+  navigationTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1);
+});
+
+test('continues automatic navigation when page enhancements are disabled', async () => {
+  const timers = [];
+  let clicked = 0;
+  const tab = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' },
+    text: '导学/研讨/通识'
+  });
+  tab.addEventListener('click', () => { clicked += 1; });
+  const root = new FakeElement('main', { classes: ['result-container'], children: [tab] });
+  const adapter = loadAdapter(new FakeDocument([root]), {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '禁用雷达仍需导航',
+    electiveBatchId: 'BATCH-1',
+    teachingClassId: 'class-disabled-radar',
+    teachingClassType: 'GG02',
+    queryScope: 'GG02'
+  });
+  vm.runInContext('grabPageEnhancementsEnabled = false;', adapter);
+
+  adapter.renderGrabPageStatus({
+    running: true,
+    runId: 1,
+    phase: 'RUNNING',
+    configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: {
+        phase: 'WATCHING',
+        lastMessage: '等待打开 GG02 课程分类以建立查询通道'
+      }
+    }
+  });
+
+  const navigationTimer = timers.find(timer => timer.delay === 200);
+  assert.ok(navigationTimer, 'automatic navigation should not depend on the radar panel');
+  navigationTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1);
+});
+
+test('invalidates a waiting automatic navigation after stop and restart', async () => {
+  const timers = [];
+  let clicked = 0;
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '取消旧导航',
+    electiveBatchId: 'BATCH-1',
+    teachingClassId: 'class-cancel-old-navigation',
+    teachingClassType: 'GG02',
+    queryScope: 'GG02'
+  });
+  const running = runId => ({
+    running: true,
+    runId,
+    phase: 'RUNNING',
+    configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: {
+        phase: 'WATCHING',
+        lastMessage: '等待打开 GG02 课程分类以建立查询通道'
+      }
+    }
+  });
+
+  adapter.renderGrabPageStatus(running(1));
+  const firstTimer = timers.find(timer => timer.delay === 200);
+  assert.ok(firstTimer);
+  firstTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  const waitingTimer = timers.find(timer => timer.delay === 250);
+  assert.ok(waitingTimer, 'navigation should be waiting for the tab');
+
+  adapter.renderGrabPageStatus({ running: false, runId: 1, phase: 'STOPPED', configuredTargets: [target] });
+  const tab = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' },
+    text: '导学/研讨/通识'
+  });
+  tab.addEventListener('click', () => { clicked += 1; });
+  root.append(tab);
+  waitingTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 0, 'a stopped navigation must not click a tab that appears later');
+
+  adapter.renderGrabPageStatus(running(2));
+  const secondTimer = timers.filter(timer => timer.delay === 200).at(-1);
+  assert.ok(secondTimer);
+  secondTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1, 'the restarted run may navigate once');
+});
+
+test('invalidates an in-flight automatic navigation when a new run starts', async () => {
+  const timers = [];
+  let clicked = 0;
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '重启旧导航', electiveBatchId: 'BATCH-1', teachingClassId: 'class-restart-navigation',
+    teachingClassType: 'GG02', queryScope: 'GG02'
+  });
+  const state = runId => ({
+    running: true, runId, phase: 'RUNNING', configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: { phase: 'WATCHING', lastMessage: '等待打开 GG02 课程分类以建立查询通道' }
+    }
+  });
+
+  adapter.renderGrabPageStatus(state(1));
+  const firstTimer = timers.find(timer => timer.delay === 200);
+  firstTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  const oldWaitingTimer = timers.find(timer => timer.delay === 250);
+  assert.ok(oldWaitingTimer);
+
+  adapter.renderGrabPageStatus(state(2));
+  const replacementTimer = timers.filter(timer => timer.delay === 200).at(-1);
+  assert.ok(replacementTimer, 'a restarted run should schedule its own navigation');
+  oldWaitingTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 0, 'the prior run must not click after restart');
+
+  const tab = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' }, text: '导学/研讨/通识'
+  });
+  tab.addEventListener('click', () => { clicked += 1; });
+  root.append(tab);
+  replacementTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1);
+});
+
+test('releases an obsolete navigation timer when the run changes before it fires', async () => {
+  const timers = [];
+  let clicked = 0;
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '释放过期定时器', electiveBatchId: 'BATCH-1', teachingClassId: 'class-stale-timer',
+    teachingClassType: 'GG02', queryScope: 'GG02'
+  });
+  const state = runId => ({
+    running: true, runId, phase: 'RUNNING', configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: { phase: 'WATCHING', lastMessage: '等待打开 GG02 课程分类以建立查询通道' }
+    }
+  });
+
+  adapter.renderGrabPageStatus(state(1));
+  const obsoleteTimer = timers.find(timer => timer.delay === 200);
+  assert.ok(obsoleteTimer);
+  adapter.renderGrabPageStatus(state(2));
+  obsoleteTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+
+  const tab = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' }, text: '导学/研讨/通识'
+  });
+  tab.addEventListener('click', () => { clicked += 1; });
+  root.append(tab);
+  adapter.renderGrabPageStatus(state(2));
+  const replacementTimer = timers.filter(timer => timer.delay === 200).at(-1);
+  assert.ok(replacementTimer, 'the new run should be able to reschedule after the stale callback');
+  obsoleteTimer.callback();
+  replacementTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1);
 });
 
 test('course radar styles are scoped, responsive and motion-safe', () => {
@@ -1278,6 +1556,7 @@ test('builds a persistent exact target from a captured favorite-course row', () 
   assert.equal(target.name, '收藏测试课程');
   assert.equal(target.courseNumber, 'FAVORITE-1');
   assert.equal(target.teachingClassId, 'favorite-full');
+  assert.equal(target.teachingClassType, 'GG02');
   assert.equal(target.queryScope, 'SC');
   assert.equal(target.teacher, '教师乙');
   assert.equal(target.time, '周二 3-4 节');
@@ -1291,7 +1570,9 @@ test('imports only visible favorite rows as deduplicated exact targets', async (
     classes: ['course-list'],
     children: [favorite.row, publicCourses.open.row]
   });
-  const adapter = loadAdapter(new FakeDocument([courseList]));
+  const adapter = loadAdapter(new FakeDocument([courseList]), {
+    storageState: { nju_grab_courses: '' }
+  });
 
   const collected = adapter.collectFavoriteCourseTargets();
   assert.equal(collected.length, 1);
@@ -1306,12 +1587,16 @@ test('imports only visible favorite rows as deduplicated exact targets', async (
     enrichedCount: 0,
     existingCount: 0,
     capacitySkippedCount: 0,
-    totalTargetCount: 2
+    totalTargetCount: 1
   });
   const saved = adapter.storageStateForTest[grabTaskModel.STORAGE_KEY];
-  assert.deepEqual(Array.from(saved.targets, target => target.name), ['旧关键词', '收藏测试课程']);
-  assert.equal(saved.targets[1].targetId, 'class:BATCH-1:ZY:favorite-full');
-  assert.equal(saved.targets[1].queryScope, 'SC');
+  assert.equal(saved.targets.length, 1);
+  assert.equal(saved.targets[0].targetId, 'class:BATCH-1:GG02:favorite-full');
+  assert.equal(saved.targets[0].queryScope, 'SC');
+  assert.equal(saved.targets[0].priority, 0);
+  assert.equal(saved.groups.length, 1);
+  assert.equal(saved.groups[0].groupId, 'group:class%3ABATCH-1%3AGG02%3Afavorite-full');
+  assert.equal(saved.groups[0].requiredCount, 1);
 
   const second = await adapter.importFavoriteCourseTargets();
   assert.equal(second.addedCount, 0);
@@ -1325,11 +1610,12 @@ test('favorite import enriches a legacy exact target with its catalog query scop
     name: '收藏测试课程',
     electiveBatchId: 'BATCH-1',
     teachingClassType: 'ZY',
-    teachingClassId: 'favorite-full'
+    teachingClassId: 'favorite-full',
+    priority: 9
   });
   const legacyConfig = grabTaskModel.normalizeTaskConfig({
     schemaVersion: 3,
-    groups: [{ groupId: 'legacy-favorite', targets: [legacyTarget], requiredCount: 1 }]
+    groups: [{ groupId: 'legacy-favorite', label: '收藏保留组', targets: [legacyTarget], requiredCount: 1 }]
   });
   const courseList = new FakeElement('div', {
     classes: ['course-list'],
@@ -1344,10 +1630,15 @@ test('favorite import enriches a legacy exact target with its catalog query scop
   assert.equal(result.addedCount, 0);
   assert.equal(result.enrichedCount, 1);
   assert.equal(adapter.storageWritesForTest.length, 1);
-  assert.equal(
-    adapter.storageStateForTest[grabTaskModel.STORAGE_KEY].targets[0].queryScope,
-    'SC'
-  );
+  const saved = adapter.storageStateForTest[grabTaskModel.STORAGE_KEY];
+  assert.equal(saved.targets.length, 1);
+  assert.equal(saved.targets[0].targetId, 'class:BATCH-1:GG02:favorite-full');
+  assert.equal(saved.targets[0].queryScope, 'SC');
+  assert.equal(saved.targets[0].priority, 9);
+  assert.equal(saved.groups.length, 1);
+  assert.equal(saved.groups[0].groupId, 'legacy-favorite');
+  assert.equal(saved.groups[0].label, '收藏保留组');
+  assert.equal(saved.groups[0].requiredCount, 1);
 });
 
 test('favorite import refuses to treat ordinary course rows as favorites', async () => {

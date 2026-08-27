@@ -516,6 +516,33 @@ test('schedules against the target period and never creates a zero-delay catch-u
   assert.equal(timer.delay, 100);
 });
 
+test('does not schedule or overlap another round while a long scan is still running', async () => {
+  const scan = deferred();
+  const harness = createHarness({
+    async scan() {
+      return scan.promise;
+    },
+    async attempt() {
+      throw new Error('not reached');
+    }
+  });
+
+  harness.engine.start(['公选课目标'], 1000);
+  await waitFor(() => harness.engine.getSnapshot().round === 1
+    && harness.engine.getSnapshot().inFlight);
+  harness.clock.advance(5000);
+
+  assert.equal(harness.engine.getSnapshot().round, 1);
+  assert.equal(harness.engine.getSnapshot().nextRunAt, 0);
+  assert.equal(harness.timers.length, 0, 'no next-round timer exists before the current scan settles');
+
+  scan.resolve(new Map([[keywordTargetId('公选课目标'), []]]));
+  await waitFor(() => !harness.engine.getSnapshot().inFlight);
+
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0].delay, 100, 'an overdue round still rests briefly before continuing');
+});
+
 test('exposes bounded scan diagnostics without coupling the engine to provider internals', async () => {
   const harness = createHarness({
     async scan() {

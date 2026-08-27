@@ -52,6 +52,42 @@ const GRAB_NETWORK_PATHS = new Set([
   GRAB_NETWORK_PATH.STATUS,
   ...GRAB_NETWORK_PATH.QUERIES
 ]);
+const COURSE_SCOPE_INFO = Object.freeze({
+  ZY: Object.freeze({ label: '专业' }),
+  GG: Object.freeze({ label: '公共' }),
+  GG01: Object.freeze({ label: '公选课', parent: 'GG' }),
+  GG02: Object.freeze({ label: '导学/研讨/通识', parent: 'GG' }),
+  KZY: Object.freeze({ label: '跨专业' }),
+  TX: Object.freeze({ label: '通修' }),
+  TY: Object.freeze({ label: '体育' }),
+  YD: Object.freeze({ label: '悦读' }),
+  QB: Object.freeze({ label: '课表查询' }),
+  SC: Object.freeze({ label: '收藏' })
+});
+const LEGACY_COURSE_SCOPE_ALIASES = Object.freeze({
+  TCT1: 'ZY',
+  TCT2: 'KZY',
+  TCT3: 'GG01',
+  TCT4: 'GG02',
+  TCT5: 'TY'
+});
+
+function normalizeCourseScope(scope) {
+  const normalized = String(scope || '').trim().toUpperCase();
+  return LEGACY_COURSE_SCOPE_ALIASES[normalized] || normalized;
+}
+
+function courseScopeLabel(scope) {
+  const normalized = normalizeCourseScope(scope);
+  return COURSE_SCOPE_INFO[normalized]?.label || normalized || '对应分类';
+}
+
+function courseScopeNavigationPath(scope) {
+  const normalized = normalizeCourseScope(scope);
+  if (!normalized) return [];
+  const parent = COURSE_SCOPE_INFO[normalized]?.parent;
+  return parent ? [parent, normalized] : [normalized];
+}
 const grabSelectionVerifier = grabVerificationModule.createVerificationEngine({
   outcome: grabModule.OUTCOME,
   paths: {
@@ -955,6 +991,52 @@ let latestGrabPageState = null;
 let grabPageStatusErrorReported = false;
 let pendingGrabRemoval = null;
 let grabPageEnhancementsEnabled = true;
+let automaticCourseScopeNavigationTimer = null;
+let automaticCourseScopeNavigationInFlight = false;
+let automaticCourseScopeNavigationInFlightToken = null;
+let automaticCourseScopeNavigationGeneration = 0;
+const automaticCourseScopeLastAttempt = new Map();
+const automaticCourseScopeLastAttemptRunId = new Map();
+
+function invalidateAutomaticCourseScopeNavigation() {
+  automaticCourseScopeNavigationGeneration += 1;
+  if (automaticCourseScopeNavigationTimer !== null) {
+    clearTimeout(automaticCourseScopeNavigationTimer.timeoutId ?? automaticCourseScopeNavigationTimer);
+    automaticCourseScopeNavigationTimer = null;
+  }
+  automaticCourseScopeNavigationInFlight = false;
+  automaticCourseScopeNavigationInFlightToken = null;
+}
+
+function automaticCourseScopeNavigationToken() {
+  return {
+    generation: automaticCourseScopeNavigationGeneration,
+    runId: Math.max(0, Number(latestGrabPageState?.runId) || 0)
+  };
+}
+
+function isAutomaticCourseScopeNavigationActive(token) {
+  if (!token || token.generation !== automaticCourseScopeNavigationGeneration) return false;
+  if (!latestGrabPageState?.running) return false;
+  const currentRunId = Math.max(0, Number(latestGrabPageState.runId) || 0);
+  return currentRunId === token.runId;
+}
+
+function missingCourseScopesForState(source) {
+  const missingScopes = new Set();
+  if (!source?.running) return missingScopes;
+  const runtimeTargets = Array.isArray(source.configuredTargets) && source.configuredTargets.length > 0
+    ? source.configuredTargets
+    : configuredGrabTargets;
+  for (const target of runtimeTargets) {
+    const state = source.targetStates?.[target.targetId];
+    if (state && String(state.lastMessage || '').includes('课程分类')) {
+      const scope = target.queryScope || target.teachingClassType;
+      if (scope) missingScopes.add(scope);
+    }
+  }
+  return missingScopes;
+}
 
 function readGrabPanelPreference(key) {
   try {
@@ -1429,13 +1511,26 @@ function ensureGrabPageStatusPanel() {
 
 function renderGrabPageStatus(state) {
   latestGrabPageState = state && typeof state === 'object' ? state : null;
+  const source = latestGrabPageState || {};
+  const missingScopes = missingCourseScopesForState(source);
   if (!grabPageEnhancementsEnabled) {
     removeGrabPageEnhancements();
+    if (source.running && missingScopes.size > 0) {
+      scheduleAutomaticCourseScopeNavigation(missingScopes);
+    } else {
+      invalidateAutomaticCourseScopeNavigation();
+    }
     return;
   }
   const panel = ensureGrabPageStatusPanel();
-  if (!panel) return;
-  const source = latestGrabPageState || {};
+  if (!panel) {
+    if (source.running && missingScopes.size > 0) {
+      scheduleAutomaticCourseScopeNavigation(missingScopes);
+    } else {
+      invalidateAutomaticCourseScopeNavigation();
+    }
+    return;
+  }
   const currentTime = Date.now();
   const summary = grabPageSummaryPresentation(source, currentTime);
   const runId = Math.max(0, Number(source.runId) || 0);
@@ -1487,20 +1582,10 @@ function renderGrabPageStatus(state) {
   }
 
   const scopesContainer = panel.querySelector('[data-nju-grab-missing-scopes]');
-  let hasMissingScope = false;
+  const hasMissingScope = missingScopes.size > 0;
   
   if (source.running) {
-    const missingScopes = new Set();
-    for (const target of runtimeTargets) {
-      const state = source.targetStates?.[target.targetId];
-      if (state && String(state.lastMessage || '').includes('课程分类')) {
-        const scope = target.queryScope || target.teachingClassType;
-        if (scope) missingScopes.add(scope);
-      }
-    }
-    
-    if (missingScopes.size > 0) {
-      hasMissingScope = true;
+    if (hasMissingScope) {
       const scopeKey = Array.from(missingScopes).sort().join(',');
       
       clearNativeCourseTabHighlights();
@@ -1509,10 +1594,8 @@ function renderGrabPageStatus(state) {
       if (scopesContainer.dataset.scopeKey !== scopeKey) {
         scopesContainer.dataset.scopeKey = scopeKey;
         scopesContainer.replaceChildren();
-        const scopeMapping = { 'SC': '收藏', 'TCT1': '本专业', 'TCT2': '跨专业', 'TCT3': '公选', 'TCT4': '通识', 'TCT5': '体育' };
-        
         missingScopes.forEach(scope => {
-          const displayScope = scopeMapping[scope.toUpperCase()] || scope;
+          const displayScope = courseScopeLabel(scope);
           const btn = document.createElement('button');
           btn.className = 'nju-grab-quick-jump-btn';
           btn.type = 'button';
@@ -1535,6 +1618,11 @@ function renderGrabPageStatus(state) {
     scopesContainer.replaceChildren();
   }
   scopesContainer.hidden = !hasMissingScope;
+  if (source.running && hasMissingScope) {
+    scheduleAutomaticCourseScopeNavigation(missingScopes);
+  } else {
+    invalidateAutomaticCourseScopeNavigation();
+  }
 
   const targetContainer = panel.querySelector('[data-nju-grab-status-targets]');
   targetContainer.replaceChildren();
@@ -1770,12 +1858,21 @@ function targetFromCourseElement(element) {
   const courseId = firstAttribute([courseRow, element, idElement], [
     'data-courseid', 'data-course-id', 'data-kcid'
   ]);
+  const typedChoiceElement = [...(element?.querySelectorAll?.('.cv-choice') || [])]
+    .find(candidate => {
+      const value = candidate.getAttribute?.('data-teachingclasstype');
+      return value && value !== 'undefined' && value !== 'null';
+    });
+  const explicitTypeElement = [element, idElement].find(candidate => {
+    const value = candidate?.getAttribute?.('data-teachingclasstype');
+    return value && value !== 'undefined' && value !== 'null';
+  });
 
   return grabTaskModel.normalizeTarget({
     kind: grabTaskModel.TARGET_KIND.TEACHING_CLASS,
     name: courseName,
     electiveBatchId: currentElectiveBatchId(),
-    teachingClassType: currentTeachingClassType(idElement),
+    teachingClassType: currentTeachingClassType(typedChoiceElement || explicitTypeElement || idElement),
     teachingClassId,
     queryScope: currentCourseQueryScope(element),
     courseId,
@@ -1856,26 +1953,47 @@ async function importFavoriteCourseTargets() {
     intervalMs: stored.nju_grab_interval
   });
   const discoveredByTargetId = new Map(discoveredTargets.map(target => [target.targetId, target]));
+  const discoveredForTarget = target => discoveredByTargetId.get(target.targetId)
+    || discoveredTargets.find(discovered => exactTargetIdentityMatches(discovered, target))
+    || null;
   let enrichedCount = 0;
   const enrichedGroups = current.groups.map(group => ({
     ...group,
     targets: group.targets.map(target => {
-      const discovered = discoveredByTargetId.get(target.targetId);
-      if (!discovered?.queryScope || discovered.queryScope === target.queryScope) return target;
+      const discovered = discoveredForTarget(target);
+      if (!discovered) return target;
+      const enriched = {
+        ...target,
+        teachingClassType: discovered.teachingClassType || target.teachingClassType,
+        queryScope: discovered.queryScope || target.queryScope,
+        courseId: discovered.courseId || target.courseId,
+        courseNumber: discovered.courseNumber || target.courseNumber,
+        teachingClassNo: discovered.teachingClassNo || target.teachingClassNo,
+        teacher: discovered.teacher || target.teacher,
+        time: discovered.time || target.time,
+        campus: discovered.campus || target.campus
+      };
+      const changed = [
+        'teachingClassType', 'queryScope', 'courseId', 'courseNumber',
+        'teachingClassNo', 'teacher', 'time', 'campus'
+      ].some(key => enriched[key] !== target[key]);
+      if (!changed) return target;
       enrichedCount += 1;
-      return { ...target, queryScope: discovered.queryScope };
+      return enriched;
     })
   }));
-  const existingTargetIds = new Set(current.targets.map(target => target.targetId));
+  const wasExisting = discovered => current.targets.some(target => {
+    return target.targetId === discovered.targetId || exactTargetIdentityMatches(target, discovered);
+  });
   let next = enrichedCount > 0
     ? grabTaskModel.normalizeTaskConfig({ ...current, groups: enrichedGroups, updatedAt: Date.now() })
     : current;
   for (const target of discoveredTargets) next = grabTaskModel.addTargetToTaskConfig(next, target);
 
   const savedTargetIds = new Set(next.targets.map(target => target.targetId));
-  const existingCount = discoveredTargets.filter(target => existingTargetIds.has(target.targetId)).length;
+  const existingCount = discoveredTargets.filter(wasExisting).length;
   const addedCount = discoveredTargets.filter(target => {
-    return !existingTargetIds.has(target.targetId) && savedTargetIds.has(target.targetId);
+    return !wasExisting(target) && savedTargetIds.has(target.targetId);
   }).length;
   const capacitySkippedCount = Math.max(0, discoveredTargets.length - existingCount - addedCount);
   if (addedCount > 0 || enrichedCount > 0) {
@@ -2401,6 +2519,7 @@ function getStateSnapshot() {
 
 function startGrab(taskConfig, intervalMs) {
   if (!grabEngine) return getStateSnapshot();
+  invalidateAutomaticCourseScopeNavigation();
   cancelGrabAuthRecoveryWatch();
   grabLifecycleCommandVersion += 1;
   grabAuthRecovery = null;
@@ -2414,6 +2533,7 @@ function startGrab(taskConfig, intervalMs) {
 
 function stopGrab() {
   if (!grabEngine) return getStateSnapshot();
+  invalidateAutomaticCourseScopeNavigation();
   cancelGrabAuthRecoveryWatch();
   grabLifecycleCommandVersion += 1;
   if (pausedGrabTaskSnapshot?.phase === 'PAUSED_AUTH' && grabAuthRecovery?.pending) {
@@ -2437,6 +2557,7 @@ function stopGrab() {
 
 function revokeGrabTaskLease(taskId) {
   if (!activeGrabTaskId || taskId !== activeGrabTaskId) return getStateSnapshot();
+  invalidateAutomaticCourseScopeNavigation();
   grabLifecycleCommandVersion += 1;
   cancelGrabAuthRecoveryWatch();
   const snapshot = grabEngine?.stop('另一个选课标签页已接管') || getStateSnapshot();
@@ -3974,19 +4095,17 @@ storageRemove(['nju_click_captcha_samples_v1']).catch(() => {});
 void Promise.resolve(grabTaskRestoreReady).finally(() => initializeClickCaptchaSolver());
 // DOM UI Interactions
 function findCourseTabElement(scope) {
-  if (!scope) return null;
-  const scopeMapping = {
-      'SC': '收藏',
-      'TCT1': '本专业',
-      'TCT2': '跨专业',
-      'TCT3': '公选',
-      'TCT4': '通识',
-      'TCT5': '体育'
-  };
-  const displayScope = scopeMapping[scope.toUpperCase()] || scope;
+  const normalizedScope = normalizeCourseScope(scope);
+  if (!normalizedScope) return null;
+  const displayScope = courseScopeLabel(normalizedScope);
   const isVisible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-  const tabs = [...document.querySelectorAll('a, button, li, [role="tab"], .cv-tab, .nav-item, .el-tabs__item, .ant-tabs-tab, .item')]
+  const tabs = [...document.querySelectorAll('a, button, li, [role="tab"], [data-teachingclasstype], .cv-tab, .nav-item, .el-tabs__item, .ant-tabs-tab, .item')]
       .filter(el => !el.closest('table, tbody, tr, .course-jxb-container, .course-list, .cv-tbody, .nju-grab-status-panel'));
+  const exactScopeTabs = tabs.filter(tab => {
+    return isVisible(tab)
+      && normalizeCourseScope(tab.getAttribute?.('data-teachingclasstype')) === normalizedScope;
+  });
+  if (exactScopeTabs.length > 0) return exactScopeTabs[exactScopeTabs.length - 1];
   const targetTabs = tabs.filter(tab => {
       if (!isVisible(tab)) return false;
       const text = (tab.textContent || '').trim();
@@ -3999,20 +4118,100 @@ function findCourseTabElement(scope) {
   return targetTabs.length > 0 ? targetTabs[targetTabs.length - 1] : null;
 }
 
-function jumpToCourseTab(scope, forceAlert = true) {
-  const targetTab = findCourseTabElement(scope);
-  if (targetTab) {
-      const simulateClick = el => {
-          for (const eventName of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-              el.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
-          }
-      };
-      simulateClick(targetTab);
-  } else if (forceAlert) {
-      const scopeMapping = { 'SC': '收藏', 'TCT1': '本专业', 'TCT2': '跨专业', 'TCT3': '公选', 'TCT4': '通识', 'TCT5': '体育' };
-      const displayScope = scopeMapping[scope.toUpperCase()] || scope;
-      alert(`未在屏幕上找到可见的“${displayScope}”切换按钮，请手动点击对应的选课标签页。`);
+function activateCourseTabElement(element, isActive = () => true) {
+  if (!element) return false;
+  if (typeof element.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
+    for (const eventName of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      if (!isActive()) return false;
+      element.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
+    }
+    return true;
   }
+  if (!isActive()) return false;
+  if (typeof element.click === 'function') {
+    element.click();
+    return true;
+  }
+  return false;
+}
+
+async function waitForCourseTab(scope, attempts = 8, isActive = () => true) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!isActive()) return null;
+    const tab = findCourseTabElement(scope);
+    if (tab) return tab;
+    await sleep(250);
+    if (!isActive()) return null;
+  }
+  return null;
+}
+
+async function jumpToCourseTab(scope, forceAlert = true, token = null) {
+  const normalizedScope = normalizeCourseScope(scope);
+  const isActive = () => token
+    ? isAutomaticCourseScopeNavigationActive(token)
+    : true;
+  if (!isActive()) return false;
+  const directTab = findCourseTabElement(normalizedScope);
+  if (directTab) return activateCourseTabElement(directTab, isActive);
+
+  const path = courseScopeNavigationPath(normalizedScope);
+  for (const step of path) {
+    if (!isActive()) return false;
+    const targetTab = await waitForCourseTab(step, step === normalizedScope ? 8 : 2, isActive);
+    if (!targetTab || !activateCourseTabElement(targetTab, isActive)) {
+      if (!isActive()) return false;
+      if (forceAlert) {
+        alert(`未在屏幕上找到可见的“${courseScopeLabel(normalizedScope)}”切换按钮，请手动点击对应的选课标签页。`);
+      }
+      return false;
+    }
+    if (step !== normalizedScope) {
+      await sleep(300);
+      if (!isActive()) return false;
+    }
+  }
+  return true;
+}
+
+function scheduleAutomaticCourseScopeNavigation(scopes) {
+  if (automaticCourseScopeNavigationTimer !== null) return;
+  if (automaticCourseScopeNavigationInFlight) {
+    if (isAutomaticCourseScopeNavigationActive(automaticCourseScopeNavigationInFlightToken)) return;
+    invalidateAutomaticCourseScopeNavigation();
+  }
+  const currentTime = Date.now();
+  const candidates = [...new Set([...scopes].map(normalizeCourseScope).filter(Boolean))]
+    .sort((left, right) => {
+      return (automaticCourseScopeLastAttempt.get(left) || 0)
+        - (automaticCourseScopeLastAttempt.get(right) || 0);
+    });
+  const scope = candidates.find(candidate => {
+    const lastRunId = automaticCourseScopeLastAttemptRunId.get(candidate);
+    const currentRunId = Math.max(0, Number(latestGrabPageState?.runId) || 0);
+    return currentTime - (automaticCourseScopeLastAttempt.get(candidate) || 0) >= 4000
+      || (currentRunId > 0 && lastRunId !== undefined && lastRunId !== currentRunId);
+  });
+  if (!scope) return;
+
+  const token = automaticCourseScopeNavigationToken();
+  const scheduledTimer = { timeoutId: null };
+  automaticCourseScopeNavigationTimer = scheduledTimer;
+  scheduledTimer.timeoutId = setTimeout(() => {
+    if (automaticCourseScopeNavigationTimer !== scheduledTimer) return;
+    automaticCourseScopeNavigationTimer = null;
+    if (!isAutomaticCourseScopeNavigationActive(token)) return;
+    automaticCourseScopeNavigationInFlight = true;
+    automaticCourseScopeNavigationInFlightToken = token;
+    automaticCourseScopeLastAttempt.set(scope, Date.now());
+    automaticCourseScopeLastAttemptRunId.set(scope, token.runId);
+    void jumpToCourseTab(scope, false, token).finally(() => {
+      if (token.generation === automaticCourseScopeNavigationGeneration) {
+        automaticCourseScopeNavigationInFlight = false;
+        automaticCourseScopeNavigationInFlightToken = null;
+      }
+    });
+  }, 200);
 }
 
 function highlightNativeCourseTab(scope) {
