@@ -302,7 +302,93 @@
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-variant-numeric: tabular-nums;
   transform: translateZ(0);
-  transition: height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), 
+              width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), 
+              transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), 
+              background-color 0.3s ease,
+              box-shadow 0.3s ease;
+  will-change: width, height, transform;
+}
+
+@keyframes nju-grab-siri-glow {
+  0% { box-shadow: 0 0 0 1px rgba(255,255,255,0.5) inset, 0 0 15px rgba(175,82,222,0.4), 0 8px 32px rgba(0,0,0,0.1); }
+  100% { box-shadow: 0 0 0 1px rgba(255,255,255,0.5) inset, 0 0 35px rgba(88,86,214,0.8), 0 8px 32px rgba(0,0,0,0.1); }
+}
+
+@keyframes nju-grab-success-burst {
+  0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+  100% { box-shadow: 0 0 0 40px rgba(52, 199, 89, 0), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+}
+
+@keyframes nju-grab-bounce-left {
+  0%, 20%, 50%, 80%, 100% { transform: translate3d(0, -50%, 0); }
+  40% { transform: translate3d(-6px, -50%, 0); }
+  60% { transform: translate3d(-3px, -50%, 0); }
+}
+
+.nju-grab-tutorial-tooltip {
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  background: var(--nju-panel-blue);
+  color: #fff;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+  pointer-events: none;
+  animation: nju-grab-bounce-left 2s infinite cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: 100;
+  white-space: nowrap;
+}
+
+.nju-grab-tutorial-tooltip::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-width: 4px 5px 4px 0;
+  border-style: solid;
+  border-color: transparent var(--nju-panel-blue) transparent transparent;
+}
+
+.nju-grab-resize-handle-l.is-tutoring {
+  box-shadow: inset 4px 0 12px -4px rgba(0, 122, 255, 0.5);
+}
+
+.nju-grab-status-panel.is-solving-captcha {
+  animation: nju-grab-siri-glow 1.5s infinite alternate ease-in-out;
+}
+
+.nju-grab-status-panel[data-tone="success"] {
+  animation: nju-grab-success-burst 0.8s cubic-bezier(0.1, 0.8, 0.2, 1);
+}
+
+.nju-grab-status-panel.is-dragging {
+  transition: none !important;
+}
+
+.nju-grab-status-panel.is-mini {
+  width: 240px;
+  height: 48px !important;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.nju-grab-status-panel.is-mini .nju-grab-tutorial-tooltip {
+  display: none !important;
+}
+.nju-grab-status-panel.is-mini .nju-grab-status-toggle {
+  min-height: 48px;
+}
+.nju-grab-status-panel.is-mini .nju-grab-status-body,
+.nju-grab-status-panel.is-mini .nju-grab-status-actions,
+.nju-grab-status-panel.is-mini .nju-grab-status-chevron,
+.nju-grab-status-panel.is-mini .nju-grab-pill-grabber,
+.nju-grab-status-panel.is-mini .nju-grab-resize-handle-l,
+.nju-grab-status-panel.is-mini .nju-grab-status-copy > span {
+  display: none !important;
 }
 
 .nju-grab-status-panel [hidden] {
@@ -345,6 +431,32 @@
   align-items: center;
   gap: 8px;
   padding-right: 14px;
+}
+
+.nju-grab-minimize-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #8e8e93;
+  background: rgba(60, 60, 67, 0.05);
+  font-family: inherit;
+  font-size: 16px;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+}
+
+.nju-grab-minimize-btn:hover,
+.nju-grab-minimize-btn:focus-visible {
+  color: #2c2c2e;
+  background: rgba(60, 60, 67, 0.1);
 }
 
 .nju-grab-more-btn {

@@ -977,6 +977,7 @@ const GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY = 'nju_grab_page_enhancements_enabled';
 const GRAB_TARGET_BUTTON_CLASS = 'nju-grab-add-target';
 const GRAB_PAGE_STATUS_CLASS = 'nju-grab-status-panel';
 const GRAB_PANEL_WIDTH_KEY = 'njuGrabPanelWidth';
+const GRAB_PANEL_MINI_TUTORIAL_KEY = 'njuGrabPanelMiniTutorialSeen';
 const GRAB_PANEL_HEIGHT_KEY = 'njuGrabPanelHeight';
 const GRAB_PANEL_HIDE_SELECTED_KEY = 'njuGrabPanelHideSelected';
 const GRAB_INTERVAL_PRESETS = Object.freeze([3000, 5000, 10000, 30000]);
@@ -1496,7 +1497,7 @@ function ensureGrabPageStatusPanel() {
   panel.setAttribute('aria-label', '课程监控状态');
   panel.innerHTML = `
     <div class="nju-grab-pill-grabber" data-resize="top"></div>
-    <div class="nju-grab-resize-handle-l" data-resize="left"></div>
+    <div class="nju-grab-resize-handle-l" data-resize="left" title="双击收起为胶囊"></div>
     <div class="nju-grab-status-head">
       <button class="nju-grab-status-toggle" type="button" data-nju-grab-status-toggle aria-expanded="false">
         <svg class="nju-grab-drag-handle" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="opacity: 0.3; cursor: grab;"><path d="M8 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM8 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM8 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0z"/></svg>
@@ -1578,6 +1579,25 @@ function ensureGrabPageStatusPanel() {
         return;
       }
       panel.dataset.lastTopClick = String(now);
+    }
+    
+    // Check for double click on left handle to toggle Mini Mode
+    if (type === 'left') {
+      const now = Date.now();
+      if (panel.dataset.lastLeftClick && (now - Number(panel.dataset.lastLeftClick)) < 300) {
+        panel.classList.toggle('is-mini');
+        panel.dataset.lastLeftClick = '0';
+        
+        // Dismiss tutorial
+        const tooltip = panel.querySelector('.nju-grab-tutorial-tooltip');
+        if (tooltip) {
+           tooltip.remove();
+           panel.querySelector('.nju-grab-resize-handle-l')?.classList.remove('is-tutoring');
+           writeGrabPanelPreference(GRAB_PANEL_MINI_TUTORIAL_KEY, '1');
+        }
+        return;
+      }
+      panel.dataset.lastLeftClick = String(now);
     }
     
     const startX = e.clientX;
@@ -1671,9 +1691,13 @@ function ensureGrabPageStatusPanel() {
         setTimeout(() => wasDragged = false, 150);
       } else {
         // Not dragged, meaning it was a click!
-        const isToggle = !!e.target.closest('[data-nju-grab-status-toggle], .nju-grab-drag-handle, .nju-grab-status-head');
-        if (isToggle) {
-          setGrabPageStatusExpanded(!grabPageStatusExpanded);
+        if (panel.classList.contains('is-mini')) {
+          panel.classList.remove('is-mini');
+        } else {
+          const isToggle = !!e.target.closest('[data-nju-grab-status-toggle], .nju-grab-drag-handle, .nju-grab-status-head');
+          if (isToggle) {
+            setGrabPageStatusExpanded(!grabPageStatusExpanded);
+          }
         }
       }
     };
@@ -1804,8 +1828,11 @@ function ensureGrabPageStatusPanel() {
     hideGrabPageStatusPanel();
   });
   const dismissPointerdown = event => {
-    if (moreMenu && !moreMenu.hidden && !panel.contains?.(event.target)
-      && !event.target?.closest?.('.nju-grab-more-menu')) closeMoreMenu();
+    if (moreMenu && !moreMenu.hidden 
+      && !event.target?.closest?.('.nju-grab-more-btn')
+      && !event.target?.closest?.('.nju-grab-more-menu')) {
+      closeMoreMenu();
+    }
     if (openGrabTargetMenu && !event.target?.closest?.('.nju-grab-target-actions')
       && !event.target?.closest?.('.nju-grab-target-menu')) {
       closeGrabTargetMenuPortal();
@@ -1847,6 +1874,15 @@ function ensureGrabPageStatusPanel() {
   panel.querySelector('[data-nju-grab-status-close]')?.setAttribute('aria-label', '隐藏面板');
   panel.querySelector('[data-nju-grab-status-close]')?.setAttribute('title', '隐藏课程监控面板');
   setGrabPageStatusExpanded(grabPageStatusExpanded);
+  
+  if (!readGrabPanelPreference(GRAB_PANEL_MINI_TUTORIAL_KEY)) {
+    const tooltip = document.createElement('div');
+    tooltip.className = 'nju-grab-tutorial-tooltip';
+    tooltip.innerHTML = '✨ 双击边缘缩为胶囊';
+    panel.appendChild(tooltip);
+    panel.querySelector('.nju-grab-resize-handle-l')?.classList.add('is-tutoring');
+  }
+
   return panel;
 }
 
@@ -4057,6 +4093,7 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
     && clickCaptchaSolver.autoClick;
   if (automaticLoginRequested) {
     grabLoginShield.show(GRAB_LOGIN_SHIELD_STATUS.LOADING, '正在识别验证码…');
+    if (grabPageStatusPanel) grabPageStatusPanel.classList.add('is-solving-captcha');
   } else {
     grabLoginShield.clear();
   }
@@ -4156,6 +4193,7 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
     }
   } finally {
     if (!loginSubmitted && !errorShieldShown) grabLoginShield.clear();
+    if (grabPageStatusPanel) grabPageStatusPanel.classList.remove('is-solving-captcha');
     clickCaptchaSolver.running = false;
     notifyClickCaptchaSolverUpdate();
   }
