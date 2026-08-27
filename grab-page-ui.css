@@ -302,9 +302,9 @@
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-variant-numeric: tabular-nums;
   transform: translateZ(0);
-  transition: height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), 
-              width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), 
-              transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), 
+  transition: height 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+              width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+              transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
               background-color 0.3s ease,
               box-shadow 0.3s ease;
   will-change: width, height, transform;
@@ -364,10 +364,6 @@
 
 .nju-grab-status-panel[data-tone="success"] {
   animation: nju-grab-success-burst 0.8s cubic-bezier(0.1, 0.8, 0.2, 1);
-}
-
-.nju-grab-status-panel.is-dragging {
-  transition: none !important;
 }
 
 .nju-grab-status-panel.is-mini {
@@ -1107,11 +1103,18 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .nju-grab-status-panel,
+  .nju-grab-tutorial-tooltip,
   .nju-grab-add-target,
   .course-jxb-container .jxb-item.nju-grab-enhanced,
   .nju-grab-status-chevron,
-  .nju-grab-status-close {
-    transition: none;
+  .nju-grab-status-close,
+  .nju-grab-control-btn,
+  .nju-grab-minimize-btn,
+  .nju-grab-more-btn,
+  .nju-grab-now-btn {
+    animation: none !important;
+    transition: none !important;
   }
 
   .nju-grab-add-target.is-loading::before {

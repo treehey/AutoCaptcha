@@ -1321,11 +1321,33 @@ function grabPageSummaryPresentation(state, currentTime = Date.now()) {
 function setGrabPageStatusExpanded(expanded) {
   grabPageStatusExpanded = Boolean(expanded);
   if (!grabPageStatusPanel) return;
+  const mini = grabPageStatusPanel.classList.contains('is-mini');
   grabPageStatusPanel.classList.toggle('is-expanded', grabPageStatusExpanded);
   const toggle = grabPageStatusPanel.querySelector('[data-nju-grab-status-toggle]');
   const body = grabPageStatusPanel.querySelector('[data-nju-grab-status-body]');
-  toggle?.setAttribute('aria-expanded', String(grabPageStatusExpanded));
-  if (body) body.hidden = !grabPageStatusExpanded;
+  toggle?.setAttribute('aria-expanded', String(!mini && grabPageStatusExpanded));
+  if (body) body.hidden = mini || !grabPageStatusExpanded;
+}
+
+function dismissGrabPanelMiniTutorial(panel) {
+  const tooltip = panel?.querySelector?.('.nju-grab-tutorial-tooltip');
+  tooltip?.remove?.();
+  panel?.querySelector?.('.nju-grab-resize-handle-l')?.classList.remove('is-tutoring');
+  writeGrabPanelPreference(GRAB_PANEL_MINI_TUTORIAL_KEY, '1');
+}
+
+function setGrabPanelMiniMode(panel, mini, { dismissTutorial = false } = {}) {
+  if (!panel) return;
+  const enabled = Boolean(mini);
+  panel.classList.toggle('is-mini', enabled);
+  const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
+  const body = panel.querySelector('[data-nju-grab-status-body]');
+  const miniButton = panel.querySelector('[data-nju-grab-mini]');
+  toggle?.setAttribute('aria-expanded', String(!enabled && grabPageStatusExpanded));
+  toggle?.setAttribute('aria-label', enabled ? '展开课程监控面板' : '折叠或展开课程监控状态');
+  miniButton?.setAttribute('aria-pressed', String(enabled));
+  if (body) body.hidden = enabled || !grabPageStatusExpanded;
+  if (dismissTutorial) dismissGrabPanelMiniTutorial(panel);
 }
 
 function revealGrabPageStatusPanel() {
@@ -1510,6 +1532,7 @@ function ensureGrabPageStatusPanel() {
       </button>
       <div class="nju-grab-status-actions">
          <button class="nju-grab-control-btn" type="button" data-nju-grab-control aria-label="开始监控"></button>
+         <button class="nju-grab-minimize-btn" type="button" data-nju-grab-mini aria-label="收起为胶囊" aria-pressed="false" title="收起为胶囊">−</button>
          <button class="nju-grab-more-btn" type="button" data-nju-grab-more aria-expanded="false" aria-haspopup="menu" aria-label="更多课程监控操作" title="更多">•••</button>
          <button class="nju-grab-status-close" type="button" data-nju-grab-status-close aria-label="隐藏面板" title="隐藏课程监控面板">×</button>
          <div class="nju-grab-more-menu" data-nju-grab-more-menu role="menu" hidden>
@@ -1585,21 +1608,13 @@ function ensureGrabPageStatusPanel() {
     if (type === 'left') {
       const now = Date.now();
       if (panel.dataset.lastLeftClick && (now - Number(panel.dataset.lastLeftClick)) < 300) {
-        panel.classList.toggle('is-mini');
+        setGrabPanelMiniMode(panel, !panel.classList.contains('is-mini'), { dismissTutorial: true });
         panel.dataset.lastLeftClick = '0';
-        
-        // Dismiss tutorial
-        const tooltip = panel.querySelector('.nju-grab-tutorial-tooltip');
-        if (tooltip) {
-           tooltip.remove();
-           panel.querySelector('.nju-grab-resize-handle-l')?.classList.remove('is-tutoring');
-           writeGrabPanelPreference(GRAB_PANEL_MINI_TUTORIAL_KEY, '1');
-        }
         return;
       }
       panel.dataset.lastLeftClick = String(now);
     }
-    
+
     const startX = e.clientX;
     const startY = e.clientY;
     
@@ -1689,16 +1704,6 @@ function ensureGrabPageStatusPanel() {
       if (isDragging) {
         panel.style.transition = '';
         setTimeout(() => wasDragged = false, 150);
-      } else {
-        // Not dragged, meaning it was a click!
-        if (panel.classList.contains('is-mini')) {
-          panel.classList.remove('is-mini');
-        } else {
-          const isToggle = !!e.target.closest('[data-nju-grab-status-toggle], .nju-grab-drag-handle, .nju-grab-status-head');
-          if (isToggle) {
-            setGrabPageStatusExpanded(!grabPageStatusExpanded);
-          }
-        }
       }
     };
 
@@ -1707,7 +1712,22 @@ function ensureGrabPageStatusPanel() {
     head.addEventListener('pointercancel', onPointerUp);
   });
 
-  // Remove the old click listener for the toggle since we handle it in pointerup now
+  panel.querySelector('[data-nju-grab-status-toggle]')?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (wasDragged) return;
+    if (panel.classList.contains('is-mini')) {
+      setGrabPanelMiniMode(panel, false);
+      return;
+    }
+    setGrabPageStatusExpanded(!grabPageStatusExpanded);
+  });
+  panel.querySelector('[data-nju-grab-mini]')?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    setGrabPanelMiniMode(panel, true, { dismissTutorial: true });
+    panel.querySelector('[data-nju-grab-status-toggle]')?.focus?.();
+  });
   panel.querySelector('[data-nju-grab-control]')?.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
@@ -1828,7 +1848,7 @@ function ensureGrabPageStatusPanel() {
     hideGrabPageStatusPanel();
   });
   const dismissPointerdown = event => {
-    if (moreMenu && !moreMenu.hidden 
+    if (moreMenu && !moreMenu.hidden
       && !event.target?.closest?.('.nju-grab-more-btn')
       && !event.target?.closest?.('.nju-grab-more-menu')) {
       closeMoreMenu();
@@ -1874,11 +1894,12 @@ function ensureGrabPageStatusPanel() {
   panel.querySelector('[data-nju-grab-status-close]')?.setAttribute('aria-label', '隐藏面板');
   panel.querySelector('[data-nju-grab-status-close]')?.setAttribute('title', '隐藏课程监控面板');
   setGrabPageStatusExpanded(grabPageStatusExpanded);
-  
+
   if (!readGrabPanelPreference(GRAB_PANEL_MINI_TUTORIAL_KEY)) {
     const tooltip = document.createElement('div');
     tooltip.className = 'nju-grab-tutorial-tooltip';
-    tooltip.innerHTML = '✨ 双击边缘缩为胶囊';
+    tooltip.setAttribute('role', 'status');
+    tooltip.textContent = '点“−”或双击边缘收起';
     panel.appendChild(tooltip);
     panel.querySelector('.nju-grab-resize-handle-l')?.classList.add('is-tutoring');
   }

@@ -91,11 +91,13 @@ class FakeElement {
     this.ownText = '';
     this.children = [];
     if (!String(value).includes('data-nju-grab-remove-confirm')) return;
+    const leftResize = new FakeElement('div', { classes: ['nju-grab-resize-handle-l'], attributes: { 'data-resize': 'left' } });
     const head = new FakeElement('div', { classes: ['nju-grab-status-head'] });
     const toggle = new FakeElement('button', { classes: ['nju-grab-status-toggle'], attributes: { 'data-nju-grab-status-toggle': '' } });
     const control = new FakeElement('button', { attributes: { 'data-nju-grab-control': '' } });
+    const mini = new FakeElement('button', { classes: ['nju-grab-minimize-btn'], attributes: { 'data-nju-grab-mini': '', 'aria-label': '收起为胶囊', 'aria-pressed': 'false' } });
     const close = new FakeElement('button', { attributes: { 'data-nju-grab-status-close': '' } });
-    head.append(toggle, control, close);
+    head.append(toggle, control, mini, close);
     const body = new FakeElement('div', { classes: ['nju-grab-status-body'], attributes: { 'data-nju-grab-status-body': '' } });
     body.append(
       new FakeElement('strong', { attributes: { 'data-nju-grab-status-title': '' } }),
@@ -112,7 +114,7 @@ class FakeElement {
     );
     body.append(new FakeElement('div', { classes: ['nju-grab-missing-scopes'], attributes: { 'data-nju-grab-missing-scopes': '' } }));
     body.append(targets, confirm);
-    this.append(head, body);
+    this.append(leftResize, head, body);
   }
 
   get innerHTML() { return this._innerHTML || ''; }
@@ -549,6 +551,37 @@ test('labels the running primary action as stop and keeps the header action as h
   assert.equal(control.textContent, '停止');
   assert.equal(close.getAttribute('aria-label'), '隐藏面板');
   assert.equal(close.getAttribute('title'), '隐藏课程监控面板');
+});
+
+test('offers an accessible mini-mode button and restores the panel from its semantic header control', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const mini = panel.querySelector('[data-nju-grab-mini]');
+  const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
+  const body = panel.querySelector('[data-nju-grab-status-body]');
+
+  assert.equal(mini.getAttribute('aria-label'), '收起为胶囊');
+  mini.click();
+  assert.equal(panel.classList.contains('is-mini'), true);
+  assert.equal(mini.getAttribute('aria-pressed'), 'true');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(toggle.getAttribute('aria-label'), '展开课程监控面板');
+  assert.equal(body.hidden, true);
+
+  toggle.click();
+  assert.equal(panel.classList.contains('is-mini'), false);
+  assert.equal(mini.getAttribute('aria-pressed'), 'false');
+  assert.equal(toggle.getAttribute('aria-label'), '折叠或展开课程监控状态');
+  assert.equal(body.hidden, false);
+});
+
+test('reduced-motion styling disables the redesigned panel animations', () => {
+  const reducedMotion = pageUiSource.slice(pageUiSource.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.match(reducedMotion, /\.nju-grab-status-panel,/);
+  assert.match(reducedMotion, /\.nju-grab-tutorial-tooltip,/);
+  assert.match(reducedMotion, /animation:\s*none\s*!important/);
+  assert.match(reducedMotion, /transition:\s*none\s*!important/);
 });
 
 test('treats auth recovery as active so the primary action stops recovery instead of starting a task', () => {
