@@ -1391,10 +1391,25 @@ function ensureGrabPageStatusPanel() {
     startY = e.clientY - currentTranslateY;
     head.setPointerCapture(e.pointerId);
 
+    const rect = panel.getBoundingClientRect();
+    const baseLeft = rect.left - currentTranslateX;
+    const baseTop = rect.top - currentTranslateY;
+    const baseWidth = rect.width;
+    
+    // Bounds constraints
+    const minDy = -baseTop + 12; 
+    const maxDy = window.innerHeight - 40 - baseTop;
+    const maxDx = window.innerWidth - 40 - baseLeft;
+    const minDx = 40 - baseWidth - baseLeft;
+
     const onPointerMove = moveEvent => {
-      const dx = moveEvent.clientX - startX;
-      const dy = moveEvent.clientY - startY;
-      if (!isDragging && (Math.abs(moveEvent.clientX - currentTranslateX - startX) > 3 || Math.abs(moveEvent.clientY - currentTranslateY - startY) > 3)) {
+      let rawDx = moveEvent.clientX - startX;
+      let rawDy = moveEvent.clientY - startY;
+      
+      const dx = Math.max(minDx, Math.min(rawDx, maxDx));
+      const dy = Math.max(minDy, Math.min(rawDy, maxDy));
+
+      if (!isDragging && (Math.abs(dx - currentTranslateX) > 3 || Math.abs(dy - currentTranslateY) > 3)) {
         isDragging = true;
         wasDragged = true;
         panel.style.transition = 'none';
