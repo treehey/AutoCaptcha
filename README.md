@@ -9,8 +9,8 @@
   南京大学统一身份认证与选课系统的本地登录、验证码处理和课程监控扩展
 
   [![Edge Add-ons](https://img.shields.io/badge/Edge_商店-获取扩展-0078D7?style=flat-square&logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/hebfkinlcalfnmeeeaciaghoialpmnfp)
-  [![Latest release](https://img.shields.io/github/v/release/treehey/AutoCaptcha?style=flat-square&color=634798)](https://github.com/treehey/AutoCaptcha/releases/latest)
-  [![License](https://img.shields.io/github/license/treehey/AutoCaptcha?style=flat-square&color=634798)](LICENSE)
+  [![Latest release](https://img.shields.io/github/v/release/treehey/NJU-Login-Pro?style=flat-square&color=634798)](https://github.com/treehey/NJU-Login-Pro/releases/latest)
+  [![License](https://img.shields.io/github/license/treehey/NJU-Login-Pro?style=flat-square&color=634798)](LICENSE)
 
   [安装与上手](#安装) · [支持范围](#支持范围) · [隐私与权限](#隐私与权限) · [问题排查](docs/troubleshooting.md)
 
@@ -44,7 +44,7 @@ NJU Login Pro 面向需要访问南京大学统一身份认证和选课系统的
 
 ### Chrome 或 Edge 手动安装
 
-1. 从 [GitHub Releases](https://github.com/treehey/AutoCaptcha/releases/latest) 下载 `NJU-Login-Pro-v*.zip`，不要下载 GitHub 自动生成的 `Source code`。
+1. 从 [GitHub Releases](https://github.com/treehey/NJU-Login-Pro/releases/latest) 下载 `NJU-Login-Pro-v*.zip`，不要下载 GitHub 自动生成的 `Source code`。
 2. 将 ZIP 解压到固定目录，并确认目录根部直接包含 `manifest.json`。
 3. 打开浏览器扩展管理页（Chrome 为 `chrome://extensions`，Edge 为 `edge://extensions`），开启“开发者模式”。
 4. 选择“加载已解压的扩展程序”，然后选中刚才解压的目录。

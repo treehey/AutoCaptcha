@@ -1369,7 +1369,7 @@ function initLoginEvents() {
 
 
   els.githubBtn.addEventListener('click', () => {
-    window.open('https://github.com/treehey/AutoCaptcha', '_blank');
+    window.open('https://github.com/treehey/NJU-Login-Pro', '_blank');
   });
 
   els.authPageBtn.addEventListener('click', () => {

@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/treehey/AutoCaptcha.git"
+    "url": "https://github.com/treehey/NJU-Login-Pro.git"
   },
   "scripts": {
     "test": "npm run verify",

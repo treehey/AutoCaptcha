@@ -6,7 +6,7 @@
 
 ## 私下报告
 
-请使用 GitHub 仓库的 [Report a vulnerability](https://github.com/treehey/AutoCaptcha/security/advisories/new) 私下提交安全报告。不要先创建公开 Issue。
+请使用 GitHub 仓库的 [Report a vulnerability](https://github.com/treehey/NJU-Login-Pro/security/advisories/new) 私下提交安全报告。不要先创建公开 Issue。
 
 报告应尽量包括：
 

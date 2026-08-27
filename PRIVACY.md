@@ -73,6 +73,6 @@
 
 ## 联系与安全报告
 
-项目源码和普通问题反馈位于 <https://github.com/treehey/AutoCaptcha>。
+项目源码和普通问题反馈位于 <https://github.com/treehey/NJU-Login-Pro>。
 
 发现可能泄露凭证、扩大站点权限或绕过用户控制的安全问题时，请按 [SECURITY.md](SECURITY.md) 私下报告，不要在公开 Issue 中粘贴账号、密码、Cookie、完整页面源码或未脱敏截图。

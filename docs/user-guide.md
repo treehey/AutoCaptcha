@@ -10,7 +10,7 @@
 
 ### Google Chrome
 
-1. 从 [GitHub Releases](https://github.com/treehey/AutoCaptcha/releases/latest) 下载文件名类似 `NJU-Login-Pro-v*.zip` 的发布包。
+1. 从 [GitHub Releases](https://github.com/treehey/NJU-Login-Pro/releases/latest) 下载文件名类似 `NJU-Login-Pro-v*.zip` 的发布包。
 2. 解压 ZIP。不要直接加载 ZIP，也不要下载 `Source code`。
 3. 打开 `chrome://extensions`，开启“开发者模式”。
 4. 选择“加载已解压的扩展程序”，选择包含 `manifest.json` 的目录。

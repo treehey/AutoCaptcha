@@ -12,8 +12,8 @@
 ## 开始开发
 
 ```powershell
-git clone https://github.com/treehey/AutoCaptcha.git
-Set-Location AutoCaptcha
+git clone https://github.com/treehey/NJU-Login-Pro.git
+Set-Location NJU-Login-Pro
 npm test
 ```
 

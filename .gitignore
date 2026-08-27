@@ -20,6 +20,7 @@ Thumbs.db
 # Captured site pages are local diagnostics, not redistributable fixtures
 /选课.html
 /选课_files/
+/assets/宣传/
 
 # Captcha samples: keep normalized fixtures, ignore credentials and outputs
 data/captcha-samples/**/cookies.txt
