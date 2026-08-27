@@ -6,9 +6,38 @@
   const EVENT_NAME = 'nju-autograb-network-v1';
   const COURSE_QUERY_EVENT = 'nju-autograb-course-query-v1';
   const COURSE_RESULT_EVENT = 'nju-autograb-course-result-v1';
-  // Searches are replayed sequentially below. This cap prevents an unbounded
-  // task from flooding the page while still covering normal task sizes in one round.
+  // This cap prevents an unbounded task from flooding the page while still
+  // covering normal task sizes in one round.
   const MAX_PROVIDER_SEARCHES = 12;
+  // Public-course endpoints can expire the session when a fourth lookup follows
+  // the first three in the same short burst. Keep requests serial, pause only at
+  // the three-query boundary, then continue within the same monitoring round.
+  const PUBLIC_COURSE_BURST_SIZE = 3;
+  const PUBLIC_COURSE_BURST_WINDOW_MS = 1000;
+  const PUBLIC_COURSE_QUERY_SCOPES = new Set(['GG', 'GG01', 'GG02']);
+  const STOP_BATCH_OUTCOMES = new Set([
+    'AUTH_EXPIRED',
+    'RATE_LIMITED',
+    'NETWORK_ERROR',
+    'SERVER_ERROR'
+  ]);
+  const COURSE_SCOPE_LABELS = Object.freeze({
+    ZY: '专业',
+    GG: '公共',
+    GG01: '公选课',
+    GG02: '导学/研讨/通识',
+    KZY: '跨专业',
+    TX: '通修',
+    TY: '体育',
+    YD: '悦读',
+    QB: '课表查询',
+    SC: '收藏',
+    TCT1: '专业',
+    TCT2: '跨专业',
+    TCT3: '公选课',
+    TCT4: '导学/研讨/通识',
+    TCT5: '体育'
+  });
   const WATCHED_PATHS = [
     '/elective/programCourse.do',
     '/elective/publicCourse.do',
@@ -18,6 +47,19 @@
     '/elective/studentstatus.do'
   ];
 
+  const COURSE_SCOPE_ALIASES = Object.freeze({
+    TCT1: 'ZY',
+    TCT2: 'KZY',
+    TCT3: 'GG01',
+    TCT4: 'GG02',
+    TCT5: 'TY'
+  });
+
+  function normalizeCourseScope(value) {
+    const scope = safeText(value).toUpperCase();
+    return COURSE_SCOPE_ALIASES[scope] || scope;
+  }
+
   if (global[INSTALL_FLAG]) return;
   Object.defineProperty(global, INSTALL_FLAG, { value: true, configurable: false });
 
@@ -26,6 +68,20 @@
   const courseQueryTemplatesByScope = new Map();
   const unscopedCourseQueryCursors = new Map();
   const activeCourseQueries = new Map();
+
+  function isPublicCourseQueryScope(queryScope) {
+    return PUBLIC_COURSE_QUERY_SCOPES.has(normalizeCourseScope(queryScope));
+  }
+
+  function waitForPublicCourseBatchCooldown(control, cooldownStartedAt) {
+    if (control.cancelled) return false;
+    const elapsed = Math.max(0, Date.now() - cooldownStartedAt);
+    const delay = Math.max(0, PUBLIC_COURSE_BURST_WINDOW_MS - elapsed);
+    if (delay === 0) return true;
+    return new Promise(resolve => {
+      global.setTimeout(() => resolve(!control.cancelled), delay);
+    });
+  }
 
   function watchedPath(value) {
     try {
@@ -115,7 +171,7 @@
     const setting = readQuerySetting(body);
     return {
       electiveBatchId: safeText(setting?.data?.electiveBatchCode).slice(0, 300),
-      teachingClassType: safeText(setting?.data?.teachingClassType).slice(0, 80)
+      teachingClassType: normalizeCourseScope(setting?.data?.teachingClassType).slice(0, 80)
     };
   }
 
@@ -218,10 +274,16 @@
 
   function providerOutcome(status, code, response) {
     if (status === 401 || status === 403 || code === '302') return 'AUTH_EXPIRED';
+    if (looksLikeLoginResponse(response)) return 'AUTH_EXPIRED';
     if (status === 429) return 'RATE_LIMITED';
+    const responseText = typeof response === 'string'
+      ? response
+      : response && typeof response === 'object'
+        ? JSON.stringify(response)
+        : '';
+    if (/(?:请求过快|操作过于频繁|操作频繁|访问频繁|稍后再试)/.test(responseText)) return 'RATE_LIMITED';
     if (status === 0) return 'NETWORK_ERROR';
     if (status >= 500) return 'SERVER_ERROR';
-    if (looksLikeLoginResponse(response)) return 'AUTH_EXPIRED';
     // An empty code often means an HTML/login response or an incompatible schema.
     // Never turn that into a trustworthy "no courses" result.
     if (code !== '1') return 'SERVER_ERROR';
@@ -295,7 +357,8 @@
       if (request?.path) {
         request.requestId = ++requestSequence;
         request.body = body;
-        if (isCourseQueryPath(request.path) && rewriteQueryBody(body, 'probe')) {
+        const querySetting = isCourseQueryPath(request.path) ? readQuerySetting(body) : null;
+        if (querySetting?.data && typeof querySetting.data === 'object') {
           latestCourseQueryTemplate = {
             path: request.path,
             method: request.method,
@@ -305,7 +368,7 @@
             body,
             withCredentials: Boolean(this.withCredentials)
           };
-          const scope = queryContext(body).teachingClassType;
+          const scope = normalizeCourseScope(queryContext(body).teachingClassType);
           if (scope) courseQueryTemplatesByScope.set(scope, latestCourseQueryTemplate);
         }
         this.addEventListener('loadend', () => {
@@ -344,7 +407,7 @@
         let xhr = null;
         try {
           xhr = new Xhr();
-          control.xhr = xhr;
+          control.xhrs.add(xhr);
           originalOpen.call(xhr, template.method || 'POST', template.url, ...(template.rest || []));
           xhr.withCredentials = template.withCredentials;
           if (originalSetRequestHeader) {
@@ -358,7 +421,7 @@
             // Some test and legacy XHR implementations expose a read-only timeout.
           }
           xhr.addEventListener('loadend', () => {
-            control.xhr = null;
+            control.xhrs.delete(xhr);
             if (control.cancelled) {
               resolve(null);
               return;
@@ -382,7 +445,7 @@
           }, { once: true });
           originalSend.call(xhr, body);
         } catch {
-          control.xhr = null;
+          if (xhr) control.xhrs.delete(xhr);
           resolve({
             searchId: search.searchId,
             outcome: 'NETWORK_ERROR',
@@ -406,7 +469,10 @@
         const control = activeCourseQueries.get(requestId);
         if (!control) return;
         control.cancelled = true;
-        if (control.xhr && originalAbort) originalAbort.call(control.xhr);
+        if (originalAbort) {
+          for (const xhr of [...control.xhrs]) originalAbort.call(xhr);
+        }
+        control.xhrs.clear();
         activeCourseQueries.delete(requestId);
         return;
       }
@@ -431,31 +497,60 @@
         return;
       }
 
-      const control = { cancelled: false, xhr: null };
+      const control = { cancelled: false, xhrs: new Set() };
       activeCourseQueries.set(requestId, control);
       void (async () => {
         const results = [];
-        for (const search of searches) {
-          if (control.cancelled) break;
-          const requestedScope = search.queryScope || search.teachingClassType;
+        const preparedSearches = searches.map(search => {
+          const requestedScope = normalizeCourseScope(search.queryScope || search.teachingClassType);
           const selected = requestedScope
             ? { queryScope: requestedScope, template: courseQueryTemplatesByScope.get(requestedScope) }
             : nextUnscopedCourseQueryTemplate(search.searchId);
-          const template = selected.template;
-          if (!template) {
-            const scopeMapping = { 'SC': '收藏', 'TCT1': '本专业', 'TCT2': '跨专业', 'TCT3': '公选', 'TCT4': '通识', 'TCT5': '体育' };
-            const displayScope = scopeMapping[requestedScope?.toUpperCase()] || requestedScope || '对应';
+          return {
+            search,
+            requestedScope,
+            queryScope: selected.queryScope || requestedScope,
+            template: selected.template
+          };
+        });
+        let index = 0;
+        let publicQueriesInBurst = 0;
+        let cooldownStartedAt = null;
+        while (index < preparedSearches.length) {
+          if (control.cancelled) break;
+          const prepared = preparedSearches[index];
+          if (!prepared.template) {
+            const displayScope = COURSE_SCOPE_LABELS[prepared.requestedScope]
+              || prepared.requestedScope
+              || '对应';
             results.push({
-              searchId: search.searchId,
-              queryScope: selected.queryScope,
+              searchId: prepared.search.searchId,
+              queryScope: prepared.queryScope,
               outcome: 'OUT_OF_SCOPE',
               message: `等待打开 ${displayScope} 课程分类以建立查询通道`,
               candidates: []
             });
+            index += 1;
             continue;
           }
-          const result = await replayCourseSearch(template, search, control);
-          if (result) results.push({ ...result, queryScope: selected.queryScope });
+
+          const isPublicCourseQuery = isPublicCourseQueryScope(prepared.queryScope);
+          if (isPublicCourseQuery && publicQueriesInBurst >= PUBLIC_COURSE_BURST_SIZE) {
+            if (!await waitForPublicCourseBatchCooldown(control, cooldownStartedAt)) break;
+            publicQueriesInBurst = 0;
+            cooldownStartedAt = null;
+          }
+
+          index += 1;
+          const result = await replayCourseSearch(prepared.template, prepared.search, control);
+          if (isPublicCourseQuery) {
+            publicQueriesInBurst += 1;
+            if (publicQueriesInBurst === PUBLIC_COURSE_BURST_SIZE) cooldownStartedAt = Date.now();
+          }
+          if (result) {
+            results.push({ ...result, queryScope: prepared.queryScope });
+            if (STOP_BATCH_OUTCOMES.has(result.outcome)) break;
+          }
         }
         activeCourseQueries.delete(requestId);
         if (!control.cancelled) emitCourseResult({ requestId, ok: true, results });

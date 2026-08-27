@@ -516,6 +516,33 @@ test('schedules against the target period and never creates a zero-delay catch-u
   assert.equal(timer.delay, 100);
 });
 
+test('does not schedule or overlap another round while a long scan is still running', async () => {
+  const scan = deferred();
+  const harness = createHarness({
+    async scan() {
+      return scan.promise;
+    },
+    async attempt() {
+      throw new Error('not reached');
+    }
+  });
+
+  harness.engine.start(['公选课目标'], 1000);
+  await waitFor(() => harness.engine.getSnapshot().round === 1
+    && harness.engine.getSnapshot().inFlight);
+  harness.clock.advance(5000);
+
+  assert.equal(harness.engine.getSnapshot().round, 1);
+  assert.equal(harness.engine.getSnapshot().nextRunAt, 0);
+  assert.equal(harness.timers.length, 0, 'no next-round timer exists before the current scan settles');
+
+  scan.resolve(new Map([[keywordTargetId('公选课目标'), []]]));
+  await waitFor(() => !harness.engine.getSnapshot().inFlight);
+
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0].delay, 100, 'an overdue round still rests briefly before continuing');
+});
+
 test('exposes bounded scan diagnostics without coupling the engine to provider internals', async () => {
   const harness = createHarness({
     async scan() {
@@ -972,4 +999,112 @@ test('backs off a structured transient scan failure globally', async () => {
   await runLatestTimer(harness);
   await waitFor(() => harness.engine.getSnapshot().round === 2 && !harness.engine.getSnapshot().inFlight);
   assert.equal(harness.engine.getSnapshot().scanFailures, 0);
+});
+
+test('runNow starts one immediate round and invalidates the previously scheduled timer', async () => {
+  let scans = 0;
+  const harness = createHarness({
+    async scan() {
+      scans += 1;
+      return new Map([['课程甲', []]]);
+    },
+    async attempt() {
+      throw new Error('not reached');
+    }
+  });
+
+  harness.engine.start(['课程甲'], 5000);
+  await waitFor(() => harness.engine.getSnapshot().nextRunAt > 0 && !harness.engine.getSnapshot().inFlight);
+  const oldTimer = harness.timers.at(-1);
+  const result = harness.engine.runNow();
+  assert.deepEqual(result, { ok: true, code: 'STARTED', message: '已立即检查' });
+  assert.equal(oldTimer.cancelled, true);
+  await waitFor(() => harness.engine.getSnapshot().round === 2 && !harness.engine.getSnapshot().inFlight);
+  assert.equal(scans, 2);
+
+  oldTimer.callback();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(scans, 2);
+});
+
+test('runNow returns safe user-facing reasons while a round, backoff, or stopped task blocks it', async () => {
+  const scanStarted = deferred();
+  const harness = createHarness({
+    async scan() {
+      scanStarted.resolve();
+      return new Promise(() => {});
+    },
+    async attempt() {
+      throw new Error('not reached');
+    }
+  });
+  harness.engine.start(['课程甲'], 1000);
+  await scanStarted.promise;
+  const inFlight = harness.engine.runNow();
+  assert.deepEqual({ ok: inFlight.ok, code: inFlight.code, message: inFlight.message }, {
+    ok: false, code: 'IN_FLIGHT', message: '正在检查课程，请稍候'
+  });
+  assert.equal(inFlight.snapshot.inFlight, true);
+  harness.engine.stop();
+  const stopped = harness.engine.runNow();
+  assert.deepEqual({ ok: stopped.ok, code: stopped.code, message: stopped.message }, {
+    ok: false, code: 'NOT_RUNNING', message: '监控未运行'
+  });
+
+  const backoffHarness = createHarness({
+    async scan() {
+      const error = new Error('稍后再试');
+      error.outcome = OUTCOME.SERVER_ERROR;
+      throw error;
+    },
+    async attempt() {
+      throw new Error('not reached');
+    }
+  });
+  backoffHarness.engine.start(['课程乙'], 1000);
+  await waitFor(() => backoffHarness.engine.getSnapshot().globalRetryAt > 0);
+  const backoff = backoffHarness.engine.runNow();
+  assert.deepEqual({ ok: backoff.ok, code: backoff.code, message: backoff.message }, {
+    ok: false, code: 'BACKOFF', message: '课程查询正在退避，请稍候'
+  });
+});
+
+test('runNow does not query while every actionable target is waiting for retry', async () => {
+  let scans = 0;
+  const harness = createHarness({
+    async scan() {
+      scans += 1;
+      return new Map([['课程甲', [{ id: 'a', status: CANDIDATE_STATUS.AVAILABLE }]]]);
+    },
+    async attempt() { return { outcome: OUTCOME.NETWORK_ERROR, message: '临时错误' }; }
+  });
+  harness.engine.start(['课程甲'], 1000);
+  await waitFor(() => harness.engine.getSnapshot().nextRetryAt > 0);
+  const retryPending = harness.engine.runNow();
+  assert.deepEqual({ ok: retryPending.ok, code: retryPending.code, message: retryPending.message }, {
+    ok: false, code: 'RETRY_PENDING', message: '所有目标都在等待重试，请稍候'
+  });
+  assert.equal(retryPending.snapshot.retryingTargetCount, 1);
+  assert.equal(scans, 1);
+});
+
+test('an early scheduled callback during backoff re-schedules instead of stopping the cadence', async () => {
+  const harness = createHarness({
+    async scan() {
+      const error = new Error('暂时不可用');
+      error.outcome = OUTCOME.SERVER_ERROR;
+      throw error;
+    },
+    async attempt() {}
+  });
+  harness.engine.start(['提前触发课程'], 1000);
+  await waitFor(() => harness.engine.getSnapshot().globalRetryAt > 0);
+  const originalTimer = harness.timers.at(-1);
+  originalTimer.callback();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.engine.getSnapshot().round, 1);
+  assert.equal(harness.engine.getSnapshot().running, true);
+  assert.ok(harness.timers.at(-1) !== originalTimer, 'blocked timer callback must install a replacement');
+  assert.equal(harness.timers.at(-1).delay >= 1000, true);
+  harness.engine.stop();
 });

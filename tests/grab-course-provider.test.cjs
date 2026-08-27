@@ -206,7 +206,85 @@ test('defers an exact target when its catalog query template has not been captur
   assert.equal(result.get(target.targetId)[0].label, '等待打开 SC 课程分类以建立查询通道');
   assert.equal(result.diagnostics.deferredTargetCount, 0);
   assert.equal(result.diagnostics.scopeDeferredTargetCount, 1);
-  assert.equal(domScans, 0);
+  assert.equal(domScans, 1);
+});
+
+test('uses an exact course row visible in favorites even when the target came from GG02', async () => {
+  const [target] = taskModel.normalizeTargets([{
+    name: '混合来源通识课',
+    electiveBatchId: 'BATCH-1',
+    teachingClassId: 'class-9',
+    teachingClassType: 'GG02',
+    queryScope: 'GG02'
+  }]);
+  let domScans = 0;
+  const provider = createCourseProvider({
+    taskModel,
+    candidateStatus: CANDIDATE_STATUS,
+    getCurrentQueryScope: () => 'SC',
+    queryClient: {
+      query: async () => [{
+        searchId: target.targetId,
+        outcome: 'OUT_OF_SCOPE',
+        message: '等待打开 GG02 课程分类以建立查询通道',
+        candidates: []
+      }]
+    },
+    scanDom: async () => {
+      domScans += 1;
+      return new Map([[target.targetId, [{
+        id: 'class-9',
+        teachingClassId: 'class-9',
+        status: CANDIDATE_STATUS.FULL
+      }]]]);
+    }
+  });
+
+  const result = await provider.scan([target], {});
+  const [candidate] = result.get(target.targetId);
+
+  assert.equal(domScans, 1);
+  assert.equal(candidate.status, CANDIDATE_STATUS.FULL);
+  assert.equal(result.diagnostics.scopeDeferredTargetCount || 0, 0);
+});
+
+test('normalizes a raw TCT4 target and accepts a canonical GG02 network result', async () => {
+  const [target] = taskModel.normalizeTargets([{
+    name: '原始分类通识课',
+    electiveBatchId: 'BATCH-1',
+    teachingClassId: 'class-raw-scope',
+    teachingClassType: ' TCT4 ',
+    queryScope: 'tct4'
+  }]);
+  let searches = null;
+  const provider = createCourseProvider({
+    taskModel,
+    candidateStatus: CANDIDATE_STATUS,
+    getCurrentQueryScope: () => ' tct4 ',
+    queryClient: {
+      query: async value => {
+        searches = value;
+        return [{
+          searchId: target.targetId,
+          queryScope: 'GG02',
+          candidates: [networkEntry({
+            teachingClassId: 'class-raw-scope',
+            teachingClassType: ' GG02 ',
+            status: CANDIDATE_STATUS.FULL
+          })]
+        }];
+      }
+    },
+    scanDom: async () => new Map()
+  });
+
+  const result = await provider.scan([target], {});
+  const [candidate] = result.get(target.targetId);
+
+  assert.equal(searches[0].queryScope, 'GG02');
+  assert.equal(searches[0].teachingClassType, 'GG02');
+  assert.equal(candidate.teachingClassType, 'GG02');
+  assert.equal(candidate.status, CANDIDATE_STATUS.FULL);
 });
 
 test('does not report a target from another page as missing during DOM fallback', async () => {

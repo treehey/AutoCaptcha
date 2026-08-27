@@ -10,6 +10,7 @@ const grabVerificationEngine = require('../grab-verification-engine.js');
 const contentSource = readFileSync(resolve(__dirname, '..', 'content-grab.js'), 'utf8');
 const pageUiSource = readFileSync(resolve(__dirname, '..', 'grab-page-ui.css'), 'utf8');
 const adapterSource = contentSource.slice(0, contentSource.indexOf('const grabEngine ='));
+const domUiSource = contentSource.slice(contentSource.indexOf('// DOM UI Interactions'));
 
 function dataKey(attributeName) {
   return attributeName.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -85,11 +86,21 @@ class FakeElement {
     }
   }
 
+  keydown(key) {
+    for (const listener of this.listeners.get('keydown') || []) {
+      listener({ key, target: this, preventDefault() {}, stopPropagation() {} });
+    }
+  }
+
   set innerHTML(value) {
     this._innerHTML = String(value || '');
     this.ownText = '';
     this.children = [];
     if (!String(value).includes('data-nju-grab-remove-confirm')) return;
+    const leftResize = new FakeElement('div', { classes: ['nju-grab-resize-handle-l'], attributes: {
+      'data-resize': 'left', role: 'button', tabindex: '0',
+      'aria-label': '连续点按两次收成胶囊，按回车键也可收起'
+    } });
     const head = new FakeElement('div', { classes: ['nju-grab-status-head'] });
     const toggle = new FakeElement('button', { classes: ['nju-grab-status-toggle'], attributes: { 'data-nju-grab-status-toggle': '' } });
     const control = new FakeElement('button', { attributes: { 'data-nju-grab-control': '' } });
@@ -111,7 +122,7 @@ class FakeElement {
     );
     body.append(new FakeElement('div', { classes: ['nju-grab-missing-scopes'], attributes: { 'data-nju-grab-missing-scopes': '' } }));
     body.append(targets, confirm);
-    this.append(head, body);
+    this.append(leftResize, head, body);
   }
 
   get innerHTML() { return this._innerHTML || ''; }
@@ -355,7 +366,11 @@ function createCapturedFavoriteDom() {
   });
   const disabledChoice = new FakeElement('a', {
     classes: ['cv-choice', 'sc-add', 'cv-disabled'],
-    attributes: { 'data-tcid': classId, 'data-number': 'FAVORITE-1' },
+    attributes: {
+      'data-tcid': classId,
+      'data-number': 'FAVORITE-1',
+      'data-teachingclasstype': 'GG02'
+    },
     text: '已满'
   });
   const row = new FakeElement('tr', {
@@ -425,12 +440,13 @@ function loadAdapter(document, options = {}) {
         return null;
       }
     },
-    setTimeout
+    clearTimeout: options.clearTimeout || clearTimeout,
+    setTimeout: options.setTimeout || setTimeout
   });
   context.stopGrab = options.stopGrab || (() => ({ running: false, phase: 'STOPPED' }));
   context.globalThis = context;
   context.window = context;
-  vm.runInContext(`${adapterSource}\nglobalThis.grabNetworkMonitorForTest = grabNetworkMonitor;`, context, {
+  vm.runInContext(`${adapterSource}\n${domUiSource}\nglobalThis.grabNetworkMonitorForTest = grabNetworkMonitor;`, context, {
     filename: 'content-grab-adapter.js'
   });
   context.storageWritesForTest = storageWrites;
@@ -531,6 +547,193 @@ test('keeps runtime state visible while exposing an exact-target remove action',
   assert.equal(button.textContent, '已满 · 移除');
   assert.equal(button.classList.contains('is-warning'), true);
   assert.equal(button.classList.contains('is-active'), false);
+});
+
+test('labels the running primary action as stop and keeps the header action as hide panel', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(grabTaskModel.normalizeTarget('面板测试'))}];`, adapter);
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const control = panel.querySelector('[data-nju-grab-control]');
+  const close = panel.querySelector('[data-nju-grab-status-close]');
+  assert.equal(control.textContent, '停止');
+  assert.equal(close.getAttribute('aria-label'), '隐藏面板');
+  assert.equal(close.getAttribute('title'), '隐藏课程监控面板');
+});
+
+test('offers an accessible edge gesture and restores the panel from its semantic header control', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const edge = panel.querySelector('.nju-grab-resize-handle-l');
+  const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
+  const body = panel.querySelector('[data-nju-grab-status-body]');
+
+  assert.equal(panel.querySelector('[data-nju-grab-mini]'), null);
+  assert.equal(edge.getAttribute('role'), 'button');
+  assert.equal(edge.getAttribute('tabindex'), '0');
+  assert.match(edge.getAttribute('aria-label'), /按回车键/);
+  assert.match(panel.querySelector('.nju-grab-tutorial-tooltip').getAttribute('aria-label'), /连续点按两次左侧边缘/);
+  assert.ok(panel.querySelector('.nju-grab-tutorial-panel-shape'));
+  edge.keydown('Enter');
+  assert.equal(panel.classList.contains('is-mini'), true);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(toggle.getAttribute('aria-label'), '展开课程监控面板');
+  assert.equal(body.hidden, true);
+
+  toggle.click();
+  assert.equal(panel.classList.contains('is-mini'), false);
+  assert.equal(toggle.getAttribute('aria-label'), '折叠或展开课程监控状态');
+  assert.equal(body.hidden, false);
+
+  edge.keydown(' ');
+  assert.equal(panel.classList.contains('is-mini'), true);
+});
+
+test('reopens the ordinary collapsed radar from the header control', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
+  const body = panel.querySelector('[data-nju-grab-status-body]');
+
+  toggle.click();
+  assert.equal(panel.classList.contains('is-expanded'), false);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(body.hidden, true);
+
+  toggle.click();
+  assert.equal(panel.classList.contains('is-expanded'), true);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(body.hidden, false);
+});
+
+test('reopens collapsed and mini radar states when pointer capture retargets the click to the header', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const head = panel.querySelector('.nju-grab-status-head');
+  const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
+  const edge = panel.querySelector('.nju-grab-resize-handle-l');
+  const body = panel.querySelector('[data-nju-grab-status-body]');
+
+  toggle.click();
+  assert.equal(body.hidden, true);
+  head.click();
+  assert.equal(body.hidden, false);
+
+  edge.keydown('Enter');
+  assert.equal(panel.classList.contains('is-mini'), true);
+  head.click();
+  assert.equal(panel.classList.contains('is-mini'), false);
+  assert.equal(body.hidden, false);
+});
+
+test('reduced-motion styling disables the redesigned panel animations', () => {
+  const reducedMotion = pageUiSource.slice(pageUiSource.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.match(reducedMotion, /\.nju-grab-status-panel,/);
+  assert.match(reducedMotion, /\.nju-grab-tutorial-tooltip,/);
+  assert.match(reducedMotion, /\.nju-grab-tutorial-panel-shape,/);
+  assert.match(reducedMotion, /animation:\s*none\s*!important/);
+  assert.match(reducedMotion, /transition:\s*none\s*!important/);
+});
+
+test('keeps capsule height independent from the ordinary collapsed panel rule', () => {
+  assert.match(pageUiSource, /\.nju-grab-status-panel:not\(\.is-expanded\):not\(\.is-mini\)\s*\{/);
+  assert.match(pageUiSource, /\.nju-grab-status-panel\.is-mini\s*\{[^}]*height:\s*48px\s*!important/s);
+});
+
+test('treats auth recovery as active so the primary action stops recovery instead of starting a task', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  adapter.renderGrabPageStatus({
+    running: false, phase: 'PAUSED_AUTH', authRecovery: { pending: true, stage: 'WAITING_LOGIN' },
+    configuredTargets: [], targetStates: {}
+  });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const control = panel.querySelector('[data-nju-grab-control]');
+  assert.equal(control.textContent, '停止恢复');
+  assert.equal(control.getAttribute('aria-label'), '停止登录恢复');
+  assert.equal(vm.runInContext('isGrabPanelEditableStopped({ running: false, phase: "PAUSED_AUTH", authRecovery: { pending: true } })', adapter), false);
+});
+
+test('disables the interval control while auth recovery is pending even when running is false', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document);
+  adapter.renderGrabPageStatus({ running: false, phase: 'PAUSED_AUTH', authRecovery: { pending: true }, targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const interval = new FakeElement('select', { attributes: { 'data-nju-grab-interval': '' } });
+  panel.querySelector('[data-nju-grab-status-body]').append(interval);
+  adapter.renderGrabPageStatus({ running: false, phase: 'PAUSED_AUTH', authRecovery: { pending: true }, targetStates: {} });
+  assert.equal(interval.disabled, true);
+});
+
+test('shows the immediate-check action only for a running task and names blocked states truthfully', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document);
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const runNow = new FakeElement('button', { attributes: { 'data-nju-grab-run-now': '' } });
+  panel.querySelector('[data-nju-grab-status-body]').append(runNow);
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', targetStates: {} });
+  assert.equal(runNow.hidden, true);
+
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', inFlight: false, targetStates: {} });
+  assert.equal(runNow.hidden, false);
+  assert.equal(runNow.disabled, false);
+  assert.equal(runNow.textContent, '立即检查');
+
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', inFlight: true, targetStates: {} });
+  assert.equal(runNow.disabled, true);
+  assert.equal(runNow.textContent, '正在检查');
+
+  adapter.renderGrabPageStatus({
+    running: true, phase: 'RUNNING', inFlight: false,
+    globalRetryAt: Date.now() + 5000, targetStates: {}
+  });
+  assert.equal(runNow.disabled, true);
+  assert.equal(runNow.textContent, '退避中');
+});
+
+test('shows the real non-preset interval while running instead of silently changing it to five seconds', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document);
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', interval: 1000, targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const interval = new FakeElement('select', { attributes: { 'data-nju-grab-interval': '' } });
+  panel.querySelector('[data-nju-grab-status-body]').append(interval);
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', interval: 1000, targetStates: {} });
+  assert.equal(interval.value, '1000');
+  assert.equal(interval.disabled, true);
+  assert.match(interval.querySelector('[data-nju-grab-current-interval]').textContent, /1 秒/);
+});
+
+test('diagnostic summary contains aggregate runtime facts but no target content', () => {
+  const adapter = loadAdapter(new FakeDocument([]));
+  const summary = vm.runInContext(`buildGrabDiagnosticSummary({
+    phase: 'RUNNING', running: true, round: 4, initialTargetCount: 1,
+    remainingTargets: [{ name: '绝密课程', targetId: 'class:secret' }],
+    targetStates: { 'class:secret': { phase: 'WATCHING', lastMessage: '查询词不要泄露' } },
+    lastScan: { mode: 'NETWORK', outcome: 'UNKNOWN', durationMs: 12 }, lastRoundDurationMs: 12
+  })`, adapter);
+  assert.match(summary, /phase=RUNNING/);
+  assert.match(summary, /scanMode=NETWORK/);
+  assert.equal(summary.includes('绝密课程'), false);
+  assert.equal(summary.includes('secret'), false);
+  assert.equal(summary.includes('查询词'), false);
+});
+
+test('persists a stopped interval in both versioned task config and legacy storage', async () => {
+  const adapter = loadAdapter(new FakeDocument([]), {
+    storageState: { nju_grab_interval: '5000', nju_grab_courses: '旧关键词' }
+  });
+  await adapter.persistGrabInterval(10000);
+  const write = adapter.storageWritesForTest.at(-1);
+  assert.equal(write.nju_grab_interval, 10000);
+  assert.equal(write.nju_grab_task_v1.intervalMs, 10000);
+  assert.deepEqual(write.nju_grab_task_v1.targets.map(target => target.name), ['旧关键词']);
 });
 
 test('matches an exact target across page metadata changes but not another class or missing batch', () => {
@@ -689,6 +892,74 @@ test('stopped panel target remove uses a real click and removes the configured k
   assert.equal(adapter.storageWritesForTest.length > 0, true);
 });
 
+test('stopped panel prefers the current configured targets after a removal, not a stale runtime snapshot', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, { grabState: { running: false } });
+  const stale = grabTaskModel.normalizeTarget('已移除的旧课程');
+  vm.runInContext('configuredGrabTargets = []; configuredGrabGroups = []; latestGrabPageState = { running: false, phase: "STOPPED", targetStates: {} };', adapter);
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', configuredTargets: [stale], targetStates: {} });
+  const targetContainer = document.querySelector('[data-nju-grab-status-targets]');
+  assert.equal(targetContainer.textContent.includes('已移除的旧课程'), false);
+});
+
+test('terminal snapshot status does not claim completion after the configured targets changed', () => {
+  const adapter = loadAdapter(new FakeDocument([]));
+  const current = grabTaskModel.normalizeTarget('当前课程');
+  const stale = grabTaskModel.normalizeTarget('已完成但已移除');
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(current)}]; configuredGrabGroups = [];`, adapter);
+  const presentation = adapter.grabPageSummaryPresentation({
+    running: false, phase: 'COMPLETED', completedGroups: 1, totalGroups: 1,
+    configuredTargets: [stale], targetStates: {}
+  });
+  assert.notEqual(presentation.title, '课程组已完成');
+  assert.equal(presentation.title, '已配置 1 门课程');
+});
+
+test('target action portal survives outside-pointer dismissal and its remove item uses the normal confirmation path', async () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, { grabState: { running: false } });
+  const target = grabTaskModel.normalizeTarget({ name: 'portal目标课程', electiveBatchId: 'BATCH-1', teachingClassId: 'portal-1', teachingClassType: 'GG' });
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(target)}]; latestGrabPageState = { running: false, phase: 'STOPPED', targetStates: {} };`, adapter);
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', targetStates: {} });
+  const trigger = new FakeElement('button');
+  adapter.openGrabTargetMenuPortal(target, trigger);
+  const portal = document.querySelector('.nju-grab-target-menu');
+  const remove = portal?.querySelector('.nju-grab-target-remove');
+  assert.ok(portal && remove);
+  vm.runInContext('grabPanelDismissHandlers.pointerdown', adapter)({ target: remove });
+  assert.equal(portal.isConnected, true, 'pointerdown inside the portal must not dismiss it');
+  remove.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const saved = grabTaskModel.normalizeTaskConfig(adapter.storageStateForTest[grabTaskModel.STORAGE_KEY]);
+  assert.equal(saved.targets.some(item => item.targetId === target.targetId), false);
+});
+
+test('hiding the panel closes both floating menus and resets their expanded state', () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, { grabState: { running: false } });
+  adapter.renderGrabPageStatus({ running: false, phase: 'STOPPED', targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const moreButton = new FakeElement('button');
+  moreButton.setAttribute('aria-expanded', 'true');
+  const moreMenu = new FakeElement('div');
+  moreMenu.hidden = false;
+  document.body.append(moreMenu);
+  adapter.moreButtonFixture = moreButton;
+  adapter.moreMenuFixture = moreMenu;
+  vm.runInContext('grabMoreButton = moreButtonFixture; grabMoreMenu = moreMenuFixture;', adapter);
+  adapter.openGrabTargetMenuPortal(grabTaskModel.normalizeTarget('隐藏时关闭菜单'), new FakeElement('button'));
+  const portal = document.querySelector('.nju-grab-target-menu');
+  assert.ok(portal);
+  vm.runInContext('hideGrabPageStatusPanel();', adapter);
+  assert.equal(portal.isConnected, false);
+  assert.equal(vm.runInContext('openGrabTargetMenu', adapter), null);
+  assert.equal(moreMenu.hidden, true);
+  assert.equal(moreButton.getAttribute('aria-expanded'), 'false');
+});
+
 test('confirm stops before saving, and save failure keeps a stable retry confirmation', async () => {
   const root = new FakeElement('main', { classes: ['result-container'] });
   const document = new FakeDocument([root]);
@@ -803,6 +1074,278 @@ test('maps runtime phases to truthful page button and radar states', () => {
   );
 });
 
+test('maps real NJU course scopes and builds a two-level automatic navigation path', () => {
+  const professional = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'ZY' },
+    text: '专业'
+  });
+  const publicRoot = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG' },
+    text: '公共'
+  });
+  const publicElective = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG01' },
+    text: '公选课'
+  });
+  const generalEducation = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' },
+    text: '导学/研讨/通识'
+  });
+  const adapter = loadAdapter(new FakeDocument([
+    professional,
+    publicRoot,
+    publicElective,
+    generalEducation
+  ]));
+
+  assert.equal(adapter.courseScopeLabel('GG01'), '公选课');
+  assert.equal(adapter.courseScopeLabel('GG02'), '导学/研讨/通识');
+  assert.deepEqual(Array.from(adapter.courseScopeNavigationPath('GG02')), ['GG', 'GG02']);
+  assert.equal(adapter.findCourseTabElement('GG01'), publicElective);
+  assert.equal(adapter.findCourseTabElement('GG02'), generalEducation);
+});
+
+test('automatically navigates to a missing course scope while monitoring', async () => {
+  const timers = [];
+  let clicked = 0;
+  const publicRoot = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG' },
+    text: '公共'
+  });
+  const generalEducation = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' },
+    text: '导学/研讨/通识'
+  });
+  generalEducation.addEventListener('click', () => { clicked += 1; });
+  const root = new FakeElement('main', {
+    classes: ['result-container'],
+    children: [publicRoot, generalEducation]
+  });
+  const adapter = loadAdapter(new FakeDocument([root]), {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '自动跳转通识课',
+    electiveBatchId: 'BATCH-1',
+    teachingClassId: 'class-auto-scope',
+    teachingClassType: 'GG02',
+    queryScope: 'GG02'
+  });
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(target)}];`, adapter);
+
+  adapter.renderGrabPageStatus({
+    running: true,
+    phase: 'RUNNING',
+    configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: {
+        phase: 'WATCHING',
+        lastMessage: '等待打开 GG02 课程分类以建立查询通道'
+      }
+    }
+  });
+
+  const navigationTimer = timers.find(timer => timer.delay === 200);
+  assert.ok(navigationTimer, 'missing scope should schedule automatic navigation');
+  navigationTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1);
+});
+
+test('continues automatic navigation when page enhancements are disabled', async () => {
+  const timers = [];
+  let clicked = 0;
+  const tab = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' },
+    text: '导学/研讨/通识'
+  });
+  tab.addEventListener('click', () => { clicked += 1; });
+  const root = new FakeElement('main', { classes: ['result-container'], children: [tab] });
+  const adapter = loadAdapter(new FakeDocument([root]), {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '禁用雷达仍需导航',
+    electiveBatchId: 'BATCH-1',
+    teachingClassId: 'class-disabled-radar',
+    teachingClassType: 'GG02',
+    queryScope: 'GG02'
+  });
+  vm.runInContext('grabPageEnhancementsEnabled = false;', adapter);
+
+  adapter.renderGrabPageStatus({
+    running: true,
+    runId: 1,
+    phase: 'RUNNING',
+    configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: {
+        phase: 'WATCHING',
+        lastMessage: '等待打开 GG02 课程分类以建立查询通道'
+      }
+    }
+  });
+
+  const navigationTimer = timers.find(timer => timer.delay === 200);
+  assert.ok(navigationTimer, 'automatic navigation should not depend on the radar panel');
+  navigationTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1);
+});
+
+test('invalidates a waiting automatic navigation after stop and restart', async () => {
+  const timers = [];
+  let clicked = 0;
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '取消旧导航',
+    electiveBatchId: 'BATCH-1',
+    teachingClassId: 'class-cancel-old-navigation',
+    teachingClassType: 'GG02',
+    queryScope: 'GG02'
+  });
+  const running = runId => ({
+    running: true,
+    runId,
+    phase: 'RUNNING',
+    configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: {
+        phase: 'WATCHING',
+        lastMessage: '等待打开 GG02 课程分类以建立查询通道'
+      }
+    }
+  });
+
+  adapter.renderGrabPageStatus(running(1));
+  const firstTimer = timers.find(timer => timer.delay === 200);
+  assert.ok(firstTimer);
+  firstTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  const waitingTimer = timers.find(timer => timer.delay === 250);
+  assert.ok(waitingTimer, 'navigation should be waiting for the tab');
+
+  adapter.renderGrabPageStatus({ running: false, runId: 1, phase: 'STOPPED', configuredTargets: [target] });
+  const tab = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' },
+    text: '导学/研讨/通识'
+  });
+  tab.addEventListener('click', () => { clicked += 1; });
+  root.append(tab);
+  waitingTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 0, 'a stopped navigation must not click a tab that appears later');
+
+  adapter.renderGrabPageStatus(running(2));
+  const secondTimer = timers.filter(timer => timer.delay === 200).at(-1);
+  assert.ok(secondTimer);
+  secondTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1, 'the restarted run may navigate once');
+});
+
+test('invalidates an in-flight automatic navigation when a new run starts', async () => {
+  const timers = [];
+  let clicked = 0;
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '重启旧导航', electiveBatchId: 'BATCH-1', teachingClassId: 'class-restart-navigation',
+    teachingClassType: 'GG02', queryScope: 'GG02'
+  });
+  const state = runId => ({
+    running: true, runId, phase: 'RUNNING', configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: { phase: 'WATCHING', lastMessage: '等待打开 GG02 课程分类以建立查询通道' }
+    }
+  });
+
+  adapter.renderGrabPageStatus(state(1));
+  const firstTimer = timers.find(timer => timer.delay === 200);
+  firstTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  const oldWaitingTimer = timers.find(timer => timer.delay === 250);
+  assert.ok(oldWaitingTimer);
+
+  adapter.renderGrabPageStatus(state(2));
+  const replacementTimer = timers.filter(timer => timer.delay === 200).at(-1);
+  assert.ok(replacementTimer, 'a restarted run should schedule its own navigation');
+  oldWaitingTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 0, 'the prior run must not click after restart');
+
+  const tab = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' }, text: '导学/研讨/通识'
+  });
+  tab.addEventListener('click', () => { clicked += 1; });
+  root.append(tab);
+  replacementTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1);
+});
+
+test('releases an obsolete navigation timer when the run changes before it fires', async () => {
+  const timers = [];
+  let clicked = 0;
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const adapter = loadAdapter(document, {
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
+    }
+  });
+  const target = grabTaskModel.normalizeTarget({
+    name: '释放过期定时器', electiveBatchId: 'BATCH-1', teachingClassId: 'class-stale-timer',
+    teachingClassType: 'GG02', queryScope: 'GG02'
+  });
+  const state = runId => ({
+    running: true, runId, phase: 'RUNNING', configuredTargets: [target],
+    targetStates: {
+      [target.targetId]: { phase: 'WATCHING', lastMessage: '等待打开 GG02 课程分类以建立查询通道' }
+    }
+  });
+
+  adapter.renderGrabPageStatus(state(1));
+  const obsoleteTimer = timers.find(timer => timer.delay === 200);
+  assert.ok(obsoleteTimer);
+  adapter.renderGrabPageStatus(state(2));
+  obsoleteTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+
+  const tab = new FakeElement('a', {
+    attributes: { 'data-teachingclasstype': 'GG02' }, text: '导学/研讨/通识'
+  });
+  tab.addEventListener('click', () => { clicked += 1; });
+  root.append(tab);
+  adapter.renderGrabPageStatus(state(2));
+  const replacementTimer = timers.filter(timer => timer.delay === 200).at(-1);
+  assert.ok(replacementTimer, 'the new run should be able to reschedule after the stale callback');
+  obsoleteTimer.callback();
+  replacementTimer.callback();
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  assert.equal(clicked, 1);
+});
+
 test('course radar styles are scoped, responsive and motion-safe', () => {
   assert.match(pageUiSource, /\.nju-grab-status-panel\s*\{/);
   assert.match(pageUiSource, /\.nju-grab-status-close\s*\{/);
@@ -812,6 +1355,11 @@ test('course radar styles are scoped, responsive and motion-safe', () => {
   assert.match(pageUiSource, /@media \(max-width: 720px\)/);
   assert.match(pageUiSource, /\.nju-grab-remove-confirm[\s\S]*grid-template-columns:\s*1fr auto/);
   assert.match(pageUiSource, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(pageUiSource, /\.nju-grab-more-menu\s*\{[\s\S]*z-index:\s*2147483647/);
+  assert.match(pageUiSource, /\.nju-grab-more-menu\[hidden\][\s\S]*display:\s*none\s*!important/);
+  assert.match(pageUiSource, /\.nju-grab-target-menu \.nju-grab-target-remove[\s\S]*var\(--nju-panel-red,\s*#ff3b30\)/);
+  assert.match(pageUiSource, /\.nju-grab-target-menu\s*\{[\s\S]*font-family:/);
+  assert.match(pageUiSource, /\.nju-grab-now-btn[\s\S]*font-family:\s*inherit[\s\S]*font-size:\s*11px[\s\S]*font-weight:\s*600/);
   assert.match(pageUiSource, /\.nju-grab-add-target\.is-exact-removable/);
   assert.match(pageUiSource, /grid-column: 2/);
   assert.match(pageUiSource, /grid-row: 1/);
@@ -1278,6 +1826,7 @@ test('builds a persistent exact target from a captured favorite-course row', () 
   assert.equal(target.name, '收藏测试课程');
   assert.equal(target.courseNumber, 'FAVORITE-1');
   assert.equal(target.teachingClassId, 'favorite-full');
+  assert.equal(target.teachingClassType, 'GG02');
   assert.equal(target.queryScope, 'SC');
   assert.equal(target.teacher, '教师乙');
   assert.equal(target.time, '周二 3-4 节');
@@ -1291,7 +1840,9 @@ test('imports only visible favorite rows as deduplicated exact targets', async (
     classes: ['course-list'],
     children: [favorite.row, publicCourses.open.row]
   });
-  const adapter = loadAdapter(new FakeDocument([courseList]));
+  const adapter = loadAdapter(new FakeDocument([courseList]), {
+    storageState: { nju_grab_courses: '' }
+  });
 
   const collected = adapter.collectFavoriteCourseTargets();
   assert.equal(collected.length, 1);
@@ -1306,12 +1857,16 @@ test('imports only visible favorite rows as deduplicated exact targets', async (
     enrichedCount: 0,
     existingCount: 0,
     capacitySkippedCount: 0,
-    totalTargetCount: 2
+    totalTargetCount: 1
   });
   const saved = adapter.storageStateForTest[grabTaskModel.STORAGE_KEY];
-  assert.deepEqual(Array.from(saved.targets, target => target.name), ['旧关键词', '收藏测试课程']);
-  assert.equal(saved.targets[1].targetId, 'class:BATCH-1:ZY:favorite-full');
-  assert.equal(saved.targets[1].queryScope, 'SC');
+  assert.equal(saved.targets.length, 1);
+  assert.equal(saved.targets[0].targetId, 'class:BATCH-1:GG02:favorite-full');
+  assert.equal(saved.targets[0].queryScope, 'SC');
+  assert.equal(saved.targets[0].priority, 0);
+  assert.equal(saved.groups.length, 1);
+  assert.equal(saved.groups[0].groupId, 'group:class%3ABATCH-1%3AGG02%3Afavorite-full');
+  assert.equal(saved.groups[0].requiredCount, 1);
 
   const second = await adapter.importFavoriteCourseTargets();
   assert.equal(second.addedCount, 0);
@@ -1325,11 +1880,12 @@ test('favorite import enriches a legacy exact target with its catalog query scop
     name: '收藏测试课程',
     electiveBatchId: 'BATCH-1',
     teachingClassType: 'ZY',
-    teachingClassId: 'favorite-full'
+    teachingClassId: 'favorite-full',
+    priority: 9
   });
   const legacyConfig = grabTaskModel.normalizeTaskConfig({
     schemaVersion: 3,
-    groups: [{ groupId: 'legacy-favorite', targets: [legacyTarget], requiredCount: 1 }]
+    groups: [{ groupId: 'legacy-favorite', label: '收藏保留组', targets: [legacyTarget], requiredCount: 1 }]
   });
   const courseList = new FakeElement('div', {
     classes: ['course-list'],
@@ -1344,10 +1900,15 @@ test('favorite import enriches a legacy exact target with its catalog query scop
   assert.equal(result.addedCount, 0);
   assert.equal(result.enrichedCount, 1);
   assert.equal(adapter.storageWritesForTest.length, 1);
-  assert.equal(
-    adapter.storageStateForTest[grabTaskModel.STORAGE_KEY].targets[0].queryScope,
-    'SC'
-  );
+  const saved = adapter.storageStateForTest[grabTaskModel.STORAGE_KEY];
+  assert.equal(saved.targets.length, 1);
+  assert.equal(saved.targets[0].targetId, 'class:BATCH-1:GG02:favorite-full');
+  assert.equal(saved.targets[0].queryScope, 'SC');
+  assert.equal(saved.targets[0].priority, 9);
+  assert.equal(saved.groups.length, 1);
+  assert.equal(saved.groups[0].groupId, 'legacy-favorite');
+  assert.equal(saved.groups[0].label, '收藏保留组');
+  assert.equal(saved.groups[0].requiredCount, 1);
 });
 
 test('favorite import refuses to treat ordinary course rows as favorites', async () => {
