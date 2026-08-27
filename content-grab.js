@@ -1712,7 +1712,7 @@ function ensureGrabPageStatusPanel() {
     head.addEventListener('pointercancel', onPointerUp);
   });
 
-  panel.querySelector('[data-nju-grab-status-toggle]')?.addEventListener('click', event => {
+  const toggleGrabPageStatusPanel = event => {
     event.preventDefault();
     event.stopPropagation();
     if (wasDragged) return;
@@ -1721,6 +1721,12 @@ function ensureGrabPageStatusPanel() {
       return;
     }
     setGrabPageStatusExpanded(!grabPageStatusExpanded);
+  };
+  panel.querySelector('[data-nju-grab-status-toggle]')?.addEventListener('click', toggleGrabPageStatusPanel);
+  head.addEventListener('click', event => {
+    // Pointer capture during header dragging can retarget an otherwise ordinary
+    // toggle click to the header itself. Keep that no-drag click actionable.
+    if (event.target === head) toggleGrabPageStatusPanel(event);
   });
   panel.querySelector('[data-nju-grab-mini]')?.addEventListener('click', event => {
     event.preventDefault();

@@ -576,6 +576,45 @@ test('offers an accessible mini-mode button and restores the panel from its sema
   assert.equal(body.hidden, false);
 });
 
+test('reopens the ordinary collapsed radar from the header control', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
+  const body = panel.querySelector('[data-nju-grab-status-body]');
+
+  toggle.click();
+  assert.equal(panel.classList.contains('is-expanded'), false);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(body.hidden, true);
+
+  toggle.click();
+  assert.equal(panel.classList.contains('is-expanded'), true);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(body.hidden, false);
+});
+
+test('reopens collapsed and mini radar states when pointer capture retargets the click to the header', () => {
+  const adapter = loadAdapter(new FakeDocument([new FakeElement('div', { classes: ['result-container'] })]));
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', runId: 1, configuredTargets: [], targetStates: {} });
+  const panel = vm.runInContext('grabPageStatusPanel', adapter);
+  const head = panel.querySelector('.nju-grab-status-head');
+  const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
+  const mini = panel.querySelector('[data-nju-grab-mini]');
+  const body = panel.querySelector('[data-nju-grab-status-body]');
+
+  toggle.click();
+  assert.equal(body.hidden, true);
+  head.click();
+  assert.equal(body.hidden, false);
+
+  mini.click();
+  assert.equal(panel.classList.contains('is-mini'), true);
+  head.click();
+  assert.equal(panel.classList.contains('is-mini'), false);
+  assert.equal(body.hidden, false);
+});
+
 test('reduced-motion styling disables the redesigned panel animations', () => {
   const reducedMotion = pageUiSource.slice(pageUiSource.indexOf('@media (prefers-reduced-motion: reduce)'));
   assert.match(reducedMotion, /\.nju-grab-status-panel,/);
