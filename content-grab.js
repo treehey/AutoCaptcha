@@ -1287,7 +1287,7 @@ function grabPageSummaryPresentation(state, currentTime = Date.now()) {
         tone: 'warning'
       };
     }
-    
+
     const activeStates = Object.values(source.targetStates || {}).filter(s => s.phase !== 'SKIPPED' && s.phase !== 'SELECTED');
     const isAllOutOfScope = activeStates.length > 0 && activeStates.every(s => String(s.lastMessage || '').includes('课程分类'));
     if (isAllOutOfScope) {
@@ -1669,9 +1669,9 @@ function ensureGrabPageStatusPanel() {
     const baseLeft = rect.left - currentTranslateX;
     const baseTop = rect.top - currentTranslateY;
     const baseWidth = rect.width;
-    
+
     // Bounds constraints
-    const minDy = -baseTop + 12; 
+    const minDy = -baseTop + 12;
     const maxDy = window.innerHeight - 40 - baseTop;
     const maxDx = window.innerWidth - 40 - baseLeft;
     const minDx = 40 - baseWidth - baseLeft;
@@ -1679,7 +1679,7 @@ function ensureGrabPageStatusPanel() {
     const onPointerMove = moveEvent => {
       let rawDx = moveEvent.clientX - startX;
       let rawDy = moveEvent.clientY - startY;
-      
+
       const dx = Math.max(minDx, Math.min(rawDx, maxDx));
       const dy = Math.max(minDy, Math.min(rawDy, maxDy));
 
