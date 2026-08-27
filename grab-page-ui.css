@@ -417,7 +417,7 @@
   justify-content: center;
   height: 32px;
   padding: 0 14px;
-  border: 1px solid rgba(0, 122, 255, 0.2);
+  border: none;
   border-radius: 999px;
   background: var(--nju-panel-blue);
   color: #fff;
@@ -426,7 +426,12 @@
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-  box-shadow: 0 2px 4px rgba(0, 122, 255, 0.15);
+  box-shadow: 0 2px 6px rgba(0, 122, 255, 0.25);
+}
+
+.nju-grab-control-btn:focus-visible {
+  outline: 2px solid rgba(0, 122, 255, 0.5);
+  outline-offset: 2px;
 }
 
 .nju-grab-control-btn:hover {
@@ -435,14 +440,13 @@
 }
 
 .nju-grab-control-btn.is-running {
-  background: rgba(255, 59, 48, 0.12);
+  background: rgba(255, 59, 48, 0.1);
   color: var(--nju-panel-red);
-  border-color: rgba(255, 59, 48, 0.2);
   box-shadow: none;
 }
 
 .nju-grab-control-btn.is-running:hover {
-  background: rgba(255, 59, 48, 0.18);
+  background: rgba(255, 59, 48, 0.15);
 }
 
 .nju-grab-status-close {
@@ -496,6 +500,10 @@
   border-radius: 50%;
   background: #8e8e93;
   box-shadow: 0 0 0 4px rgba(142, 142, 147, 0.12);
+}
+
+.nju-grab-target-dot {
+  margin-top: 5px;
 }
 
 .nju-grab-radar-dot {
@@ -589,26 +597,27 @@
 .nju-grab-status-metrics {
   display: grid;
   grid-template-columns: 0.8fr 0.8fr 1.4fr;
-  gap: 1px;
   margin: 10px 0;
   overflow: hidden;
-  border: 1px solid rgba(60, 60, 67, 0.1);
+  border: none;
   border-radius: 12px;
-  background: rgba(60, 60, 67, 0.1);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 }
 
 .nju-grab-command-bar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 7px;
-  margin: 0 0 10px;
-  padding: 7px 8px;
-  border: 1px solid rgba(60, 60, 67, 0.1);
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.65);
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   color: #6e6e73;
-  font-size: 11px;
+  font-size: 12px;
 }
 .nju-grab-now-btn {
   min-height: 28px;
@@ -641,11 +650,16 @@
 .nju-grab-panel-feedback[data-tone="danger"] { color: #b42318; background: rgba(255, 59, 48, 0.1); }
 
 .nju-grab-status-metrics > span {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   min-width: 0;
   gap: 2px;
-  padding: 8px 9px;
-  background: rgba(255, 255, 255, 0.7);
+  padding: 10px 12px;
+  border-right: 1px solid rgba(60, 60, 67, 0.06);
+}
+.nju-grab-status-metrics > span:last-child {
+  border-right: none;
 }
 
 .nju-grab-status-metrics strong {
@@ -745,14 +759,15 @@
   height: 10px;
   border-radius: 50%;
   background: #c7c7cc;
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .nju-grab-target-actions {
   position: relative;
   grid-column: 3;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .nju-grab-target-menu-trigger {
@@ -776,9 +791,6 @@
 .nju-grab-target-menu .nju-grab-target-remove { opacity: 1; pointer-events: auto; width: auto; height: 34px; padding: 0 10px; color: var(--nju-panel-red, #ff3b30); text-align: left; }
 
 .nju-grab-target-remove {
-  grid-column: 1;
-  grid-row: 1;
-  justify-self: center;
   display: inline-grid;
   place-items: center;
   width: 28px;
@@ -793,9 +805,13 @@
   transition: opacity 0.15s ease;
 }
 
-.nju-grab-target-actions:hover .nju-grab-target-remove,
-.nju-grab-target-remove:focus-visible,
-.nju-grab-target-actions:focus-within .nju-grab-target-remove {
+.nju-grab-target-remove[hidden] {
+  display: none !important;
+}
+
+.nju-grab-target-actions:hover .nju-grab-target-remove:not([hidden]),
+.nju-grab-target-remove:not([hidden]):focus-visible,
+.nju-grab-target-actions:focus-within .nju-grab-target-remove:not([hidden]) {
   opacity: 1;
   pointer-events: auto;
 }
@@ -910,8 +926,6 @@
 .nju-grab-status-target[data-tone="remove"] .nju-grab-target-status { color: #8e8e93; }
 
 .nju-grab-target-badge {
-  grid-column: 1;
-  grid-row: 1;
   max-width: 74px;
   overflow: hidden;
   padding: 5px 8px;
@@ -923,13 +937,6 @@
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: opacity 0.15s ease;
-}
-
-.nju-grab-target-actions:hover .nju-grab-target-badge,
-.nju-grab-target-actions:focus-within .nju-grab-target-badge {
-  opacity: 0;
-  pointer-events: none;
 }
 
 .nju-grab-status-target[data-tone="active"] .nju-grab-target-badge {
