@@ -52,6 +52,42 @@ const GRAB_NETWORK_PATHS = new Set([
   GRAB_NETWORK_PATH.STATUS,
   ...GRAB_NETWORK_PATH.QUERIES
 ]);
+const COURSE_SCOPE_INFO = Object.freeze({
+  ZY: Object.freeze({ label: '专业' }),
+  GG: Object.freeze({ label: '公共' }),
+  GG01: Object.freeze({ label: '公选课', parent: 'GG' }),
+  GG02: Object.freeze({ label: '导学/研讨/通识', parent: 'GG' }),
+  KZY: Object.freeze({ label: '跨专业' }),
+  TX: Object.freeze({ label: '通修' }),
+  TY: Object.freeze({ label: '体育' }),
+  YD: Object.freeze({ label: '悦读' }),
+  QB: Object.freeze({ label: '课表查询' }),
+  SC: Object.freeze({ label: '收藏' })
+});
+const LEGACY_COURSE_SCOPE_ALIASES = Object.freeze({
+  TCT1: 'ZY',
+  TCT2: 'KZY',
+  TCT3: 'GG01',
+  TCT4: 'GG02',
+  TCT5: 'TY'
+});
+
+function normalizeCourseScope(scope) {
+  const normalized = String(scope || '').trim().toUpperCase();
+  return LEGACY_COURSE_SCOPE_ALIASES[normalized] || normalized;
+}
+
+function courseScopeLabel(scope) {
+  const normalized = normalizeCourseScope(scope);
+  return COURSE_SCOPE_INFO[normalized]?.label || normalized || '对应分类';
+}
+
+function courseScopeNavigationPath(scope) {
+  const normalized = normalizeCourseScope(scope);
+  if (!normalized) return [];
+  const parent = COURSE_SCOPE_INFO[normalized]?.parent;
+  return parent ? [parent, normalized] : [normalized];
+}
 const grabSelectionVerifier = grabVerificationModule.createVerificationEngine({
   outcome: grabModule.OUTCOME,
   paths: {
@@ -941,20 +977,77 @@ const GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY = 'nju_grab_page_enhancements_enabled';
 const GRAB_TARGET_BUTTON_CLASS = 'nju-grab-add-target';
 const GRAB_PAGE_STATUS_CLASS = 'nju-grab-status-panel';
 const GRAB_PANEL_WIDTH_KEY = 'njuGrabPanelWidth';
+const GRAB_PANEL_MINI_TUTORIAL_KEY = 'njuGrabPanelMiniTutorialSeen';
 const GRAB_PANEL_HEIGHT_KEY = 'njuGrabPanelHeight';
+const GRAB_PANEL_HIDE_SELECTED_KEY = 'njuGrabPanelHideSelected';
+const GRAB_INTERVAL_PRESETS = Object.freeze([3000, 5000, 10000, 30000]);
 let configuredGrabTargetIds = new Set();
 let configuredGrabTargets = [];
 let configuredGrabGroups = [];
+let configuredGrabInterval = 5000;
 let grabTargetDecorateTimer = null;
 let grabTargetObserver = null;
 let grabPageStatusPanel = null;
 let grabPageStatusTimer = null;
+let grabPanelFeedbackTimer = null;
 let grabPageStatusExpanded = false;
 let grabPageStatusAutoExpandedRunId = 0;
 let latestGrabPageState = null;
 let grabPageStatusErrorReported = false;
 let pendingGrabRemoval = null;
+let grabPanelDismissHandlers = null;
+let openGrabTargetMenu = null;
+let openGrabTargetMenuTrigger = null;
+let grabMoreMenu = null;
+let grabMoreButton = null;
 let grabPageEnhancementsEnabled = true;
+let grabPanelHideSelected = false;
+let automaticCourseScopeNavigationTimer = null;
+let automaticCourseScopeNavigationInFlight = false;
+let automaticCourseScopeNavigationInFlightToken = null;
+let automaticCourseScopeNavigationGeneration = 0;
+const automaticCourseScopeLastAttempt = new Map();
+const automaticCourseScopeLastAttemptRunId = new Map();
+
+function invalidateAutomaticCourseScopeNavigation() {
+  automaticCourseScopeNavigationGeneration += 1;
+  if (automaticCourseScopeNavigationTimer !== null) {
+    clearTimeout(automaticCourseScopeNavigationTimer.timeoutId ?? automaticCourseScopeNavigationTimer);
+    automaticCourseScopeNavigationTimer = null;
+  }
+  automaticCourseScopeNavigationInFlight = false;
+  automaticCourseScopeNavigationInFlightToken = null;
+}
+
+function automaticCourseScopeNavigationToken() {
+  return {
+    generation: automaticCourseScopeNavigationGeneration,
+    runId: Math.max(0, Number(latestGrabPageState?.runId) || 0)
+  };
+}
+
+function isAutomaticCourseScopeNavigationActive(token) {
+  if (!token || token.generation !== automaticCourseScopeNavigationGeneration) return false;
+  if (!latestGrabPageState?.running) return false;
+  const currentRunId = Math.max(0, Number(latestGrabPageState.runId) || 0);
+  return currentRunId === token.runId;
+}
+
+function missingCourseScopesForState(source) {
+  const missingScopes = new Set();
+  if (!source?.running) return missingScopes;
+  const runtimeTargets = Array.isArray(source.configuredTargets) && source.configuredTargets.length > 0
+    ? source.configuredTargets
+    : configuredGrabTargets;
+  for (const target of runtimeTargets) {
+    const state = source.targetStates?.[target.targetId];
+    if (state && String(state.lastMessage || '').includes('课程分类')) {
+      const scope = target.queryScope || target.teachingClassType;
+      if (scope) missingScopes.add(scope);
+    }
+  }
+  return missingScopes;
+}
 
 function readGrabPanelPreference(key) {
   try {
@@ -974,6 +1067,99 @@ function removeGrabPanelPreference(key) {
   try {
     globalThis.localStorage?.removeItem(key);
   } catch {}
+}
+
+function isGrabSelectedTarget(target, state) {
+  return state?.targetStates?.[target?.targetId]?.phase === 'SELECTED';
+}
+
+function isGrabPanelEditableStopped(state) {
+  return !state?.running && state?.phase !== 'PAUSED_AUTH' && !state?.authRecovery?.pending;
+}
+
+function isGrabAuthRecoveryActive(state) {
+  return state?.phase === 'PAUSED_AUTH' || Boolean(state?.authRecovery?.pending);
+}
+
+function grabTargetIdSetMatches(left, right) {
+  const leftIds = new Set((Array.isArray(left) ? left : []).map(target => String(target?.targetId || '')).filter(Boolean));
+  const rightIds = new Set((Array.isArray(right) ? right : []).map(target => String(target?.targetId || '')).filter(Boolean));
+  return leftIds.size === rightIds.size && [...leftIds].every(targetId => rightIds.has(targetId));
+}
+
+function readGrabPanelBooleanPreference(key) {
+  return readGrabPanelPreference(key) === 'true';
+}
+
+function showGrabPanelFeedback(message, tone = 'info') {
+  const panel = grabPageStatusPanel;
+  const node = panel?.querySelector?.('[data-nju-grab-panel-feedback]');
+  if (!node) return;
+  if (message && !grabPageStatusExpanded) setGrabPageStatusExpanded(true);
+  node.textContent = String(message || '');
+  node.dataset.tone = tone;
+  node.hidden = !message;
+  if (grabPanelFeedbackTimer) clearTimeout(grabPanelFeedbackTimer);
+  grabPanelFeedbackTimer = setTimeout(() => {
+    if (node) node.hidden = true;
+    grabPanelFeedbackTimer = null;
+  }, 3500);
+}
+
+function buildGrabDiagnosticSummary(state) {
+  const source = state && typeof state === 'object' ? state : {};
+  const scan = source.lastScan && typeof source.lastScan === 'object' ? source.lastScan : {};
+  const targetStates = source.targetStates && typeof source.targetStates === 'object'
+    ? Object.values(source.targetStates) : [];
+  const counts = {
+    configured: Math.max(0, Number(source.initialTargetCount) || Number(source.configuredTargets?.length) || 0),
+    remaining: Math.max(0, Number(source.remainingTargets?.length) || 0),
+    selected: targetStates.filter(item => item?.phase === 'SELECTED').length,
+    retrying: Math.max(0, Number(source.retryingTargetCount) || 0)
+  };
+  return [
+    `phase=${String(source.phase || 'STOPPED')}`,
+    `running=${Boolean(source.running)}`,
+    `round=${Math.max(0, Number(source.round) || 0)}`,
+    `counts=${counts.configured}/${counts.remaining}/${counts.selected}/${counts.retrying}`,
+    `scanMode=${String(scan.mode || 'NONE')}`,
+    `outcome=${String(scan.outcome || source.lastTransientOutcome || 'NONE')}`,
+    `timing=${Math.max(0, Number(source.lastRoundDurationMs) || Number(scan.durationMs) || 0)}ms`
+  ].join('\n');
+}
+
+function copyGrabDiagnosticSummary() {
+  const summary = buildGrabDiagnosticSummary(latestGrabPageState || getStateSnapshot?.() || {});
+  try {
+    const result = globalThis.navigator?.clipboard?.writeText?.(summary);
+    if (result?.then) {
+      return result.then(() => {
+        showGrabPanelFeedback('已复制脱敏诊断摘要', 'success');
+        return { ok: true, summary };
+      }).catch(() => {
+        showGrabPanelFeedback('复制失败，请检查浏览器剪贴板权限', 'danger');
+        return { ok: false, code: 'CLIPBOARD_FAILED', message: '复制失败，请检查浏览器剪贴板权限' };
+      });
+    }
+  } catch {}
+  showGrabPanelFeedback('复制失败，请检查浏览器剪贴板权限', 'danger');
+  return Promise.resolve({ ok: false, code: 'CLIPBOARD_FAILED', message: '复制失败，请检查浏览器剪贴板权限' });
+}
+
+async function persistGrabInterval(intervalMs) {
+  const interval = GRAB_INTERVAL_PRESETS.includes(Number(intervalMs)) ? Number(intervalMs) : 5000;
+  if (!chrome.storage?.local) return interval;
+  const stored = await chrome.storage.local.get([GRAB_TASK_CONFIG_KEY, 'nju_grab_courses', 'nju_grab_interval']);
+  const current = grabTaskModel.normalizeTaskConfig(stored[GRAB_TASK_CONFIG_KEY], {
+    legacyCourseText: stored.nju_grab_courses,
+    intervalMs: stored.nju_grab_interval
+  });
+  await chrome.storage.local.set({
+    [GRAB_TASK_CONFIG_KEY]: { ...current, intervalMs: interval, updatedAt: Date.now() },
+    nju_grab_interval: interval
+  });
+  configuredGrabInterval = interval;
+  return interval;
 }
 
 function grabPageScanLabel(scan) {
@@ -1054,14 +1240,16 @@ function grabPageTargetPresentation(state, running, timing = {}) {
 
 function grabPageSummaryPresentation(state, currentTime = Date.now()) {
   const source = state && typeof state === 'object' ? state : {};
-  const useRuntimeConfig = Boolean(source.running
-    || ['COMPLETED', 'FAILED', 'PAUSED_AUTH'].includes(source.phase));
+  const runtimeTargets = Array.isArray(source.configuredTargets) ? source.configuredTargets : [];
+  const isTerminalSnapshot = ['COMPLETED', 'FAILED'].includes(source.phase);
+  const useRuntimeConfig = Boolean(source.running) || isGrabAuthRecoveryActive(source)
+    || (isTerminalSnapshot && runtimeTargets.length > 0
+      && grabTargetIdSetMatches(runtimeTargets, configuredGrabTargets));
   const configuredCount = useRuntimeConfig
-    && Array.isArray(source.configuredTargets)
-    && source.configuredTargets.length > 0
-    ? source.configuredTargets.length
-    : configuredGrabTargets.length;
-  const configuredGroupCount = Math.max(0, Number(source.totalGroups) || configuredCount);
+    && runtimeTargets.length > 0 ? runtimeTargets.length : configuredGrabTargets.length;
+  const configuredGroupCount = useRuntimeConfig
+    ? Math.max(0, Number(source.totalGroups) || configuredCount)
+    : Math.max(0, configuredGrabGroups.length || configuredCount);
   const round = Math.max(0, Number(source.round) || 0);
   const globalRetryAt = Math.max(0, Number(source.globalRetryAt) || 0);
   const nextRetryAt = Math.max(0, Number(source.nextRetryAt) || 0);
@@ -1099,7 +1287,7 @@ function grabPageSummaryPresentation(state, currentTime = Date.now()) {
         tone: 'warning'
       };
     }
-    
+
     const activeStates = Object.values(source.targetStates || {}).filter(s => s.phase !== 'SKIPPED' && s.phase !== 'SELECTED');
     const isAllOutOfScope = activeStates.length > 0 && activeStates.every(s => String(s.lastMessage || '').includes('课程分类'));
     if (isAllOutOfScope) {
@@ -1117,10 +1305,10 @@ function grabPageSummaryPresentation(state, currentTime = Date.now()) {
       tone: 'active'
     };
   }
-  if (source.phase === 'COMPLETED') {
+  if (source.phase === 'COMPLETED' && useRuntimeConfig) {
     return { title: '课程组已完成', subtitle: '选课结果已经二次确认', tone: 'success' };
   }
-  if (source.phase === 'FAILED') {
+  if (source.phase === 'FAILED' && useRuntimeConfig) {
     return { title: '任务需要处理', subtitle: '请查看目标状态并调整配置', tone: 'danger' };
   }
   return {
@@ -1133,11 +1321,32 @@ function grabPageSummaryPresentation(state, currentTime = Date.now()) {
 function setGrabPageStatusExpanded(expanded) {
   grabPageStatusExpanded = Boolean(expanded);
   if (!grabPageStatusPanel) return;
+  const mini = grabPageStatusPanel.classList.contains('is-mini');
   grabPageStatusPanel.classList.toggle('is-expanded', grabPageStatusExpanded);
   const toggle = grabPageStatusPanel.querySelector('[data-nju-grab-status-toggle]');
   const body = grabPageStatusPanel.querySelector('[data-nju-grab-status-body]');
-  toggle?.setAttribute('aria-expanded', String(grabPageStatusExpanded));
-  if (body) body.hidden = !grabPageStatusExpanded;
+  toggle?.setAttribute('aria-expanded', String(!mini && grabPageStatusExpanded));
+  if (body) body.hidden = mini || !grabPageStatusExpanded;
+}
+
+function dismissGrabPanelMiniTutorial(panel) {
+  const tooltip = panel?.querySelector?.('.nju-grab-tutorial-tooltip');
+  tooltip?.remove?.();
+  panel?.classList?.remove('has-mini-tutorial');
+  panel?.querySelector?.('.nju-grab-resize-handle-l')?.classList.remove('is-tutoring');
+  writeGrabPanelPreference(GRAB_PANEL_MINI_TUTORIAL_KEY, '1');
+}
+
+function setGrabPanelMiniMode(panel, mini, { dismissTutorial = false } = {}) {
+  if (!panel) return;
+  const enabled = Boolean(mini);
+  panel.classList.toggle('is-mini', enabled);
+  const toggle = panel.querySelector('[data-nju-grab-status-toggle]');
+  const body = panel.querySelector('[data-nju-grab-status-body]');
+  toggle?.setAttribute('aria-expanded', String(!enabled && grabPageStatusExpanded));
+  toggle?.setAttribute('aria-label', enabled ? '展开课程监控面板' : '折叠或展开课程监控状态');
+  if (body) body.hidden = enabled || !grabPageStatusExpanded;
+  if (dismissTutorial) dismissGrabPanelMiniTutorial(panel);
 }
 
 function revealGrabPageStatusPanel() {
@@ -1150,10 +1359,127 @@ function revealGrabPageStatusPanel() {
   return panel;
 }
 
+function hideGrabPageStatusPanel() {
+  const panel = grabPageStatusPanel;
+  if (!panel) return false;
+  closeGrabMoreMenuPortal();
+  closeGrabTargetMenuPortal();
+  panel.style.display = 'none';
+  let restoreBtn = document.getElementById?.('nju-grab-restore-btn');
+  if (!restoreBtn && document.createElement) {
+    restoreBtn = document.createElement('button');
+    restoreBtn.id = 'nju-grab-restore-btn';
+    restoreBtn.type = 'button';
+    restoreBtn.title = '恢复课程监控面板';
+    restoreBtn.setAttribute('aria-label', '恢复课程监控面板');
+    restoreBtn.textContent = '◉';
+    Object.assign(restoreBtn.style, {
+      position: 'fixed', bottom: '24px', right: '24px', width: '44px', height: '44px',
+      borderRadius: '50%', background: '#ffffff', border: '1px solid rgba(0,0,0,0.08)',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.12)', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', cursor: 'pointer', color: '#007aff', zIndex: '2147483647'
+    });
+    restoreBtn.addEventListener('click', () => {
+      restoreBtn.remove();
+      panel.style.display = '';
+      setGrabPageStatusExpanded(true);
+    });
+    document.body?.appendChild(restoreBtn);
+  }
+  return true;
+}
+
+function resetGrabPanelPositionAndSize(panel) {
+  removeGrabPanelPreference(GRAB_PANEL_WIDTH_KEY);
+  removeGrabPanelPreference(GRAB_PANEL_HEIGHT_KEY);
+  panel?.style?.removeProperty?.('--nju-panel-width');
+  panel?.style?.removeProperty?.('--nju-panel-height');
+  panel?.style?.removeProperty?.('transform');
+  if (panel) panel.dataset.lastTopClick = '0';
+  showGrabPanelFeedback('面板位置和尺寸已重置', 'success');
+}
+
+function closeGrabTargetMenuPortal({ restoreFocus = false } = {}) {
+  const trigger = openGrabTargetMenuTrigger;
+  openGrabTargetMenu?.remove?.();
+  openGrabTargetMenu = null;
+  openGrabTargetMenuTrigger = null;
+  trigger?.setAttribute?.('aria-expanded', 'false');
+  if (restoreFocus) trigger?.focus?.();
+}
+
+function closeGrabMoreMenuPortal() {
+  if (grabMoreMenu) grabMoreMenu.hidden = true;
+  grabMoreButton?.setAttribute?.('aria-expanded', 'false');
+}
+
+function openGrabTargetMenuPortal(target, trigger) {
+  closeGrabMoreMenuPortal();
+  closeGrabTargetMenuPortal();
+  const menu = document.createElement('div');
+  menu.className = 'nju-grab-target-menu';
+  menu.setAttribute('role', 'menu');
+  const scope = target?.queryScope || target?.teachingClassType;
+  if (scope) {
+    const jump = document.createElement('button');
+    jump.type = 'button';
+    jump.setAttribute('role', 'menuitem');
+    jump.textContent = `前往${courseScopeLabel(scope)}分类`;
+    jump.addEventListener('click', event => {
+      event.preventDefault();
+      closeGrabTargetMenuPortal();
+      jumpToCourseTab(scope, true);
+    });
+    menu.appendChild(jump);
+  }
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'nju-grab-target-remove';
+  remove.setAttribute('role', 'menuitem');
+  remove.textContent = '移除监控';
+  remove.setAttribute('aria-label', `移除监控目标：${grabTaskModel.targetLabel(target)}`);
+  remove.addEventListener('click', event => {
+    event.preventDefault();
+    closeGrabTargetMenuPortal();
+    requestGrabTargetRemoval(target, trigger);
+  });
+  menu.appendChild(remove);
+  document.body?.appendChild(menu);
+  openGrabTargetMenu = menu;
+  openGrabTargetMenuTrigger = trigger;
+  trigger?.setAttribute?.('aria-expanded', 'true');
+  const rect = trigger?.getBoundingClientRect?.();
+  if (rect) {
+    const viewportHeight = Number(globalThis.innerHeight) || 800;
+    const viewportWidth = Number(globalThis.innerWidth) || 1200;
+    const menuHeight = 90;
+    const menuWidth = 150;
+    menu.style.top = `${Math.max(8, rect.bottom + menuHeight > viewportHeight ? rect.top - menuHeight - 4 : rect.bottom + 4)}px`;
+    menu.style.left = `${Math.max(8, Math.min(viewportWidth - menuWidth - 8, rect.right - menuWidth))}px`;
+  }
+  menu.querySelector('button')?.focus?.();
+}
+
 function removeGrabPageStatusPanel() {
   if (grabPageStatusTimer) clearTimeout(grabPageStatusTimer);
   grabPageStatusTimer = null;
+  if (grabPanelFeedbackTimer) clearTimeout(grabPanelFeedbackTimer);
+  grabPanelFeedbackTimer = null;
   grabPageStatusPanel?.remove();
+  grabMoreMenu?.remove?.();
+  grabMoreMenu = null;
+  grabMoreButton = null;
+  document.getElementById?.('nju-grab-restore-btn')?.remove?.();
+  if (grabPanelDismissHandlers) {
+    document.removeEventListener('pointerdown', grabPanelDismissHandlers.pointerdown);
+    document.removeEventListener('keydown', grabPanelDismissHandlers.keydown);
+    if (typeof globalThis.window?.removeEventListener === 'function') {
+      globalThis.window.removeEventListener('scroll', grabPanelDismissHandlers.dismissFloatingMenus, true);
+      globalThis.window.removeEventListener('resize', grabPanelDismissHandlers.dismissFloatingMenus);
+    }
+    grabPanelDismissHandlers = null;
+  }
+  closeGrabTargetMenuPortal();
   grabPageStatusPanel = null;
 }
 
@@ -1192,7 +1518,7 @@ function ensureGrabPageStatusPanel() {
   panel.setAttribute('aria-label', '课程监控状态');
   panel.innerHTML = `
     <div class="nju-grab-pill-grabber" data-resize="top"></div>
-    <div class="nju-grab-resize-handle-l" data-resize="left"></div>
+    <div class="nju-grab-resize-handle-l" data-resize="left" role="button" tabindex="0" aria-label="连续点按两次收成胶囊，按回车键也可收起" title="连续点按两次收成胶囊"></div>
     <div class="nju-grab-status-head">
       <button class="nju-grab-status-toggle" type="button" data-nju-grab-status-toggle aria-expanded="false">
         <svg class="nju-grab-drag-handle" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" style="opacity: 0.3; cursor: grab;"><path d="M8 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM8 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM8 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM20 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0z"/></svg>
@@ -1204,16 +1530,33 @@ function ensureGrabPageStatusPanel() {
         <span class="nju-grab-status-chevron" aria-hidden="true"></span>
       </button>
       <div class="nju-grab-status-actions">
-        <button class="nju-grab-control-btn" type="button" data-nju-grab-control aria-label="启动/暂停"></button>
-        <button class="nju-grab-status-close" type="button" data-nju-grab-status-close aria-label="隐藏" title="隐藏选课页增强控件">×</button>
+         <button class="nju-grab-control-btn" type="button" data-nju-grab-control aria-label="开始监控"></button>
+         <button class="nju-grab-more-btn" type="button" data-nju-grab-more aria-expanded="false" aria-haspopup="menu" aria-label="更多课程监控操作" title="更多">•••</button>
+         <button class="nju-grab-status-close" type="button" data-nju-grab-status-close aria-label="隐藏面板" title="隐藏课程监控面板">×</button>
+         <div class="nju-grab-more-menu" data-nju-grab-more-menu role="menu" hidden>
+           <button type="button" role="menuitem" data-nju-grab-import-favorites>导入当前收藏页课程</button>
+           <button type="button" role="menuitem" data-nju-grab-toggle-selected>隐藏已选目标</button>
+           <button type="button" role="menuitem" data-nju-grab-copy-diagnostic>复制脱敏诊断摘要</button>
+           <button type="button" role="menuitem" data-nju-grab-reset-panel>重置面板位置和尺寸</button>
+           <button type="button" role="menuitem" data-nju-grab-hide-panel>隐藏面板</button>
+           <button type="button" role="menuitem" data-nju-grab-disable-enhancements class="is-destructive">关闭选课页增强</button>
+         </div>
       </div>
     </div>
     <div class="nju-grab-status-body" data-nju-grab-status-body hidden>
-      <div class="nju-grab-status-metrics">
+       <div class="nju-grab-status-metrics">
         <span><strong data-nju-grab-status-progress>0/0</strong><small>课程组</small></span>
         <span><strong data-nju-grab-status-round>0</strong><small>检测轮次</small></span>
-        <span><strong data-nju-grab-status-channel>待命</strong><small>底层状态</small></span>
-      </div>
+         <span><strong data-nju-grab-status-channel>待命</strong><small>底层状态</small></span>
+       </div>
+       <div class="nju-grab-command-bar" data-nju-grab-command-bar>
+         <button type="button" class="nju-grab-now-btn" data-nju-grab-run-now>立即检查</button>
+         <label>间隔 <select data-nju-grab-interval aria-label="监控间隔">
+           <option value="3000">3 秒</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="30000">30 秒</option>
+         </select></label>
+         <span data-nju-grab-next-check>下次检查：—</span>
+       </div>
+       <div class="nju-grab-panel-feedback" data-nju-grab-panel-feedback hidden role="status"></div>
       <div class="nju-grab-missing-scopes" data-nju-grab-missing-scopes hidden></div>
       <div class="nju-grab-status-targets" data-nju-grab-status-targets></div>
       <div class="nju-grab-remove-confirm" data-nju-grab-remove-confirm hidden>
@@ -1259,6 +1602,17 @@ function ensureGrabPageStatusPanel() {
       panel.dataset.lastTopClick = String(now);
     }
     
+    // Check for double click on left handle to toggle Mini Mode
+    if (type === 'left') {
+      const now = Date.now();
+      if (panel.dataset.lastLeftClick && (now - Number(panel.dataset.lastLeftClick)) < 300) {
+        setGrabPanelMiniMode(panel, !panel.classList.contains('is-mini'), { dismissTutorial: true });
+        panel.dataset.lastLeftClick = '0';
+        return;
+      }
+      panel.dataset.lastLeftClick = String(now);
+    }
+
     const startX = e.clientX;
     const startY = e.clientY;
     
@@ -1309,10 +1663,25 @@ function ensureGrabPageStatusPanel() {
     startY = e.clientY - currentTranslateY;
     head.setPointerCapture(e.pointerId);
 
+    const rect = panel.getBoundingClientRect();
+    const baseLeft = rect.left - currentTranslateX;
+    const baseTop = rect.top - currentTranslateY;
+    const baseWidth = rect.width;
+
+    // Bounds constraints
+    const minDy = -baseTop + 12;
+    const maxDy = window.innerHeight - 40 - baseTop;
+    const maxDx = window.innerWidth - 40 - baseLeft;
+    const minDx = 40 - baseWidth - baseLeft;
+
     const onPointerMove = moveEvent => {
-      const dx = moveEvent.clientX - startX;
-      const dy = moveEvent.clientY - startY;
-      if (!isDragging && (Math.abs(moveEvent.clientX - currentTranslateX - startX) > 3 || Math.abs(moveEvent.clientY - currentTranslateY - startY) > 3)) {
+      let rawDx = moveEvent.clientX - startX;
+      let rawDy = moveEvent.clientY - startY;
+
+      const dx = Math.max(minDx, Math.min(rawDx, maxDx));
+      const dy = Math.max(minDy, Math.min(rawDy, maxDy));
+
+      if (!isDragging && (Math.abs(dx - currentTranslateX) > 3 || Math.abs(dy - currentTranslateY) > 3)) {
         isDragging = true;
         wasDragged = true;
         panel.style.transition = 'none';
@@ -1333,12 +1702,6 @@ function ensureGrabPageStatusPanel() {
       if (isDragging) {
         panel.style.transition = '';
         setTimeout(() => wasDragged = false, 150);
-      } else {
-        // Not dragged, meaning it was a click!
-        const isToggle = !!e.target.closest('[data-nju-grab-status-toggle], .nju-grab-drag-handle, .nju-grab-status-head');
-        if (isToggle) {
-          setGrabPageStatusExpanded(!grabPageStatusExpanded);
-        }
       }
     };
 
@@ -1347,17 +1710,43 @@ function ensureGrabPageStatusPanel() {
     head.addEventListener('pointercancel', onPointerUp);
   });
 
-  // Remove the old click listener for the toggle since we handle it in pointerup now
+  const toggleGrabPageStatusPanel = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (wasDragged) return;
+    if (panel.classList.contains('is-mini')) {
+      setGrabPanelMiniMode(panel, false);
+      return;
+    }
+    setGrabPageStatusExpanded(!grabPageStatusExpanded);
+  };
+  panel.querySelector('[data-nju-grab-status-toggle]')?.addEventListener('click', toggleGrabPageStatusPanel);
+  head.addEventListener('click', event => {
+    // Pointer capture during header dragging can retarget an otherwise ordinary
+    // toggle click to the header itself. Keep that no-drag click actionable.
+    if (event.target === head) toggleGrabPageStatusPanel(event);
+  });
+  panel.querySelector('.nju-grab-resize-handle-l')?.addEventListener('keydown', event => {
+    if (!['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setGrabPanelMiniMode(panel, true, { dismissTutorial: true });
+    panel.querySelector('[data-nju-grab-status-toggle]')?.focus?.();
+  });
   panel.querySelector('[data-nju-grab-control]')?.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
-    const isRunning = Boolean(latestGrabPageState?.running);
-    if (isRunning) {
+    const currentState = latestGrabPageState || getStateSnapshot();
+    const isRunning = Boolean(currentState?.running);
+    if (isRunning || isGrabAuthRecoveryActive(currentState)) {
       stopGrab();
       renderGrabPageStatus(getStateSnapshot());
     } else {
-      chrome.storage.local.get([GRAB_TASK_CONFIG_KEY, 'nju_grab_interval']).then(stored => {
-        const config = grabTaskModel.normalizeTaskConfig(stored[GRAB_TASK_CONFIG_KEY]);
+      chrome.storage.local.get([GRAB_TASK_CONFIG_KEY, 'nju_grab_courses', 'nju_grab_interval']).then(stored => {
+        const config = grabTaskModel.normalizeTaskConfig(stored[GRAB_TASK_CONFIG_KEY], {
+          legacyCourseText: stored.nju_grab_courses,
+          intervalMs: stored.nju_grab_interval
+        });
         const interval = Number(stored.nju_grab_interval) || config.intervalMs || 5000;
         if (config.targets.length === 0) {
           alert('请先添加课程目标');
@@ -1370,47 +1759,131 @@ function ensureGrabPageStatusPanel() {
       });
     }
   });
+  panel.querySelector('[data-nju-grab-run-now]')?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const result = runNowGrab();
+    if (result?.message) showGrabPanelFeedback(result.message, result.ok ? 'success' : 'warning');
+  });
+  panel.querySelector('[data-nju-grab-interval]')?.addEventListener('change', async event => {
+    const select = event.target;
+    const currentState = latestGrabPageState || getStateSnapshot();
+    if (!isGrabPanelEditableStopped(currentState)) {
+      select.value = String(currentState.interval || 5000);
+      showGrabPanelFeedback(currentState?.authRecovery?.pending || currentState?.phase === 'PAUSED_AUTH'
+        ? '登录恢复中不能修改监控间隔' : '运行中不能修改监控间隔', 'warning');
+      return;
+    }
+    try {
+      const interval = await persistGrabInterval(select.value);
+      showGrabPanelFeedback(`已保存监控间隔：${interval / 1000} 秒`, 'success');
+    } catch (error) {
+      showGrabPanelFeedback(`保存间隔失败：${error?.message || '未知错误'}`, 'danger');
+    }
+  });
+  const moreButton = panel.querySelector('[data-nju-grab-more]');
+  const moreMenu = panel.querySelector('[data-nju-grab-more-menu]');
+  grabMoreButton = moreButton;
+  grabMoreMenu = moreMenu;
+  const closeMoreMenu = ({ restoreFocus = false } = {}) => {
+    if (!moreMenu) return;
+    moreMenu.hidden = true;
+    moreButton?.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) moreButton?.focus?.();
+  };
+  moreButton?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!moreMenu) return;
+    if (moreMenu.hidden) closeGrabTargetMenuPortal();
+    moreMenu.hidden = !moreMenu.hidden;
+    moreButton.setAttribute('aria-expanded', String(!moreMenu.hidden));
+    if (!moreMenu.hidden) {
+      if (moreMenu.parentElement !== document.body) document.body?.appendChild(moreMenu);
+      const rect = moreButton.getBoundingClientRect?.();
+      if (rect) {
+        const viewportHeight = Number(globalThis.innerHeight) || 800;
+        const viewportWidth = Number(globalThis.innerWidth) || 1200;
+        const menuHeight = 260;
+        const menuWidth = 210;
+        moreMenu.style.top = `${Math.max(8, rect.bottom + menuHeight > viewportHeight ? rect.top - menuHeight - 4 : rect.bottom + 4)}px`;
+        moreMenu.style.left = `${Math.max(8, Math.min(viewportWidth - menuWidth - 8, rect.right - menuWidth))}px`;
+      }
+    }
+    if (!moreMenu.hidden) moreMenu.querySelector('[role="menuitem"]')?.focus?.();
+  });
+  panel.querySelector('[data-nju-grab-import-favorites]')?.addEventListener('click', async () => {
+    closeMoreMenu();
+    if (!isGrabPanelEditableStopped(latestGrabPageState || getStateSnapshot())
+      || normalizeCourseScope(currentCourseQueryScope(document.body)) !== 'SC') {
+      showGrabPanelFeedback('仅可在停止态的收藏页导入课程', 'warning');
+      return;
+    }
+    try {
+      const result = await importFavoriteCourseTargets();
+      showGrabPanelFeedback(result?.message || (result?.ok ? '已导入当前收藏课程' : '导入收藏课程失败'), result?.ok ? 'success' : 'danger');
+    } catch (error) {
+      showGrabPanelFeedback(`导入失败：${error?.message || '未知错误'}`, 'danger');
+    }
+  });
+  panel.querySelector('[data-nju-grab-toggle-selected]')?.addEventListener('click', () => {
+    grabPanelHideSelected = !grabPanelHideSelected;
+    writeGrabPanelPreference(GRAB_PANEL_HIDE_SELECTED_KEY, grabPanelHideSelected);
+    closeMoreMenu();
+    renderGrabPageStatus(latestGrabPageState || {});
+  });
+  panel.querySelector('[data-nju-grab-copy-diagnostic]')?.addEventListener('click', () => {
+    closeMoreMenu();
+    void copyGrabDiagnosticSummary();
+  });
+  panel.querySelector('[data-nju-grab-reset-panel]')?.addEventListener('click', () => {
+    closeMoreMenu();
+    currentTranslateX = 0;
+    currentTranslateY = 0;
+    wasDragged = false;
+    isDragging = false;
+    resetGrabPanelPositionAndSize(panel);
+  });
+  panel.querySelector('[data-nju-grab-disable-enhancements]')?.addEventListener('click', () => {
+    closeMoreMenu();
+    void setGrabPageEnhancementsEnabled(false);
+  });
+  panel.querySelector('[data-nju-grab-hide-panel]')?.addEventListener('click', () => {
+    closeMoreMenu();
+    hideGrabPageStatusPanel();
+  });
+  const dismissPointerdown = event => {
+    if (moreMenu && !moreMenu.hidden
+      && !event.target?.closest?.('.nju-grab-more-btn')
+      && !event.target?.closest?.('.nju-grab-more-menu')) {
+      closeMoreMenu();
+    }
+    if (openGrabTargetMenu && !event.target?.closest?.('.nju-grab-target-actions')
+      && !event.target?.closest?.('.nju-grab-target-menu')) {
+      closeGrabTargetMenuPortal();
+    }
+  };
+  const dismissKeydown = event => {
+    if (event.key === 'Escape') {
+      closeMoreMenu({ restoreFocus: true });
+      closeGrabTargetMenuPortal({ restoreFocus: true });
+    }
+  };
+  const dismissFloatingMenus = () => {
+    closeMoreMenu();
+    closeGrabTargetMenuPortal();
+  };
+  if (typeof globalThis.window?.addEventListener === 'function') {
+    globalThis.window.addEventListener('scroll', dismissFloatingMenus, true);
+    globalThis.window.addEventListener('resize', dismissFloatingMenus);
+  }
+  document.addEventListener('pointerdown', dismissPointerdown);
+  document.addEventListener('keydown', dismissKeydown);
+  grabPanelDismissHandlers = { pointerdown: dismissPointerdown, keydown: dismissKeydown, dismissFloatingMenus };
   panel.querySelector('[data-nju-grab-status-close]')?.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
-    panel.style.display = 'none';
-
-    let restoreBtn = document.getElementById('nju-grab-restore-btn');
-    if (!restoreBtn) {
-        restoreBtn = document.createElement('button');
-        restoreBtn.id = 'nju-grab-restore-btn';
-        restoreBtn.title = '恢复选课监控面板';
-        restoreBtn.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
-        Object.assign(restoreBtn.style, {
-            position: 'fixed',
-            bottom: '24px',
-            right: '24px',
-            width: '44px',
-            height: '44px',
-            borderRadius: '50%',
-            background: '#ffffff',
-            border: '1px solid rgba(0,0,0,0.08)',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            color: '#634798',
-            zIndex: '2147483647',
-            transition: 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
-        });
-        restoreBtn.addEventListener('mouseenter', () => restoreBtn.style.transform = 'scale(1.08)');
-        restoreBtn.addEventListener('mouseleave', () => restoreBtn.style.transform = 'scale(1)');
-        restoreBtn.addEventListener('click', () => {
-            restoreBtn.style.transform = 'scale(0.8)';
-            restoreBtn.style.opacity = '0';
-            setTimeout(() => {
-                restoreBtn.remove();
-                panel.style.display = '';
-            }, 150);
-        });
-        document.body.appendChild(restoreBtn);
-    }
+    hideGrabPageStatusPanel();
   });
   panel.querySelector('[data-nju-grab-remove-cancel]')?.addEventListener('click', () => {
     if (pendingGrabRemoval?.processing) return;
@@ -1423,19 +1896,62 @@ function ensureGrabPageStatusPanel() {
   });
   document.body.appendChild(panel);
   grabPageStatusPanel = panel;
+  panel.querySelector('[data-nju-grab-status-close]')?.setAttribute('aria-label', '隐藏面板');
+  panel.querySelector('[data-nju-grab-status-close]')?.setAttribute('title', '隐藏课程监控面板');
   setGrabPageStatusExpanded(grabPageStatusExpanded);
+
+  if (!readGrabPanelPreference(GRAB_PANEL_MINI_TUTORIAL_KEY)) {
+    const tooltip = document.createElement('div');
+    tooltip.className = 'nju-grab-tutorial-tooltip';
+    tooltip.setAttribute('role', 'status');
+    tooltip.setAttribute('aria-label', '操作提示：连续点按两次左侧边缘，可以把课程雷达收成胶囊');
+    const gesture = document.createElement('span');
+    gesture.className = 'nju-grab-tutorial-gesture';
+    gesture.setAttribute('aria-hidden', 'true');
+    gesture.append(
+      Object.assign(document.createElement('span'), { className: 'nju-grab-tutorial-panel-shape' }),
+      Object.assign(document.createElement('span'), { className: 'nju-grab-tutorial-taps' })
+    );
+    const copy = document.createElement('span');
+    copy.className = 'nju-grab-tutorial-copy';
+    copy.innerHTML = '<strong>双击左侧边缘</strong><small>面板会收成胶囊</small>';
+    tooltip.append(gesture, copy);
+    panel.appendChild(tooltip);
+    panel.classList.add('has-mini-tutorial');
+    panel.querySelector('.nju-grab-resize-handle-l')?.classList.add('is-tutoring');
+    tooltip.addEventListener('animationend', event => {
+      if (event.target !== tooltip || event.animationName !== 'nju-grab-tutorial-coach') return;
+      tooltip.remove();
+      panel.classList.remove('has-mini-tutorial');
+      panel.querySelector('.nju-grab-resize-handle-l')?.classList.remove('is-tutoring');
+    });
+  }
+
   return panel;
 }
 
 function renderGrabPageStatus(state) {
   latestGrabPageState = state && typeof state === 'object' ? state : null;
+  const source = latestGrabPageState || {};
+  const missingScopes = missingCourseScopesForState(source);
   if (!grabPageEnhancementsEnabled) {
     removeGrabPageEnhancements();
+    if (source.running && missingScopes.size > 0) {
+      scheduleAutomaticCourseScopeNavigation(missingScopes);
+    } else {
+      invalidateAutomaticCourseScopeNavigation();
+    }
     return;
   }
   const panel = ensureGrabPageStatusPanel();
-  if (!panel) return;
-  const source = latestGrabPageState || {};
+  if (!panel) {
+    if (source.running && missingScopes.size > 0) {
+      scheduleAutomaticCourseScopeNavigation(missingScopes);
+    } else {
+      invalidateAutomaticCourseScopeNavigation();
+    }
+    return;
+  }
   const currentTime = Date.now();
   const summary = grabPageSummaryPresentation(source, currentTime);
   const runId = Math.max(0, Number(source.runId) || 0);
@@ -1448,59 +1964,108 @@ function renderGrabPageStatus(state) {
   panel.querySelector('[data-nju-grab-status-title]').textContent = summary.title;
   panel.querySelector('[data-nju-grab-status-subtitle]').textContent = summary.subtitle;
 
-  let displayTargets = configuredGrabTargets;
-  if (Array.isArray(source.configuredTargets) && source.configuredTargets.length > 0) {
-    displayTargets = source.configuredTargets;
-  } else if (source.running || source.phase === 'FAILED' || source.phase === 'COMPLETED') {
-    displayTargets = source.configuredTargets || [];
-  }
+  const runtimeSnapshotTargets = Array.isArray(source.configuredTargets)
+    ? source.configuredTargets : [];
+  const isTerminalSnapshot = ['COMPLETED', 'FAILED'].includes(source.phase);
+  const useRuntimeConfig = isGrabAuthRecoveryActive(source) || Boolean(source.running)
+    || (isTerminalSnapshot && runtimeSnapshotTargets.length > 0
+      && grabTargetIdSetMatches(runtimeSnapshotTargets, configuredGrabTargets));
 
   const controlBtn = panel.querySelector('[data-nju-grab-control]');
   if (controlBtn) {
-    if (source.running) {
-      controlBtn.textContent = '暂停';
+    if (source.running || isGrabAuthRecoveryActive(source)) {
+      controlBtn.textContent = source.running ? '停止' : '停止恢复';
+      controlBtn.setAttribute('aria-label', source.running ? '停止监控' : '停止登录恢复');
       controlBtn.className = 'nju-grab-control-btn is-running';
     } else {
       controlBtn.textContent = '开始监控';
+      controlBtn.setAttribute('aria-label', '开始监控');
       controlBtn.className = 'nju-grab-control-btn';
     }
   }
 
-  const useRuntimeConfig = Boolean(source.running
-    || ['COMPLETED', 'FAILED', 'PAUSED_AUTH'].includes(source.phase));
+  const runNowButton = panel.querySelector('[data-nju-grab-run-now]');
+  if (runNowButton) {
+    const retryingAllTargets = Number(source.retryingTargetCount) > 0
+      && Number(source.retryingTargetCount) >= Math.max(1, Number(source.remainingTargets?.length) || Number(source.initialTargetCount) || 1)
+      && Number(source.nextRetryAt) > currentTime;
+    const globallyBackingOff = Number(source.globalRetryAt) > currentTime;
+    const blocked = source.inFlight || globallyBackingOff || retryingAllTargets;
+    runNowButton.hidden = !source.running;
+    runNowButton.disabled = blocked;
+    runNowButton.textContent = source.inFlight ? '正在检查'
+      : globallyBackingOff || retryingAllTargets ? '退避中'
+        : '立即检查';
+    runNowButton.title = source.inFlight ? '正在检查课程，请稍候'
+      : globallyBackingOff ? '课程查询正在退避，请稍候'
+        : retryingAllTargets ? '所有目标都在等待重试，请稍候'
+          : '立即检查一轮课程';
+  }
+  const intervalSelect = panel.querySelector('[data-nju-grab-interval]');
+  if (intervalSelect) {
+    const interval = source.running ? Number(source.interval) || configuredGrabInterval : configuredGrabInterval;
+    const intervalIsPreset = GRAB_INTERVAL_PRESETS.includes(interval);
+    if (!intervalIsPreset) {
+      let currentOption = intervalSelect.querySelector('[data-nju-grab-current-interval]');
+      if (!currentOption && typeof document.createElement === 'function') {
+        currentOption = document.createElement('option');
+        currentOption.setAttribute('data-nju-grab-current-interval', 'true');
+        currentOption.disabled = true;
+        intervalSelect.appendChild(currentOption);
+      }
+      if (currentOption) {
+        currentOption.value = String(interval);
+        currentOption.textContent = `当前值 ${Math.max(1, Math.round(interval / 1000))} 秒`;
+      }
+    } else {
+      intervalSelect.querySelector('[data-nju-grab-current-interval]')?.remove?.();
+    }
+    intervalSelect.value = String(intervalIsPreset ? interval : Math.max(0, interval));
+    intervalSelect.disabled = !isGrabPanelEditableStopped(source);
+  }
+  const nextCheck = panel.querySelector('[data-nju-grab-next-check]');
+  if (nextCheck) {
+    const nextTimestamp = Math.max(Number(source.globalRetryAt) || 0, Number(source.nextRetryAt) || 0, Number(source.nextRunAt) || 0);
+    const seconds = nextTimestamp > currentTime ? Math.max(1, Math.ceil((nextTimestamp - currentTime) / 1000)) : 0;
+    const retryingAllTargets = Number(source.retryingTargetCount) > 0
+      && Number(source.retryingTargetCount) >= Math.max(1, Number(source.remainingTargets?.length) || Number(source.initialTargetCount) || 1)
+      && Number(source.nextRetryAt) > currentTime;
+    nextCheck.textContent = source.inFlight ? '正在检查…'
+      : Number(source.globalRetryAt) > currentTime ? `退避中 · ${seconds}s 后恢复`
+        : retryingAllTargets ? `全体退避中 · ${seconds}s 后恢复`
+        : source.phase === 'PAUSED_AUTH' ? '等待登录恢复'
+          : seconds > 0 ? `下次检查：${seconds}s 后` : source.running ? '下次检查：准备中' : '下次检查：启动后检查';
+  }
+  const menuRoot = grabMoreMenu || panel.querySelector('[data-nju-grab-more-menu]');
+  const importButton = menuRoot?.querySelector?.('[data-nju-grab-import-favorites]');
+  if (importButton) {
+    const isFavoriteScope = normalizeCourseScope(currentCourseQueryScope(document.body)) === 'SC';
+    importButton.hidden = !isFavoriteScope;
+    importButton.disabled = !isGrabPanelEditableStopped(source) || !isFavoriteScope;
+  }
+  const toggleSelected = menuRoot?.querySelector?.('[data-nju-grab-toggle-selected]');
+  if (toggleSelected) toggleSelected.textContent = grabPanelHideSelected ? '显示已选目标' : '隐藏已选目标';
+
   const configuredGroupCount = configuredGrabGroups.length || configuredGrabTargets.length;
   const totalGroups = Math.max(0, useRuntimeConfig
     ? Number(source.totalGroups) || configuredGroupCount
     : configuredGroupCount);
-  const completedGroups = Math.min(totalGroups, Math.max(0, Number(source.completedGroups) || 0));
+  const completedGroups = useRuntimeConfig
+    ? Math.min(totalGroups, Math.max(0, Number(source.completedGroups) || 0)) : 0;
   const authView = grabAuthPresentation.present(source, { groupCount: totalGroups });
   panel.querySelector('[data-nju-grab-status-progress]').textContent = `${completedGroups}/${totalGroups}`;
   panel.querySelector('[data-nju-grab-status-round]').textContent = String(Math.max(0, Number(source.round) || 0));
   panel.querySelector('[data-nju-grab-status-channel]').textContent = grabPageScanLabel(source.lastScan)
     .replace(' · ', ' / ');
 
-  let runtimeTargets = configuredGrabTargets;
-  if (Array.isArray(source.configuredTargets) && source.configuredTargets.length > 0) {
-    runtimeTargets = source.configuredTargets;
-  } else if (useRuntimeConfig) {
-    runtimeTargets = source.configuredTargets || [];
-  }
+  const runtimeTargets = useRuntimeConfig && runtimeSnapshotTargets.length > 0
+    ? runtimeSnapshotTargets : configuredGrabTargets;
 
   const scopesContainer = panel.querySelector('[data-nju-grab-missing-scopes]');
-  let hasMissingScope = false;
+  const hasMissingScope = missingScopes.size > 0;
   
   if (source.running) {
-    const missingScopes = new Set();
-    for (const target of runtimeTargets) {
-      const state = source.targetStates?.[target.targetId];
-      if (state && String(state.lastMessage || '').includes('课程分类')) {
-        const scope = target.queryScope || target.teachingClassType;
-        if (scope) missingScopes.add(scope);
-      }
-    }
-    
-    if (missingScopes.size > 0) {
-      hasMissingScope = true;
+    if (hasMissingScope) {
       const scopeKey = Array.from(missingScopes).sort().join(',');
       
       clearNativeCourseTabHighlights();
@@ -1509,10 +2074,8 @@ function renderGrabPageStatus(state) {
       if (scopesContainer.dataset.scopeKey !== scopeKey) {
         scopesContainer.dataset.scopeKey = scopeKey;
         scopesContainer.replaceChildren();
-        const scopeMapping = { 'SC': '收藏', 'TCT1': '本专业', 'TCT2': '跨专业', 'TCT3': '公选', 'TCT4': '通识', 'TCT5': '体育' };
-        
         missingScopes.forEach(scope => {
-          const displayScope = scopeMapping[scope.toUpperCase()] || scope;
+          const displayScope = courseScopeLabel(scope);
           const btn = document.createElement('button');
           btn.className = 'nju-grab-quick-jump-btn';
           btn.type = 'button';
@@ -1535,17 +2098,26 @@ function renderGrabPageStatus(state) {
     scopesContainer.replaceChildren();
   }
   scopesContainer.hidden = !hasMissingScope;
+  if (source.running && hasMissingScope) {
+    scheduleAutomaticCourseScopeNavigation(missingScopes);
+  } else {
+    invalidateAutomaticCourseScopeNavigation();
+  }
 
   const targetContainer = panel.querySelector('[data-nju-grab-status-targets]');
   targetContainer.replaceChildren();
-  if (runtimeTargets.length === 0) {
+  const visibleRuntimeTargets = runtimeTargets.filter(target => !(grabPanelHideSelected && isGrabSelectedTarget(target, source)));
+  if (visibleRuntimeTargets.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'nju-grab-status-empty';
-    empty.textContent = '在课程行点击“加入监控”，目标状态会显示在这里。';
+    empty.textContent = grabPanelHideSelected && runtimeTargets.length > 0
+      ? '已隐藏已选目标（监控配置未改变）。'
+      : '在课程行点击“加入监控”，目标状态会显示在这里。';
     targetContainer.appendChild(empty);
   } else {
     for (const target of runtimeTargets) {
       const targetState = source.targetStates?.[target.targetId] || null;
+      if (grabPanelHideSelected && isGrabSelectedTarget(target, source)) continue;
       const presentation = authView?.target || grabPageTargetPresentation(
         targetState,
         Boolean(source.running),
@@ -1602,20 +2174,39 @@ function renderGrabPageStatus(state) {
       const badge = document.createElement('span');
       badge.className = 'nju-grab-target-badge';
       badge.textContent = presentation.label;
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'nju-grab-target-remove';
-      remove.textContent = '−';
-      remove.title = `移除监控目标：${grabTaskModel.targetLabel(target)}`;
-      remove.setAttribute('aria-label', `移除监控目标：${grabTaskModel.targetLabel(target)}`);
-      remove.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        requestGrabTargetRemoval(target, remove);
-      });
-      const actions = document.createElement('div');
-      actions.className = 'nju-grab-target-actions';
-      actions.append(badge, remove);
+       const targetMenuButton = document.createElement('button');
+       targetMenuButton.type = 'button';
+       targetMenuButton.className = 'nju-grab-target-menu-trigger';
+       targetMenuButton.textContent = '•••';
+       targetMenuButton.title = '目标操作';
+       targetMenuButton.setAttribute('aria-label', `目标操作：${grabTaskModel.targetLabel(target)}`);
+       targetMenuButton.setAttribute('aria-expanded', 'false');
+       targetMenuButton.setAttribute('aria-haspopup', 'menu');
+        targetMenuButton.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (openGrabTargetMenuTrigger === targetMenuButton) {
+            closeGrabTargetMenuPortal({ restoreFocus: true });
+            return;
+          }
+          openGrabTargetMenuPortal(target, targetMenuButton);
+        });
+        // Keep a hidden semantic fallback for keyboard/legacy integrations;
+        // the visible row action is always the explicit ••• menu above.
+        const semanticRemove = document.createElement('button');
+        semanticRemove.type = 'button';
+        semanticRemove.className = 'nju-grab-target-remove';
+        semanticRemove.hidden = true;
+        semanticRemove.textContent = '移除监控';
+        semanticRemove.setAttribute('aria-label', `移除监控目标：${grabTaskModel.targetLabel(target)}`);
+        semanticRemove.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          requestGrabTargetRemoval(target, semanticRemove);
+        });
+        const actions = document.createElement('div');
+        actions.className = 'nju-grab-target-actions';
+        actions.append(badge, targetMenuButton, semanticRemove);
       item.append(indicator, copy, actions);
       targetContainer.appendChild(item);
     }
@@ -1770,12 +2361,21 @@ function targetFromCourseElement(element) {
   const courseId = firstAttribute([courseRow, element, idElement], [
     'data-courseid', 'data-course-id', 'data-kcid'
   ]);
+  const typedChoiceElement = [...(element?.querySelectorAll?.('.cv-choice') || [])]
+    .find(candidate => {
+      const value = candidate.getAttribute?.('data-teachingclasstype');
+      return value && value !== 'undefined' && value !== 'null';
+    });
+  const explicitTypeElement = [element, idElement].find(candidate => {
+    const value = candidate?.getAttribute?.('data-teachingclasstype');
+    return value && value !== 'undefined' && value !== 'null';
+  });
 
   return grabTaskModel.normalizeTarget({
     kind: grabTaskModel.TARGET_KIND.TEACHING_CLASS,
     name: courseName,
     electiveBatchId: currentElectiveBatchId(),
-    teachingClassType: currentTeachingClassType(idElement),
+    teachingClassType: currentTeachingClassType(typedChoiceElement || explicitTypeElement || idElement),
     teachingClassId,
     queryScope: currentCourseQueryScope(element),
     courseId,
@@ -1856,26 +2456,47 @@ async function importFavoriteCourseTargets() {
     intervalMs: stored.nju_grab_interval
   });
   const discoveredByTargetId = new Map(discoveredTargets.map(target => [target.targetId, target]));
+  const discoveredForTarget = target => discoveredByTargetId.get(target.targetId)
+    || discoveredTargets.find(discovered => exactTargetIdentityMatches(discovered, target))
+    || null;
   let enrichedCount = 0;
   const enrichedGroups = current.groups.map(group => ({
     ...group,
     targets: group.targets.map(target => {
-      const discovered = discoveredByTargetId.get(target.targetId);
-      if (!discovered?.queryScope || discovered.queryScope === target.queryScope) return target;
+      const discovered = discoveredForTarget(target);
+      if (!discovered) return target;
+      const enriched = {
+        ...target,
+        teachingClassType: discovered.teachingClassType || target.teachingClassType,
+        queryScope: discovered.queryScope || target.queryScope,
+        courseId: discovered.courseId || target.courseId,
+        courseNumber: discovered.courseNumber || target.courseNumber,
+        teachingClassNo: discovered.teachingClassNo || target.teachingClassNo,
+        teacher: discovered.teacher || target.teacher,
+        time: discovered.time || target.time,
+        campus: discovered.campus || target.campus
+      };
+      const changed = [
+        'teachingClassType', 'queryScope', 'courseId', 'courseNumber',
+        'teachingClassNo', 'teacher', 'time', 'campus'
+      ].some(key => enriched[key] !== target[key]);
+      if (!changed) return target;
       enrichedCount += 1;
-      return { ...target, queryScope: discovered.queryScope };
+      return enriched;
     })
   }));
-  const existingTargetIds = new Set(current.targets.map(target => target.targetId));
+  const wasExisting = discovered => current.targets.some(target => {
+    return target.targetId === discovered.targetId || exactTargetIdentityMatches(target, discovered);
+  });
   let next = enrichedCount > 0
     ? grabTaskModel.normalizeTaskConfig({ ...current, groups: enrichedGroups, updatedAt: Date.now() })
     : current;
   for (const target of discoveredTargets) next = grabTaskModel.addTargetToTaskConfig(next, target);
 
   const savedTargetIds = new Set(next.targets.map(target => target.targetId));
-  const existingCount = discoveredTargets.filter(target => existingTargetIds.has(target.targetId)).length;
+  const existingCount = discoveredTargets.filter(wasExisting).length;
   const addedCount = discoveredTargets.filter(target => {
-    return !existingTargetIds.has(target.targetId) && savedTargetIds.has(target.targetId);
+    return !wasExisting(target) && savedTargetIds.has(target.targetId);
   }).length;
   const capacitySkippedCount = Math.max(0, discoveredTargets.length - existingCount - addedCount);
   if (addedCount > 0 || enrichedCount > 0) {
@@ -2098,17 +2719,25 @@ async function initializeCourseTargetControls() {
   try {
     const stored = await chrome.storage.local.get([
       GRAB_TASK_CONFIG_KEY,
-      GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY
+      GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY,
+      'nju_grab_courses',
+      'nju_grab_interval'
     ]);
-    const config = grabTaskModel.normalizeTaskConfig(stored[GRAB_TASK_CONFIG_KEY]);
+    const config = grabTaskModel.normalizeTaskConfig(stored[GRAB_TASK_CONFIG_KEY], {
+      legacyCourseText: stored.nju_grab_courses,
+      intervalMs: stored.nju_grab_interval
+    });
     grabPageEnhancementsEnabled = stored[GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY] !== false;
+    grabPanelHideSelected = readGrabPanelBooleanPreference(GRAB_PANEL_HIDE_SELECTED_KEY);
     configuredGrabTargetIds = new Set(config.targets.map(target => target.targetId));
     configuredGrabTargets = config.targets.slice();
     configuredGrabGroups = config.groups.slice();
+    configuredGrabInterval = config.intervalMs;
   } catch {
     configuredGrabTargetIds = new Set();
     configuredGrabTargets = [];
     configuredGrabGroups = [];
+    configuredGrabInterval = 5000;
   }
   updateGrabPageStatus(typeof getStateSnapshot === 'function' ? getStateSnapshot() : {});
   decorateCourseTargets();
@@ -2127,6 +2756,7 @@ async function initializeCourseTargetControls() {
       configuredGrabTargetIds = new Set(config.targets.map(target => target.targetId));
       configuredGrabTargets = config.targets.slice();
       configuredGrabGroups = config.groups.slice();
+      configuredGrabInterval = config.intervalMs;
       updateGrabPageStatus(latestGrabPageState || {});
       scheduleCourseTargetDecoration();
     }
@@ -2401,6 +3031,7 @@ function getStateSnapshot() {
 
 function startGrab(taskConfig, intervalMs) {
   if (!grabEngine) return getStateSnapshot();
+  invalidateAutomaticCourseScopeNavigation();
   cancelGrabAuthRecoveryWatch();
   grabLifecycleCommandVersion += 1;
   grabAuthRecovery = null;
@@ -2414,6 +3045,7 @@ function startGrab(taskConfig, intervalMs) {
 
 function stopGrab() {
   if (!grabEngine) return getStateSnapshot();
+  invalidateAutomaticCourseScopeNavigation();
   cancelGrabAuthRecoveryWatch();
   grabLifecycleCommandVersion += 1;
   if (pausedGrabTaskSnapshot?.phase === 'PAUSED_AUTH' && grabAuthRecovery?.pending) {
@@ -2435,8 +3067,20 @@ function stopGrab() {
   return snapshot;
 }
 
+function runNowGrab() {
+  if (!grabEngine?.runNow) {
+    const result = { ok: false, code: 'UNAVAILABLE', message: '立即检查暂不可用' };
+    showGrabPanelFeedback(result.message, 'warning');
+    return result;
+  }
+  const result = grabEngine.runNow();
+  renderGrabPageStatus(getStateSnapshot());
+  return result;
+}
+
 function revokeGrabTaskLease(taskId) {
   if (!activeGrabTaskId || taskId !== activeGrabTaskId) return getStateSnapshot();
+  invalidateAutomaticCourseScopeNavigation();
   grabLifecycleCommandVersion += 1;
   cancelGrabAuthRecoveryWatch();
   const snapshot = grabEngine?.stop('另一个选课标签页已接管') || getStateSnapshot();
@@ -3493,6 +4137,7 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
     && clickCaptchaSolver.autoClick;
   if (automaticLoginRequested) {
     grabLoginShield.show(GRAB_LOGIN_SHIELD_STATUS.LOADING, '正在识别验证码…');
+    if (grabPageStatusPanel) grabPageStatusPanel.classList.add('is-solving-captcha');
   } else {
     grabLoginShield.clear();
   }
@@ -3592,6 +4237,7 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
     }
   } finally {
     if (!loginSubmitted && !errorShieldShown) grabLoginShield.clear();
+    if (grabPageStatusPanel) grabPageStatusPanel.classList.remove('is-solving-captcha');
     clickCaptchaSolver.running = false;
     notifyClickCaptchaSolverUpdate();
   }
@@ -3925,6 +4571,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.action === 'stopGrab') {
     stopGrab();
     sendResponse({ ok: true, state: getStateSnapshot() });
+  } else if (['runGrabNow', 'runNow', 'requestRunNow'].includes(msg.action)) {
+    sendResponse({ ...runNowGrab(), state: getStateSnapshot() });
   } else if (msg.action === 'getGrabStatus') {
     sendResponse({ ok: true, state: getStateSnapshot() });
   } else if (msg.action === 'importFavoriteCourses') {
@@ -3974,19 +4622,17 @@ storageRemove(['nju_click_captcha_samples_v1']).catch(() => {});
 void Promise.resolve(grabTaskRestoreReady).finally(() => initializeClickCaptchaSolver());
 // DOM UI Interactions
 function findCourseTabElement(scope) {
-  if (!scope) return null;
-  const scopeMapping = {
-      'SC': '收藏',
-      'TCT1': '本专业',
-      'TCT2': '跨专业',
-      'TCT3': '公选',
-      'TCT4': '通识',
-      'TCT5': '体育'
-  };
-  const displayScope = scopeMapping[scope.toUpperCase()] || scope;
+  const normalizedScope = normalizeCourseScope(scope);
+  if (!normalizedScope) return null;
+  const displayScope = courseScopeLabel(normalizedScope);
   const isVisible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-  const tabs = [...document.querySelectorAll('a, button, li, [role="tab"], .cv-tab, .nav-item, .el-tabs__item, .ant-tabs-tab, .item')]
+  const tabs = [...document.querySelectorAll('a, button, li, [role="tab"], [data-teachingclasstype], .cv-tab, .nav-item, .el-tabs__item, .ant-tabs-tab, .item')]
       .filter(el => !el.closest('table, tbody, tr, .course-jxb-container, .course-list, .cv-tbody, .nju-grab-status-panel'));
+  const exactScopeTabs = tabs.filter(tab => {
+    return isVisible(tab)
+      && normalizeCourseScope(tab.getAttribute?.('data-teachingclasstype')) === normalizedScope;
+  });
+  if (exactScopeTabs.length > 0) return exactScopeTabs[exactScopeTabs.length - 1];
   const targetTabs = tabs.filter(tab => {
       if (!isVisible(tab)) return false;
       const text = (tab.textContent || '').trim();
@@ -3999,20 +4645,100 @@ function findCourseTabElement(scope) {
   return targetTabs.length > 0 ? targetTabs[targetTabs.length - 1] : null;
 }
 
-function jumpToCourseTab(scope, forceAlert = true) {
-  const targetTab = findCourseTabElement(scope);
-  if (targetTab) {
-      const simulateClick = el => {
-          for (const eventName of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-              el.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
-          }
-      };
-      simulateClick(targetTab);
-  } else if (forceAlert) {
-      const scopeMapping = { 'SC': '收藏', 'TCT1': '本专业', 'TCT2': '跨专业', 'TCT3': '公选', 'TCT4': '通识', 'TCT5': '体育' };
-      const displayScope = scopeMapping[scope.toUpperCase()] || scope;
-      alert(`未在屏幕上找到可见的“${displayScope}”切换按钮，请手动点击对应的选课标签页。`);
+function activateCourseTabElement(element, isActive = () => true) {
+  if (!element) return false;
+  if (typeof element.dispatchEvent === 'function' && typeof MouseEvent === 'function') {
+    for (const eventName of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      if (!isActive()) return false;
+      element.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
+    }
+    return true;
   }
+  if (!isActive()) return false;
+  if (typeof element.click === 'function') {
+    element.click();
+    return true;
+  }
+  return false;
+}
+
+async function waitForCourseTab(scope, attempts = 8, isActive = () => true) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!isActive()) return null;
+    const tab = findCourseTabElement(scope);
+    if (tab) return tab;
+    await sleep(250);
+    if (!isActive()) return null;
+  }
+  return null;
+}
+
+async function jumpToCourseTab(scope, forceAlert = true, token = null) {
+  const normalizedScope = normalizeCourseScope(scope);
+  const isActive = () => token
+    ? isAutomaticCourseScopeNavigationActive(token)
+    : true;
+  if (!isActive()) return false;
+  const directTab = findCourseTabElement(normalizedScope);
+  if (directTab) return activateCourseTabElement(directTab, isActive);
+
+  const path = courseScopeNavigationPath(normalizedScope);
+  for (const step of path) {
+    if (!isActive()) return false;
+    const targetTab = await waitForCourseTab(step, step === normalizedScope ? 8 : 2, isActive);
+    if (!targetTab || !activateCourseTabElement(targetTab, isActive)) {
+      if (!isActive()) return false;
+      if (forceAlert) {
+        alert(`未在屏幕上找到可见的“${courseScopeLabel(normalizedScope)}”切换按钮，请手动点击对应的选课标签页。`);
+      }
+      return false;
+    }
+    if (step !== normalizedScope) {
+      await sleep(300);
+      if (!isActive()) return false;
+    }
+  }
+  return true;
+}
+
+function scheduleAutomaticCourseScopeNavigation(scopes) {
+  if (automaticCourseScopeNavigationTimer !== null) return;
+  if (automaticCourseScopeNavigationInFlight) {
+    if (isAutomaticCourseScopeNavigationActive(automaticCourseScopeNavigationInFlightToken)) return;
+    invalidateAutomaticCourseScopeNavigation();
+  }
+  const currentTime = Date.now();
+  const candidates = [...new Set([...scopes].map(normalizeCourseScope).filter(Boolean))]
+    .sort((left, right) => {
+      return (automaticCourseScopeLastAttempt.get(left) || 0)
+        - (automaticCourseScopeLastAttempt.get(right) || 0);
+    });
+  const scope = candidates.find(candidate => {
+    const lastRunId = automaticCourseScopeLastAttemptRunId.get(candidate);
+    const currentRunId = Math.max(0, Number(latestGrabPageState?.runId) || 0);
+    return currentTime - (automaticCourseScopeLastAttempt.get(candidate) || 0) >= 4000
+      || (currentRunId > 0 && lastRunId !== undefined && lastRunId !== currentRunId);
+  });
+  if (!scope) return;
+
+  const token = automaticCourseScopeNavigationToken();
+  const scheduledTimer = { timeoutId: null };
+  automaticCourseScopeNavigationTimer = scheduledTimer;
+  scheduledTimer.timeoutId = setTimeout(() => {
+    if (automaticCourseScopeNavigationTimer !== scheduledTimer) return;
+    automaticCourseScopeNavigationTimer = null;
+    if (!isAutomaticCourseScopeNavigationActive(token)) return;
+    automaticCourseScopeNavigationInFlight = true;
+    automaticCourseScopeNavigationInFlightToken = token;
+    automaticCourseScopeLastAttempt.set(scope, Date.now());
+    automaticCourseScopeLastAttemptRunId.set(scope, token.runId);
+    void jumpToCourseTab(scope, false, token).finally(() => {
+      if (token.generation === automaticCourseScopeNavigationGeneration) {
+        automaticCourseScopeNavigationInFlight = false;
+        automaticCourseScopeNavigationInFlightToken = null;
+      }
+    });
+  }, 200);
 }
 
 function highlightNativeCourseTab(scope) {

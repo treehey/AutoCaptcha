@@ -408,6 +408,12 @@
     }
 
     function clearScheduledRound(run) {
+      // In addition to clearing the platform timer, invalidate its callback.
+      // This keeps a queued/late callback from starting a stale round in
+      // environments where clearTimeout cannot cancel an already-dispatched
+      // callback (and makes runNow safe under test and extension lifecycle
+      // races).
+      run.scheduleGeneration += 1;
       if (run.timer !== null) {
         clearTimer(run.timer);
         run.timer = null;
@@ -764,15 +770,45 @@
       const nextRunAt = Math.max(currentTime + cadenceDelay, retryAt);
       const delay = Math.max(minimumRestMs, nextRunAt - currentTime);
       run.state.nextRunAt = currentTime + delay;
+      const generation = ++run.scheduleGeneration;
       run.timer = setTimer(() => {
+        if (run.scheduleGeneration !== generation || !isCurrentRunning(run)) return;
         run.timer = null;
-        void runRound(run);
+        void runRound(run, { fromTimer: true });
       }, delay);
       publish(run);
     }
 
-    async function runRound(run) {
-      if (!isCurrentRunning(run) || run.state.inFlight) return;
+    function admissionFailure(run, code, message) {
+      return { ok: false, code, message, snapshot: snapshot(run) };
+    }
+
+    function roundAdmission(run) {
+      if (!run || !isCurrentRunning(run) || !run.state.running || run.state.phase === 'PAUSED_AUTH') {
+        return admissionFailure(run, 'NOT_RUNNING', '监控未运行');
+      }
+      if (run.state.inFlight) {
+        return admissionFailure(run, 'IN_FLIGHT', '正在检查课程，请稍候');
+      }
+      if (run.state.globalRetryAt > now()) {
+        return admissionFailure(run, 'BACKOFF', '课程查询正在退避，请稍候');
+      }
+      const retryAt = activeRetryScheduleAt(run, now());
+      if (retryAt > now()) {
+        return admissionFailure(run, 'RETRY_PENDING', '所有目标都在等待重试，请稍候');
+      }
+      return null;
+    }
+
+    async function runRound(run, options = {}) {
+      const blocked = roundAdmission(run);
+      if (blocked) {
+        // A timer can be dispatched a little early (or a backoff can be
+        // extended while it is queued). Keep the task scheduled instead of
+        // losing its cadence after the stale callback returns.
+        if (options.fromTimer && isCurrentRunning(run)) scheduleNextRound(run, now());
+        return blocked;
+      }
       if (run.state.globalRetryAt <= now()) run.state.globalRetryAt = 0;
       const roundStartedAt = now();
       run.state.inFlight = true;
@@ -877,6 +913,7 @@
         id: ++sequence,
         controller: new AbortController(),
         timer: null,
+        scheduleGeneration: 0,
         groupByTarget: new Map(groups.flatMap(group => {
           return group.targets.map(target => [target.targetId, group]);
         })),
@@ -948,10 +985,21 @@
       return snapshot(run);
     }
 
+    function runNow() {
+      const run = activeRun;
+      const blocked = roundAdmission(run);
+      if (blocked) return blocked;
+      clearScheduledRound(run);
+      void runRound(run);
+      return { ok: true, code: 'STARTED', message: '已立即检查' };
+    }
+
     const engine = Object.freeze({
       start,
       restore,
       stop,
+      runNow,
+      requestRunNow: runNow,
       getSnapshot: () => snapshot(activeRun)
     });
     return engine;

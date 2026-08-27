@@ -23,6 +23,21 @@ assert.match(html, /无感登录/, 'The prewarm control should use plain user-fa
 assert.doesNotMatch(html, /提前准备统一认证|启动时预认证/, 'The popup should not expose implementation-oriented prewarm terminology.');
 assert.match(html, /value="5000" selected/, 'Five seconds should be the visible default interval.');
 assert.match(html, /id="grabSteps"/, 'Disconnected course monitoring needs a guided next step.');
+const grabTabStart = html.indexOf('<div class="tab-panel" id="tab-grab"');
+const divTokens = /<\/?div\b[^>]*>/g;
+divTokens.lastIndex = grabTabStart;
+let grabTabDepth = 0;
+let grabTabEnd = -1;
+for (let match = divTokens.exec(html); match; match = divTokens.exec(html)) {
+  grabTabDepth += match[0].startsWith('</') ? -1 : 1;
+  if (grabTabDepth === 0) {
+    grabTabEnd = divTokens.lastIndex;
+    break;
+  }
+}
+assert.ok(grabTabStart >= 0 && grabTabEnd > grabTabStart, 'The course-monitoring tab must have balanced markup.');
+const grabTabMarkup = html.slice(grabTabStart, grabTabEnd);
+assert.match(grabTabMarkup, /id="grabStatus"/, 'Course-monitoring logs must stay inside the course-monitoring tab.');
 assert.match(html, /id="exactTargets"/, 'The popup must list exact teaching-class targets.');
 assert.match(html, /id="courseGroups"/, 'The popup must expose course-group and priority controls.');
 assert.match(html, /id="grabPageEnhancementsEnabled"/, 'All course-page enhancements must be optional and reversible from the popup.');
