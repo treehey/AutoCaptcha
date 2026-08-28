@@ -274,6 +274,22 @@ test('preserves bounded retry checkpoints in the session whitelist', () => {
   assert.equal(JSON.stringify(snapshot).includes('must-not-persist'), false);
 });
 
+test('preserves bounded structure-error recovery state for a safe reload', () => {
+  const snapshot = sanitizeSnapshot(runtimeSnapshot({
+    running: true,
+    phase: 'RUNNING',
+    scanFailures: 4,
+    structureFailures: 4,
+    structureFailureSignature: 'STRUCTURE_ERROR: 未发现课程列表',
+    lastTransientOutcome: 'STRUCTURE_ERROR',
+    lastScan: { mode: 'ERROR', outcome: 'STRUCTURE_ERROR' }
+  }));
+
+  assert.equal(snapshot.structureFailures, 4);
+  assert.equal(snapshot.structureFailureSignature, 'STRUCTURE_ERROR: 未发现课程列表');
+  assert.equal(snapshot.lastScan.outcome, 'STRUCTURE_ERROR');
+});
+
 test('preserves only bounded conflict candidate identifiers for task recovery', () => {
   const targetId = keywordTargetId('课程甲');
   const snapshot = sanitizeSnapshot(runtimeSnapshot({

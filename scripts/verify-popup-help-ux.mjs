@@ -66,6 +66,7 @@ assert.match(source, /event\.key !== 'Escape'/, 'Help panels must close with Esc
 assert.match(source, /nju_grab_interval \|\| '5000'/, 'Five seconds should be the stored fallback interval.');
 assert.match(source, /initialTargetCount/, 'Grab progress must use the immutable initial target count.');
 assert.match(source, /globalRetryAt/, 'Global course-grab backoff must be visible in the popup.');
+assert.match(source, /PAUSED_STRUCTURE/, 'The popup must visibly explain a structure-paused monitor.');
 assert.match(source, /retryingTargetCount/, 'Per-target course-grab backoff must be visible in the popup.');
 assert.match(source, /GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY/, 'The course-page enhancement preference must persist across reloads.');
 assert.match(source, /data\[GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY\] !== false/, 'Course-page enhancements should default on but respect an explicit opt-out.');
@@ -96,6 +97,36 @@ assert.match(source, /updateTargetPriority/, 'The popup must persist target prio
 assert.match(source, /updateTargetFilters/, 'The popup must persist keyword teacher, time, and campus filters.');
 assert.match(source, /moveTargetToGroup/, 'The popup must support grouping fallback targets.');
 assert.match(source, /TARGET_KIND\.TEACHING_CLASS/, 'The popup must distinguish exact teaching-class targets.');
+const targetLabelSource = source.slice(
+  source.indexOf('function createTargetLabelElement'),
+  source.indexOf('function renderExactTargets')
+);
+assert.doesNotMatch(targetLabelSource, /\.innerHTML\s*=/, 'Course metadata labels must not interpolate external HTML.');
+assert.match(targetLabelSource, /pill\.textContent\s*=\s*detail/, 'Course metadata labels must render each pill as text.');
+class FakeElement {
+  constructor() {
+    this.className = '';
+    this.textContent = '';
+    this.children = [];
+  }
+
+  append(...children) {
+    this.children.push(...children);
+  }
+}
+const createTargetLabelElement = new Function(
+  'document', 'grabTaskModel',
+  `${targetLabelSource}; return createTargetLabelElement;`
+)({ createElement: () => new FakeElement() }, { TARGET_KIND: { KEYWORD: 'KEYWORD' } });
+const maliciousMetadata = '<img src=x onerror="globalThis.compromised=true">';
+const renderedTarget = createTargetLabelElement({
+  kind: 'TEACHING_CLASS',
+  name: '安全测试课程',
+  teacher: maliciousMetadata
+});
+const renderedPill = renderedTarget.children[1].children[0];
+assert.equal(renderedPill.textContent, maliciousMetadata, 'Course metadata that looks like HTML must remain plain text.');
+assert.equal(renderedPill.children.length, 0, 'Course metadata must not create nested HTML elements.');
 assert.match(source, /action: 'importFavoriteCourses'/, 'Favorite import must go through the existing content-script seam.');
 const applySnapshotSource = source.slice(
   source.indexOf('function applyGrabSnapshot'),

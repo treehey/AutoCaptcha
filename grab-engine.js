@@ -39,6 +39,8 @@
     REJECTED: 'REJECTED',
     GROUP_SATISFIED: 'GROUP_SATISFIED',
     UNKNOWN_COMMIT: 'UNKNOWN_COMMIT',
+    STRUCTURE_ERROR: 'STRUCTURE_ERROR',
+    UNKNOWN_SCAN_ERROR: 'UNKNOWN_SCAN_ERROR',
     UNKNOWN: 'UNKNOWN'
   });
 
@@ -209,6 +211,8 @@
       retryingTargetCount: 0,
       scanFailures: 0,
       lastTransientOutcome: null,
+      structureFailures: 0,
+      structureFailureSignature: null,
       lastScan: null,
       successTargetIds: [],
       successTargets: [],
@@ -337,6 +341,8 @@
           .filter(state => state.phase === TARGET_PHASE.RETRY && state.retryAt > currentTime).length,
         scanFailures: run.state.scanFailures,
         lastTransientOutcome: run.state.lastTransientOutcome,
+        structureFailures: run.state.structureFailures,
+        structureFailureSignature: run.state.structureFailureSignature,
         lastScan: run.state.lastScan ? { ...run.state.lastScan } : null,
         successTargetIds: success.map(target => target.targetId),
         successTargets,
@@ -384,6 +390,10 @@
       const normalizedRandom = Number.isFinite(randomValue) ? Math.max(0, Math.min(1, randomValue)) : 0.5;
       const jittered = Math.round(exponential * (0.9 + normalizedRandom * 0.2));
       return Math.max(minimumRestMs, Math.min(maxBackoffMs, jittered));
+    }
+
+    function calculateScanErrorBackoff(failures) {
+      return Math.min(60000, 5000 * (2 ** Math.max(0, failures - 1)));
     }
 
     function clampRestoredRetryAt(value) {
@@ -836,6 +846,8 @@
           durationMs: Math.max(0, now() - roundStartedAt)
         }));
         run.state.scanFailures = 0;
+        run.state.structureFailures = 0;
+        run.state.structureFailureSignature = null;
 
         for (const target of remaining) {
           await processTarget(run, target, candidateListFor(scanResult, target));
@@ -865,11 +877,12 @@
         if (missingTargets.length) log(run, `🔍 当前页面未找到以下课程: ${missingTargets.join('、')}`);
       } catch (error) {
         if (!isAbortError(error) && isCurrentRunning(run)) {
-          const outcome = Object.values(OUTCOME).includes(error?.outcome) ? error.outcome : null;
+          const reportedOutcome = Object.values(OUTCOME).includes(error?.outcome) ? error.outcome : null;
+          const outcome = reportedOutcome || OUTCOME.UNKNOWN_SCAN_ERROR;
           run.state.lastScan = accumulateShadowComparison(run.state.lastScan, normalizeScanDiagnostics({
             mode: 'ERROR',
             queriedTargetCount: remaining.length,
-            outcome: outcome || OUTCOME.UNKNOWN
+            outcome
           }, {
             round: run.state.round,
             completedAt: now(),
@@ -883,6 +896,24 @@
             run.state.globalRetryAt = now() + delay;
             run.state.lastTransientOutcome = outcome;
             log(run, `🛡️ 课程查询遇到临时错误（${outcome}），${Math.ceil(delay / 1000)} 秒后恢复`);
+          } else if (outcome === OUTCOME.STRUCTURE_ERROR || outcome === OUTCOME.UNKNOWN_SCAN_ERROR) {
+            const sameStructureError = outcome === OUTCOME.STRUCTURE_ERROR;
+            run.state.scanFailures += 1;
+            const signature = sameStructureError
+              ? `${outcome}:${String(error?.message || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 300)}`
+              : null;
+            run.state.structureFailures = sameStructureError
+              ? (signature === run.state.structureFailureSignature ? run.state.structureFailures + 1 : 1)
+              : 0;
+            run.state.structureFailureSignature = signature;
+            if (sameStructureError && run.state.structureFailures >= 5) {
+              finish(run, 'PAUSED_STRUCTURE', '选课页面结构可能已经变化，监控已暂停，请刷新页面或更新扩展后重试。');
+              return;
+            }
+            const delay = calculateScanErrorBackoff(run.state.scanFailures);
+            run.state.globalRetryAt = now() + delay;
+            run.state.lastTransientOutcome = outcome;
+            log(run, `🛡️ 课程查询遇到${sameStructureError ? '页面结构异常' : '未知异常'}，${Math.ceil(delay / 1000)} 秒后恢复`);
           } else {
             log(run, `❌ 本轮检测出错: ${error?.message || String(error)}`);
           }
@@ -936,6 +967,10 @@
           globalRetryAt: resumeSnapshot ? clampRestoredRetryAt(resumeSnapshot.globalRetryAt) : 0,
           scanFailures: resumeSnapshot ? Math.max(0, Number(resumeSnapshot.scanFailures) || 0) : 0,
           lastTransientOutcome: resumeSnapshot?.lastTransientOutcome || null,
+          structureFailures: resumeSnapshot ? Math.max(0, Number(resumeSnapshot.structureFailures) || 0) : 0,
+          structureFailureSignature: resumeSnapshot?.structureFailureSignature
+            ? String(resumeSnapshot.structureFailureSignature).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 380)
+            : null,
           lastScan: normalizeScanDiagnostics(resumeSnapshot?.lastScan),
           log: restoredLog
         }

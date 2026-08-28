@@ -28,7 +28,7 @@ test('classifies user-facing selection feedback through one verification interfa
 test('accepts final success only from the matching teaching class status event', () => {
   const candidate = { teachingClassId: 'class-2' };
   const otherClassFailure = {
-    path: '/elective/studentstatus.do', status: 500, code: '-1',
+    path: '/elective/studentstatus.do', status: 200, code: '-1',
     teachingClassId: 'class-1', message: '其他教学班失败'
   };
   const matchingSuccess = {
@@ -46,12 +46,42 @@ test('accepts final success only from the matching teaching class status event',
 test('keeps accepted submit and processing status responses pending', () => {
   const candidate = { teachingClassId: 'class-2' };
   assert.equal(verifier.evaluate({ candidate, networkEvents: [{
-    path: '/elective/volunteer.do', status: 200, code: '1', message: '已提交'
+    path: '/elective/volunteer.do', status: 200, code: '1', message: '已提交', teachingClassId: 'class-2'
   }] }), null);
   assert.equal(verifier.evaluate({ candidate, networkEvents: [{
     path: '/elective/studentstatus.do', status: 200, code: '0',
     teachingClassId: 'class-2', message: '处理中'
   }] }), null);
+});
+
+test('ignores another teaching class candidate-level submit outcomes', () => {
+  const candidate = { teachingClassId: 'class-a' };
+  for (const message of ['课程冲突', '名额已满', '添加选课失败']) {
+    assert.equal(verifier.evaluate({
+      candidate,
+      networkEvents: [{
+        path: '/elective/volunteer.do', status: 200, code: '0', message, teachingClassId: 'class-b'
+      }]
+    }), null, `another class must not affect candidate A: ${message}`);
+  }
+  assert.deepEqual(verifier.evaluate({
+    candidate,
+    networkEvents: [{
+      path: '/elective/volunteer.do', status: 200, code: '0', message: '课程冲突', teachingClassId: 'class-a'
+    }]
+  }), { outcome: 'CONFLICT', message: '课程冲突', retryOtherCandidate: true });
+});
+
+test('does not let unassociated page feedback reject a candidate', () => {
+  assert.equal(verifier.evaluate({
+    candidate: { teachingClassId: 'class-a' }, feedbackText: '添加选课失败：课程冲突'
+  }), null);
+  assert.equal(verifier.evaluate({
+    candidate: { teachingClassId: 'class-a' }, feedbackText: '名额已满'
+  }), null);
+  assert.equal(verifier.evaluate({
+    candidate: { teachingClassId: 'class-a' }, feedbackText: '登录状态已过期'
+  }).outcome, 'AUTH_EXPIRED');
 });
 
 test('stops candidate fan-out for a global selection-window rejection', () => {
@@ -79,7 +109,7 @@ test('maps transport failures without treating them as course-rule failures', ()
   for (const [event, expectedOutcome] of cases) {
     assert.equal(verifier.evaluate({
       candidate,
-      networkEvents: [{ ...event, path: '/elective/volunteer.do' }]
+      networkEvents: [{ ...event, path: '/elective/volunteer.do', teachingClassId: 'class-2' }]
     }).outcome, expectedOutcome);
   }
 });

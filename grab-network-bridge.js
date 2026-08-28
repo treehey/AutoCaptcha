@@ -4,6 +4,7 @@
 
   const INSTALL_FLAG = '__njuAutoGrabNetworkBridgeV1__';
   const EVENT_NAME = 'nju-autograb-network-v1';
+  const VOLUNTEER_ARM_EVENT = 'nju-autograb-volunteer-arm-v1';
   const COURSE_QUERY_EVENT = 'nju-autograb-course-query-v1';
   const COURSE_RESULT_EVENT = 'nju-autograb-course-result-v1';
   // This cap prevents an unbounded task from flooding the page while still
@@ -64,6 +65,7 @@
   Object.defineProperty(global, INSTALL_FLAG, { value: true, configurable: false });
 
   let requestSequence = 0;
+  let armedVolunteerTeachingClass = null;
   let latestCourseQueryTemplate = null;
   const courseQueryTemplatesByScope = new Map();
   const unscopedCourseQueryCursors = new Map();
@@ -101,6 +103,34 @@
     }
     return '';
   }
+
+  function consumeArmedVolunteerTeachingClass(path) {
+    if (path !== '/elective/volunteer.do') return '';
+    const armed = armedVolunteerTeachingClass;
+    armedVolunteerTeachingClass = null;
+    if (!armed || armed.expiresAt < Date.now()) return '';
+    return armed.teachingClassId;
+  }
+
+  global.document.addEventListener(VOLUNTEER_ARM_EVENT, event => {
+    let detail = null;
+    try {
+      detail = JSON.parse(String(event.detail || ''));
+    } catch {
+      return;
+    }
+    if (detail?.action === 'clear') {
+      armedVolunteerTeachingClass = null;
+      return;
+    }
+    if (detail?.action !== 'arm') return;
+    const teachingClassId = safeText(detail.teachingClassId).slice(0, 300);
+    if (!teachingClassId) return;
+    // The content-script dispatch and the page click handler run synchronously.
+    // A short expiry makes an asynchronous school request degrade safely instead
+    // of attaching an old automated candidate to a later manual request.
+    armedVolunteerTeachingClass = { teachingClassId, expiresAt: Date.now() + 1000 };
+  });
 
   function parseResponse(value) {
     if (value && typeof value === 'object') return value;
@@ -300,7 +330,7 @@
     }
   }
 
-  function emitResult({ requestId, path, status, body, response, transport }) {
+  function emitResult({ requestId, path, status, body, response, transport, teachingClassId = '' }) {
     if (!path) return;
     const parsed = parseResponse(response);
     const detail = {
@@ -310,8 +340,8 @@
       code: safeText(parsed.code),
       message: safeText(parsed.msg ?? parsed.message ?? parsed.extmsg),
       outcome: providerOutcome(Number(status) || 0, safeText(parsed.code), response),
-      teachingClassId: path === '/elective/studentstatus.do'
-        ? safeText(bodyField(body, 'teachingClassId'))
+      teachingClassId: (path === '/elective/volunteer.do' || path === '/elective/studentstatus.do')
+        ? safeText(teachingClassId || bodyField(body, 'teachingClassId'))
         : '',
       transport,
       completedAt: Date.now()
@@ -357,6 +387,8 @@
       if (request?.path) {
         request.requestId = ++requestSequence;
         request.body = body;
+        request.teachingClassId = safeText(bodyField(body, 'teachingClassId'))
+          || consumeArmedVolunteerTeachingClass(request.path);
         const querySetting = isCourseQueryPath(request.path) ? readQuerySetting(body) : null;
         if (querySetting?.data && typeof querySetting.data === 'object') {
           latestCourseQueryTemplate = {
@@ -383,6 +415,7 @@
             path: request.path,
             status: this.status,
             body: request.body,
+            teachingClassId: request.teachingClassId,
             response,
             transport: 'xhr'
           });
@@ -567,6 +600,8 @@
 
       const requestId = ++requestSequence;
       const body = init?.body;
+      const teachingClassId = safeText(bodyField(body, 'teachingClassId'))
+        || consumeArmedVolunteerTeachingClass(path);
       try {
         const result = await originalFetch.apply(this, arguments);
         result.clone().text().then(response => emitResult({
@@ -574,14 +609,15 @@
           path,
           status: result.status,
           body,
+          teachingClassId,
           response: result.url && /authserver\/login|\/login(?:\.do)?$/i.test(result.url)
             ? `${response}\n${result.url}`
             : response,
           transport: 'fetch'
-        })).catch(() => emitResult({ requestId, path, status: result.status, body, response: null, transport: 'fetch' }));
+        })).catch(() => emitResult({ requestId, path, status: result.status, body, teachingClassId, response: null, transport: 'fetch' }));
         return result;
       } catch (error) {
-        emitResult({ requestId, path, status: 0, body, response: null, transport: 'fetch' });
+        emitResult({ requestId, path, status: 0, body, teachingClassId, response: null, transport: 'fetch' });
         throw error;
       }
     };

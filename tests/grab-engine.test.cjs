@@ -1001,6 +1001,95 @@ test('backs off a structured transient scan failure globally', async () => {
   assert.equal(harness.engine.getSnapshot().scanFailures, 0);
 });
 
+test('backs off unknown scan errors and resets the failure count after a healthy scan', async () => {
+  let scans = 0;
+  const harness = createHarness({
+    async scan() {
+      scans += 1;
+      if (scans === 1) throw new Error('unexpected scan failure');
+      return new Map([['课程甲', []]]);
+    },
+    async attempt() { throw new Error('not reached'); }
+  });
+
+  harness.engine.start(['课程甲'], 1000);
+  await waitFor(() => harness.engine.getSnapshot().globalRetryAt === 5000);
+  assert.equal(harness.engine.getSnapshot().lastScan.outcome, OUTCOME.UNKNOWN_SCAN_ERROR);
+  assert.equal(harness.timers.at(-1).delay, 5000);
+  harness.clock.advance(5000);
+  await runLatestTimer(harness);
+  await waitFor(() => harness.engine.getSnapshot().round === 2 && !harness.engine.getSnapshot().inFlight);
+  assert.equal(harness.engine.getSnapshot().scanFailures, 0);
+});
+
+test('pauses after five consecutive page-structure scan errors without leaving a timer', async () => {
+  const harness = createHarness({
+    async scan() {
+      const error = new Error('course list missing');
+      error.outcome = OUTCOME.STRUCTURE_ERROR;
+      throw error;
+    },
+    async attempt() { throw new Error('not reached'); }
+  });
+
+  harness.engine.start(['课程甲'], 1000);
+  for (const delay of [5000, 10000, 20000, 40000]) {
+    await waitFor(() => harness.engine.getSnapshot().globalRetryAt > harness.clock.value);
+    assert.equal(harness.timers.at(-1).delay, delay);
+    harness.clock.advance(delay);
+    await runLatestTimer(harness);
+  }
+  await waitFor(() => harness.engine.getSnapshot().phase === 'PAUSED_STRUCTURE');
+  const snapshot = harness.engine.getSnapshot();
+  assert.equal(snapshot.running, false);
+  assert.equal(snapshot.structureFailures, 5);
+  assert.match(snapshot.log.join('\n'), /选课页面结构可能已经变化/);
+  assert.equal(harness.timers.some(timer => !timer.cancelled), false);
+});
+
+test('resets the structure circuit-breaker when the structure error signature changes', async () => {
+  let scans = 0;
+  const harness = createHarness({
+    async scan() {
+      scans += 1;
+      const error = new Error(scans === 1 ? 'course list missing' : 'course tabs missing');
+      error.outcome = OUTCOME.STRUCTURE_ERROR;
+      throw error;
+    },
+    async attempt() { throw new Error('not reached'); }
+  });
+
+  harness.engine.start(['课程甲'], 1000);
+  await waitFor(() => harness.engine.getSnapshot().structureFailures === 1);
+  harness.clock.advance(5000);
+  await runLatestTimer(harness);
+  await waitFor(() => harness.engine.getSnapshot().round === 2 && !harness.engine.getSnapshot().inFlight);
+  assert.equal(harness.engine.getSnapshot().structureFailures, 1);
+  assert.match(harness.engine.getSnapshot().structureFailureSignature, /course tabs missing/);
+});
+
+test('restores a persisted matching structure-error signature without bypassing the circuit breaker', async () => {
+  const targetId = keywordTargetId('课程甲');
+  const harness = createHarness({
+    async scan() {
+      const error = new Error('course list missing');
+      error.outcome = OUTCOME.STRUCTURE_ERROR;
+      throw error;
+    },
+    async attempt() { throw new Error('not reached'); }
+  });
+  harness.engine.restore({
+    configuredTargets: [{ name: '课程甲' }],
+    interval: 1000,
+    targetStates: { [targetId]: { phase: TARGET_PHASE.WATCHING } },
+    structureFailures: 4,
+    structureFailureSignature: 'STRUCTURE_ERROR:course list missing'
+  });
+  await waitFor(() => harness.engine.getSnapshot().phase === 'PAUSED_STRUCTURE');
+  assert.equal(harness.engine.getSnapshot().structureFailures, 5);
+  assert.equal(harness.timers.some(timer => !timer.cancelled), false);
+});
+
 test('runNow starts one immediate round and invalidates the previously scheduled timer', async () => {
   let scans = 0;
   const harness = createHarness({

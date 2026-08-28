@@ -37,6 +37,7 @@ const FEEDBACK_SELECTOR = [
   '.ant-message-notice'
 ].join(',');
 const GRAB_NETWORK_EVENT = 'nju-autograb-network-v1';
+const GRAB_VOLUNTEER_ARM_EVENT = 'nju-autograb-volunteer-arm-v1';
 const GRAB_NETWORK_PATH = Object.freeze({
   SUBMIT: '/elective/volunteer.do',
   STATUS: '/elective/studentstatus.do',
@@ -498,7 +499,11 @@ async function scanDomCandidates(targets, context, options = {}) {
   throwIfGrabAborted(signal);
 
   const rows = [...document.querySelectorAll(COURSE_ROW_SELECTOR)];
-  if (rows.length === 0) throw new Error('未发现课程列表，请确认已打开选课页面');
+  if (rows.length === 0) {
+    const error = new Error('未发现课程列表，请确认已打开选课页面');
+    error.outcome = grabModule.OUTCOME.STRUCTURE_ERROR;
+    throw error;
+  }
 
   const normalizedTargets = grabTaskModel.normalizeTargets(targets);
   const result = new Map(normalizedTargets.map(target => [target.targetId, []]));
@@ -584,6 +589,33 @@ function selectionObservationAfter(candidate, checkpoint, observation = {}) {
     feedbackText: observation.feedbackText,
     networkEvents: grabNetworkMonitor.after(checkpoint)
   });
+}
+
+function setVolunteerSubmissionArm(candidate, action) {
+  try {
+    document.dispatchEvent(new CustomEvent(GRAB_VOLUNTEER_ARM_EVENT, {
+      detail: JSON.stringify({
+        action,
+        ...(action === 'arm' && candidate?.teachingClassId
+          ? { teachingClassId: String(candidate.teachingClassId).slice(0, 300) }
+          : {})
+      })
+    }));
+  } catch {
+    // The bridge is optional observability. A missing bridge must not change
+    // the page's native click path.
+  }
+}
+
+function clickWithVolunteerSubmissionArm(candidate, click) {
+  setVolunteerSubmissionArm(candidate, 'arm');
+  try {
+    return click();
+  } finally {
+    // Only a volunteer request issued synchronously from this native click may
+    // consume the arm. Always clear it, including when the page handler throws.
+    setVolunteerSubmissionArm(candidate, 'clear');
+  }
 }
 
 function candidateIsSelected(candidate) {
@@ -714,63 +746,63 @@ async function attemptDomCandidate(candidate, context) {
   const baselineFeedbackElements = new Set(visibleFeedbackElements());
   const baselineFeedback = visibleFeedbackTexts([...baselineFeedbackElements]);
   const networkCheckpoint = grabNetworkMonitor.checkpoint();
-  candidate.choiceBtn.click();
+  clickWithVolunteerSubmissionArm(candidate, () => candidate.choiceBtn.click());
 
-  const immediate = await waitForConfirmOrImmediateResult(candidate, baselineButtons, baselineFeedback, networkCheckpoint, signal);
-  if (immediate.kind === 'selected') {
-    return finalizeDomAttemptResult(
-      selectionObservationAfter(candidate, networkCheckpoint, { domSelected: true }),
-      baselineFeedbackElements,
-      signal
-    );
-  }
-  if (immediate.kind === 'outcome') {
-    return finalizeDomAttemptResult({
-      outcome: immediate.outcome,
-      message: immediate.message,
-      retryOtherCandidate: typeof immediate.retryOtherCandidate === 'boolean'
-        ? immediate.retryOtherCandidate
-        : undefined
-    }, baselineFeedbackElements, signal);
-  }
-  if (immediate.kind === 'confirm') {
-    throwIfGrabAborted(signal);
-    immediate.button.click();
-  }
+  try {
+    const immediate = await waitForConfirmOrImmediateResult(candidate, baselineButtons, baselineFeedback, networkCheckpoint, signal);
+    if (immediate.kind === 'selected') {
+      return finalizeDomAttemptResult(
+        selectionObservationAfter(candidate, networkCheckpoint, { domSelected: true }),
+        baselineFeedbackElements,
+        signal
+      );
+    }
+    if (immediate.kind === 'outcome') {
+      return finalizeDomAttemptResult({
+        outcome: immediate.outcome,
+        message: immediate.message,
+        retryOtherCandidate: typeof immediate.retryOtherCandidate === 'boolean'
+          ? immediate.retryOtherCandidate
+          : undefined
+      }, baselineFeedbackElements, signal);
+    }
+    if (immediate.kind === 'confirm') {
+      throwIfGrabAborted(signal);
+      clickWithVolunteerSubmissionArm(candidate, () => immediate.button.click());
+    }
 
-  const observed = await waitForSelectionOutcome(candidate, baselineFeedback, networkCheckpoint, signal);
-  if (observed) return finalizeDomAttemptResult(observed, baselineFeedbackElements, signal);
+    const observed = await waitForSelectionOutcome(candidate, baselineFeedback, networkCheckpoint, signal);
+    if (observed) return finalizeDomAttemptResult(observed, baselineFeedbackElements, signal);
 
   // A fresh list is required before DOM state can be used as a success proof.
-  await refreshCourseList(signal);
-  await sleep(200, signal);
-  if (candidateIsSelected(candidate)) {
-    return finalizeDomAttemptResult(
-      selectionObservationAfter(candidate, networkCheckpoint, {
-        domSelected: true,
-        domMessage: '刷新后已确认该教学班为已选'
-      }),
-      baselineFeedbackElements,
-      signal
-    );
-  }
+    await refreshCourseList(signal);
+    await sleep(200, signal);
+    if (candidateIsSelected(candidate)) {
+      return finalizeDomAttemptResult(
+        selectionObservationAfter(candidate, networkCheckpoint, {
+          domSelected: true,
+          domMessage: '刷新后已确认该教学班为已选'
+        }),
+        baselineFeedbackElements,
+        signal
+      );
+    }
 
-  const feedback = newFeedbackText(baselineFeedback);
-  const classified = grabSelectionVerifier.evaluate({ feedbackText: feedback });
-  if (classified) {
-    return finalizeDomAttemptResult(
-      classified,
-      baselineFeedbackElements,
-      signal
-    );
+    const feedback = newFeedbackText(baselineFeedback);
+    const classified = grabSelectionVerifier.evaluate({ candidate, feedbackText: feedback });
+    if (classified) {
+      return finalizeDomAttemptResult(classified, baselineFeedbackElements, signal);
+    }
+    return {
+      outcome: grabModule.OUTCOME.UNKNOWN_COMMIT,
+      message: immediate.kind === 'confirm'
+        ? '确认已点击，但未得到可验证的服务端结果'
+        : '选择已点击，但未得到可验证的服务端结果',
+      retryOtherCandidate: false
+    };
+  } finally {
+    setVolunteerSubmissionArm(candidate, 'clear');
   }
-  return {
-    outcome: grabModule.OUTCOME.UNKNOWN_COMMIT,
-    message: immediate.kind === 'confirm'
-      ? '确认已点击，但未得到可验证的服务端结果'
-      : '选择已点击，但未得到可验证的服务端结果',
-    retryOtherCandidate: false
-  };
 }
 
 function sendGrabRuntimeMessage(message) {
@@ -1263,6 +1295,13 @@ function grabPageSummaryPresentation(state, currentTime = Date.now()) {
       title: authView.title,
       subtitle: authView.subtitle,
       tone: authView.tone
+    };
+  }
+  if (source.phase === 'PAUSED_STRUCTURE') {
+    return {
+      title: '页面结构异常，监控已暂停',
+      subtitle: '请刷新页面或更新扩展后重试',
+      tone: 'danger'
     };
   }
   if (source.running) {
