@@ -42,10 +42,19 @@
       return /未开放|未开始|已结束|关闭|不在.*(?:时间|范围)/.test(safeText(message));
     }
 
-    function feedbackResult(feedbackText) {
+    function feedbackResult(feedbackText, { candidateScoped = false } = {}) {
       const message = safeText(feedbackText);
       const classified = classifyFeedback(message);
       if (!classified) return null;
+      // A page dialog has no stable teaching-class identity. While an exact
+      // candidate is being verified, only global conditions are safe to apply;
+      // another manual submission must not reject the automated candidate.
+      if (candidateScoped && ![
+        outcome.AUTH_EXPIRED,
+        outcome.CAPTCHA_REQUIRED,
+        outcome.RATE_LIMITED,
+        outcome.SERVER_ERROR
+      ].includes(classified) && !isGlobalSelectionWindowRejection(message)) return null;
       return {
         outcome: classified,
         message,
@@ -59,10 +68,13 @@
       for (const event of events) {
         const path = safeText(event?.path);
         const isSubmit = path === paths.submit;
-        const isMatchingStatus = path === paths.status
-          && teachingClassId
+        const isStatus = path === paths.status;
+        const isMatchingCandidate = teachingClassId
           && safeText(event?.teachingClassId) === teachingClassId;
-        if (!isSubmit && !isMatchingStatus) continue;
+        const isMatchingStatus = isStatus
+          && teachingClassId
+          && isMatchingCandidate;
+        if (!isSubmit && !isStatus) continue;
 
         const status = Number(event?.status) || 0;
         const code = safeText(event?.code);
@@ -79,6 +91,13 @@
         if (status === 0) {
           return { outcome: outcome.NETWORK_ERROR, message: message || '选课请求未得到网络响应' };
         }
+        if (isSubmit && isGlobalSelectionWindowRejection(message)) {
+          return { outcome: outcome.REJECTED, message, retryOtherCandidate: false };
+        }
+
+        // Submit and status bodies describe one teaching class. Do not let a
+        // different class's ordinary rejection alter this candidate.
+        if (!isMatchingCandidate) continue;
 
         if (isSubmit) {
           if (code && code !== '1') {
@@ -86,7 +105,9 @@
             return {
               outcome: classified,
               message: message || `选课提交被拒绝（code=${code}）`,
-              ...(isGlobalSelectionWindowRejection(message) ? { retryOtherCandidate: false } : {})
+              retryOtherCandidate: isGlobalSelectionWindowRejection(message)
+                ? false
+                : [outcome.FULL, outcome.CONFLICT, outcome.REJECTED].includes(classified)
             };
           }
           continue;
@@ -98,7 +119,8 @@
         if (code === '-1') {
           return {
             outcome: classifyFeedback(message) || outcome.REJECTED,
-            message: message || '服务端确认该教学班选课失败'
+            message: message || '服务端确认该教学班选课失败',
+            retryOtherCandidate: true
           };
         }
       }
@@ -112,7 +134,7 @@
           message: safeText(observation.domMessage) || '页面已显示该教学班为已选'
         };
       }
-      return feedbackResult(observation.feedbackText)
+      return feedbackResult(observation.feedbackText, { candidateScoped: Boolean(observation.candidate) })
         || networkResult(observation.candidate, observation.networkEvents);
     }
 

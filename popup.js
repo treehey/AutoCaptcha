@@ -221,7 +221,14 @@ function createTargetLabelElement(target) {
   }
   
   if (details.length > 0) {
-    detailsLine.innerHTML = details.map(d => `<span class="detail-pill">${d}</span>`).join('');
+    for (const detail of details) {
+      const pill = document.createElement('span');
+      pill.className = 'detail-pill';
+      // Course metadata comes from the course page. Keep it text-only even when
+      // a teacher or location happens to contain HTML-looking characters.
+      pill.textContent = detail;
+      detailsLine.append(pill);
+    }
     container.append(titleLine, detailsLine);
   } else {
     container.append(titleLine);
@@ -635,6 +642,11 @@ function renderGrabState() {
     setPill(els.grabStatePill, '任务未完成');
     els.grabSummaryTitle.textContent = '课程组存在不可恢复限制';
     els.grabSummarySub.textContent = `${progressText}；请查看日志并调整目标。`;
+  } else if (grabState?.phase === 'PAUSED_STRUCTURE') {
+    setBadge(els.grabBadge, '结构异常', 'warning');
+    setPill(els.grabStatePill, '监控已暂停');
+    els.grabSummaryTitle.textContent = '选课页面结构可能已经变化';
+    els.grabSummarySub.textContent = '监控已暂停，请刷新页面或更新扩展后重试。';
   } else {
     setBadge(els.grabBadge, '已连接', 'info');
     setPill(els.grabStatePill, '选课已连接');
