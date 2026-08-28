@@ -13,7 +13,10 @@ const GRAB_LOGIN_SHIELD_STATUS = grabLoginShieldModule?.STATUS || Object.freeze(
   SUCCESS: 'success',
   ERROR: 'error'
 });
-const grabLoginShield = grabLoginShieldModule?.createLoginShield?.({ documentRef: document }) || Object.freeze({
+const grabLoginShield = grabLoginShieldModule?.createLoginShield?.({
+  documentRef: document,
+  isAuthenticatedPage: isGrabAuthenticatedPage
+}) || Object.freeze({
   clear() {},
   resolveAutomation() {},
   show() { return false; }
@@ -905,11 +908,12 @@ function normalizeGrabAuthRecovery(value) {
     : '';
   return {
     pending: Boolean(value.pending),
-    stage: ['WAITING_LOGIN', 'RETURNING', 'ENTERING_COURSE', 'VERIFYING', 'MANUAL_REQUIRED'].includes(value.stage)
+    stage: ['WAITING_LOGIN', 'RETURNING', 'SELECTING_ROUND', 'ENTERING_COURSE', 'VERIFYING', 'MANUAL_REQUIRED'].includes(value.stage)
       ? value.stage
       : 'WAITING_LOGIN',
     attempts: Math.min(GRAB_AUTH_RECOVERY_MAX_ATTEMPTS + 1, Math.max(0, Math.floor(Number(value.attempts) || 0))),
     startedAt: Math.max(0, Number(value.startedAt) || 0),
+    electiveBatchCode: String(value.electiveBatchCode || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 200),
     returnPath,
     lastMessage: String(value.lastMessage || '').slice(0, 500)
   };
@@ -931,6 +935,39 @@ function isGrabPreCoursePage() {
   return Boolean(document.getElementById?.('courseBtn')
     && document.getElementById?.('cvStageAxis')
     && document.getElementById?.('stundentinfoDiv'));
+}
+
+function isGrabRoundSelectionPage() {
+  if (!/\/index\.do$/i.test(String(globalThis.location?.pathname || ''))) return false;
+  const table = document.querySelector?.('.electiveBatch-list-table');
+  const body = document.querySelector?.('.electiveBatch-body');
+  return Boolean(table && body && isVisibleGrabElement(table));
+}
+
+function isGrabAuthenticatedPage() {
+  return isGrabRoundSelectionPage() || isGrabPreCoursePage() || isGrabCoursePage();
+}
+
+function boundedGrabElectiveBatchCode(value) {
+  return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 200);
+}
+
+function currentGrabElectiveBatchCode(snapshot = null) {
+  for (const key of ['currentBatch', 'studentInfo']) {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(key) || 'null');
+      const code = boundedGrabElectiveBatchCode(
+        key === 'studentInfo' ? value?.electiveBatch?.code : value?.code
+      );
+      if (code) return code;
+    } catch {
+      // Fall through to the persisted task target identity.
+    }
+  }
+  const codes = [...new Set((snapshot?.configuredTargets || [])
+    .map(target => boundedGrabElectiveBatchCode(target?.electiveBatchId))
+    .filter(Boolean))];
+  return codes.length === 1 ? codes[0] : '';
 }
 
 function currentGrabPreCourseButton() {
@@ -2860,6 +2897,7 @@ async function beginGrabAuthRecovery(state, options = {}) {
     stage: manualRequired ? 'MANUAL_REQUIRED' : 'WAITING_LOGIN',
     attempts,
     startedAt: withinRecoveryWindow ? previous.startedAt : currentTime,
+    electiveBatchCode: previous?.electiveBatchCode || currentGrabElectiveBatchCode(state),
     returnPath,
     lastMessage: manualRequired
       ? '登录状态连续失效，已停止自动跳转，请手动完成选课登录'
@@ -2887,7 +2925,7 @@ async function beginGrabAuthRecovery(state, options = {}) {
 }
 
 async function routeGrabAuthRecoveryToPreCoursePage(savedSnapshot) {
-  if (['RETURNING', 'ENTERING_COURSE'].includes(grabAuthRecovery?.stage)
+  if (['RETURNING', 'SELECTING_ROUND', 'ENTERING_COURSE'].includes(grabAuthRecovery?.stage)
     || (location.origin === new URL(GRAB_AUTH_LOGIN_URL).origin && String(location.pathname || '/') === '/')) {
     await requireManualGrabAuthRecovery(savedSnapshot, '登录完成后未识别到选课轮次入口，请手动进入当前选课轮次');
     return;
@@ -2899,6 +2937,59 @@ async function routeGrabAuthRecoveryToPreCoursePage(savedSnapshot) {
   if (!response?.ok || !grabAuthRecovery?.pending) return;
   if (!navigateForGrabAuthRecovery(GRAB_AUTH_LOGIN_URL)) {
     await requireManualGrabAuthRecovery(savedSnapshot, '无法打开选课轮次预备页，请手动进入当前选课轮次');
+  }
+}
+
+function readGrabRoundChoice(choice) {
+  try {
+    const value = JSON.parse(choice?.getAttribute?.('data-value') || 'null');
+    return value && typeof value === 'object' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function selectGrabAuthRecoveryRound(savedSnapshot) {
+  if (!grabAuthRecovery) return;
+  if (grabAuthRecovery.stage === 'SELECTING_ROUND') return;
+  const expectedCode = boundedGrabElectiveBatchCode(grabAuthRecovery.electiveBatchCode);
+  if (!expectedCode) {
+    await requireManualGrabAuthRecovery(savedSnapshot, '无法确认原监控轮次，请手动选择后继续');
+    return;
+  }
+  const choices = Array.from(document.querySelectorAll?.('.cv-electiveBatch-select') || []);
+  const choice = choices.find(item => boundedGrabElectiveBatchCode(readGrabRoundChoice(item)?.code) === expectedCode);
+  const choiceValue = readGrabRoundChoice(choice);
+  if (!choice || String(choiceValue?.canSelect || '') !== '1') {
+    await requireManualGrabAuthRecovery(savedSnapshot, '原监控轮次当前不可选择，请手动确认轮次');
+    return;
+  }
+  const table = document.querySelector?.('.electiveBatch-list-table');
+  const dialog = table?.closest?.('.jqx-window');
+  const confirmButton = dialog?.querySelector?.('#buttons .bh-btn-primary');
+  if (!confirmButton || confirmButton.disabled || !isVisibleGrabElement(confirmButton)) {
+    await requireManualGrabAuthRecovery(savedSnapshot, '轮次确认按钮尚不可用，请手动选择原监控轮次');
+    return;
+  }
+
+  const taskId = activeGrabTaskId;
+  const commandVersion = grabLifecycleCommandVersion;
+  grabAuthRecovery.stage = 'SELECTING_ROUND';
+  grabAuthRecovery.lastMessage = '已找到原监控轮次，正在确认并恢复任务';
+  pausedGrabTaskSnapshot = withGrabAuthRecovery(savedSnapshot);
+  sendGrabRuntimeMessage({ action: 'grabStopped', state: pausedGrabTaskSnapshot });
+  const response = await sendGrabTaskRuntime(pausedGrabTaskSnapshot);
+  if (!response?.ok || activeGrabTaskId !== taskId || commandVersion !== grabLifecycleCommandVersion
+    || !grabAuthRecovery?.pending) return;
+
+  try {
+    choice.click();
+    if (!choice.checked || boundedGrabElectiveBatchCode(readGrabRoundChoice(choice)?.code) !== expectedCode) {
+      throw new Error('round choice changed');
+    }
+    confirmButton.click();
+  } catch {
+    await requireManualGrabAuthRecovery(savedSnapshot, '无法自动确认原监控轮次，请手动选择');
   }
 }
 
@@ -2917,6 +3008,10 @@ async function continueGrabAuthRecoveryFromPage(savedSnapshot, taskId, commandVe
     || !grabAuthRecovery?.pending) return;
   const checkpoint = pausedGrabTaskSnapshot || savedSnapshot;
   if (grabAuthRecovery.stage === 'MANUAL_REQUIRED' && !isGrabCoursePage()) return;
+  if (isGrabRoundSelectionPage()) {
+    await selectGrabAuthRecoveryRound(checkpoint);
+    return;
+  }
   if (isGrabPreCoursePage()) {
     if (grabAuthRecovery.stage === 'ENTERING_COURSE') return;
     await enterGrabCourseFromPrePage(checkpoint);
@@ -2971,6 +3066,7 @@ function watchGrabAuthRecoveryPage(savedSnapshot) {
       return;
     }
     const pageStateReady = isGrabCoursePage()
+      || (isGrabRoundSelectionPage() && grabAuthRecovery.stage !== 'SELECTING_ROUND')
       || (isGrabPreCoursePage() && grabAuthRecovery.stage !== 'ENTERING_COURSE');
     if (!pageStateReady && Date.now() >= deadline) {
       await requireManualGrabAuthRecovery(
@@ -3164,8 +3260,8 @@ async function restoreGrabTaskFromSession() {
     activeGrabTaskId = runtime.taskId;
     activeGrabTaskRevision = Math.max(0, Number(runtime.revision) || 0);
     activeGrabTaskNeedsClaim = false;
-    if (savedSnapshot.running && (isGrabLoginPage() || isGrabPreCoursePage())) {
-      const preserveCurrentPage = isGrabPreCoursePage();
+    if (savedSnapshot.running && (isGrabLoginPage() || isGrabRoundSelectionPage() || isGrabPreCoursePage())) {
+      const preserveCurrentPage = isGrabRoundSelectionPage() || isGrabPreCoursePage();
       await beginGrabAuthRecovery({
         ...savedSnapshot,
         running: false,
@@ -3180,6 +3276,10 @@ async function restoreGrabTaskFromSession() {
       grabAuthRecovery = savedRecovery;
       pausedGrabTaskSnapshot = withGrabAuthRecovery(savedSnapshot);
       sendGrabRuntimeMessage({ action: 'grabStopped', state: pausedGrabTaskSnapshot });
+      if (isGrabRoundSelectionPage()) {
+        watchGrabAuthRecoveryPage(savedSnapshot);
+        return;
+      }
       if (isGrabLoginPage()) {
         if (!['WAITING_LOGIN', 'MANUAL_REQUIRED'].includes(grabAuthRecovery.stage)) {
           grabAuthRecovery.stage = 'WAITING_LOGIN';
@@ -3272,7 +3372,8 @@ const clickCaptchaSolver = {
   result: null,
   loginStatus: '未检测登录表单',
   status: '未启用',
-  monitor: null
+  monitor: null,
+  suspendedForAuthenticatedPage: false
 };
 
 const clickCaptchaWorker = {
@@ -3592,6 +3693,7 @@ async function prepareClickCaptchaLogin(target) {
 }
 
 async function submitClickCaptchaLogin(target, fingerprint, context, autoClickToken) {
+  if (isGrabAuthenticatedPage()) return false;
   if (!context || !clickCaptchaSolver.enabled || !clickCaptchaSolver.autoClick
     || clickCaptchaSolver.autoClickToken !== autoClickToken) {
     return false;
@@ -3606,6 +3708,10 @@ async function submitClickCaptchaLogin(target, fingerprint, context, autoClickTo
   }
 
   await sleep(CLICK_CAPTCHA_LOGIN_SUBMIT_DELAY_MS);
+  if (isGrabAuthenticatedPage()) {
+    clickCaptchaSolver.loginStatus = '已进入选课系统，跳过旧登录表单';
+    return false;
+  }
   if (!document.contains(target) || getClickCaptchaFingerprint(target) !== fingerprint) {
     clickCaptchaSolver.loginStatus = '验证码已验证，页面正在跳转';
     return false;
@@ -4129,9 +4235,18 @@ function createClickCaptchaAutoClickCancelledError() {
   return error;
 }
 
+function createClickCaptchaAuthenticatedPageError() {
+  const error = new Error('已进入选课系统');
+  error.code = 'AUTHENTICATED_PAGE_REACHED';
+  return error;
+}
+
 async function dispatchClickCaptchaPoints(target, result, autoClickToken) {
   const fingerprint = getClickCaptchaFingerprint(target);
   for (const point of result.points) {
+    if (isGrabAuthenticatedPage()) {
+      throw createClickCaptchaAuthenticatedPageError();
+    }
     if (!clickCaptchaSolver.enabled
       || !clickCaptchaSolver.autoClick
       || clickCaptchaSolver.autoClickToken !== autoClickToken) {
@@ -4152,7 +4267,41 @@ async function dispatchClickCaptchaPoints(target, result, autoClickToken) {
   }
 }
 
+function suspendClickCaptchaSolverOnAuthenticatedPage() {
+  if (!isGrabAuthenticatedPage()) {
+    if (clickCaptchaSolver.suspendedForAuthenticatedPage) {
+      clickCaptchaSolver.suspendedForAuthenticatedPage = false;
+      clickCaptchaSolver.target = null;
+      clickCaptchaSolver.fingerprint = '';
+      clickCaptchaSolver.attemptedTarget = null;
+      clickCaptchaSolver.attemptedFingerprint = '';
+      clickCaptchaSolver.submittedTarget = null;
+      clickCaptchaSolver.submittedFingerprint = '';
+      clickCaptchaSolver.status = clickCaptchaSolver.enabled ? '等待点击验证码' : '未启用';
+      notifyClickCaptchaSolverUpdate();
+    }
+    return false;
+  }
+
+  if (!clickCaptchaSolver.suspendedForAuthenticatedPage) {
+    clickCaptchaSolver.suspendedForAuthenticatedPage = true;
+    clickCaptchaSolver.autoClickToken += 1;
+    clickCaptchaSolver.target = null;
+    clickCaptchaSolver.fingerprint = '';
+    clickCaptchaSolver.result = null;
+    clickCaptchaSolver.status = '已进入选课系统，验证码识别已停止';
+    grabLoginShield.clear();
+    clearClickCaptchaSolverOverlay();
+    if (grabPageStatusPanel) grabPageStatusPanel.classList.remove('is-solving-captcha');
+    notifyClickCaptchaSolverUpdate();
+  }
+  return true;
+}
+
 async function runClickCaptchaSolver({ allowAutoClick = false, force = false } = {}) {
+  if (suspendClickCaptchaSolverOnAuthenticatedPage()) {
+    return getClickCaptchaSolverState();
+  }
   if (clickCaptchaCapture.enabled) {
     grabLoginShield.clear();
     clickCaptchaSolver.status = '采样进行中，识别已暂停';
@@ -4205,6 +4354,9 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
         break;
       }
       target = await prepareFourTargetClickCaptchaForSolver(target);
+      if (suspendClickCaptchaSolverOnAuthenticatedPage()) {
+        throw createClickCaptchaAuthenticatedPageError();
+      }
       const fingerprint = getClickCaptchaFingerprint(target);
       clickCaptchaSolver.attemptedTarget = target;
       clickCaptchaSolver.attemptedFingerprint = fingerprint;
@@ -4213,6 +4365,9 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
         throw new Error(`当前验证码尺寸 ${frame.width}x${frame.height} 与本地模型不兼容`);
       }
       const result = await solveClickCaptchaFrame(frame, CLICK_CAPTCHA_REQUIRED_TARGET_COUNT);
+      if (suspendClickCaptchaSolverOnAuthenticatedPage()) {
+        throw createClickCaptchaAuthenticatedPageError();
+      }
       if (!document.contains(target) || getClickCaptchaFingerprint(target) !== fingerprint) {
         throw new Error('验证码在识别过程中已刷新');
       }
@@ -4223,6 +4378,9 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
       const autoEligible = isClickCaptchaAutoEligible(result);
       if (canAutoClickNow() && autoEligible) {
         const loginContext = await prepareClickCaptchaLogin(target);
+        if (suspendClickCaptchaSolverOnAuthenticatedPage()) {
+          throw createClickCaptchaAuthenticatedPageError();
+        }
         if (!loginContext) {
           grabLoginShield.clear();
           clickCaptchaSolver.status = `${clickCaptchaSolver.loginStatus}，已标出识别顺序供人工处理`;
@@ -4235,6 +4393,9 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
         renderClickCaptchaSolverOverlay();
         notifyClickCaptchaSolverUpdate();
         await dispatchClickCaptchaPoints(target, result, clickCaptchaSolver.autoClickToken);
+        if (suspendClickCaptchaSolverOnAuthenticatedPage()) {
+          throw createClickCaptchaAuthenticatedPageError();
+        }
         const submitted = await submitClickCaptchaLogin(target, fingerprint, loginContext, clickCaptchaSolver.autoClickToken);
         if (submitted) {
           loginSubmitted = true;
@@ -4275,7 +4436,11 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
     }
     renderClickCaptchaSolverOverlay();
   } catch (error) {
-    if (error?.code === 'AUTO_CLICK_CANCELLED') {
+    if (error?.code === 'AUTHENTICATED_PAGE_REACHED') {
+      grabLoginShield.clear();
+      clearClickCaptchaSolverOverlay();
+      clickCaptchaSolver.status = '已进入选课系统，验证码识别已停止';
+    } else if (error?.code === 'AUTO_CLICK_CANCELLED') {
       grabLoginShield.clear();
       clickCaptchaSolver.status = '自动点击已取消，已保留标点供人工确认';
       renderClickCaptchaSolverOverlay();
@@ -4297,7 +4462,9 @@ async function runClickCaptchaSolver({ allowAutoClick = false, force = false } =
 }
 
 async function pollClickCaptchaSolver() {
-  if (!clickCaptchaSolver.enabled || clickCaptchaSolver.running || clickCaptchaCapture.enabled) return;
+  if (!clickCaptchaSolver.enabled || clickCaptchaCapture.enabled) return;
+  if (suspendClickCaptchaSolverOnAuthenticatedPage()) return;
+  if (clickCaptchaSolver.running) return;
   const target = findClickCaptchaElement();
   if (!target || !isReadyClickCaptchaElement(target)) return;
   const fingerprint = getClickCaptchaFingerprint(target);
@@ -4329,6 +4496,7 @@ async function setClickCaptchaSolverEnabled(enabled) {
     clickCaptchaSolver.lowConfidenceRefreshes = 0;
     clickCaptchaSolver.result = null;
     clickCaptchaSolver.loginStatus = '未检测登录表单';
+    clickCaptchaSolver.suspendedForAuthenticatedPage = false;
     clickCaptchaSolver.status = '等待点击验证码';
     startClickCaptchaSolverMonitor();
   } else {
