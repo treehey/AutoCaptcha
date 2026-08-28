@@ -64,7 +64,8 @@ function installBridge(options = {}) {
     URL,
     URLSearchParams,
     setTimeout: scheduleTimeout,
-    XMLHttpRequest: FakeXmlHttpRequest
+    XMLHttpRequest: FakeXmlHttpRequest,
+    fetch: options.fetch
   });
   context.globalThis = context;
   context.window = context;
@@ -122,22 +123,73 @@ test('reports an exact teaching class result without leaking the student code', 
   assert.equal(JSON.stringify(detail).includes('123456789'), false);
 });
 
-test('reports an immediate volunteer rejection without exposing encrypted parameters', async () => {
+test('reports a volunteer teaching class ID when the page sends it without exposing other parameters', async () => {
+  const { context, document } = installBridge();
+  const detailPromise = nextDetail(document);
+  const xhr = new context.XMLHttpRequest();
+
+  xhr.open('POST', '/xsxkapp/sys/xsxkapp/elective/volunteer.do');
+  xhr.send('addParam=encrypted-secret&studentCode=123456789&teachingClassId=class-2');
+  xhr.complete({ responseText: JSON.stringify({ code: '0', msg: '当前时间不在选课开放时间范围内' }) });
+
+  const detail = await detailPromise;
+  assert.equal(detail.path, '/elective/volunteer.do');
+  assert.equal(detail.code, '0');
+  assert.equal(detail.teachingClassId, 'class-2');
+  assert.equal(detail.message, '当前时间不在选课开放时间范围内');
+  assert.equal(JSON.stringify(detail).includes('encrypted-secret'), false);
+  assert.equal(JSON.stringify(detail).includes('123456789'), false);
+});
+
+test('does not guess a volunteer teaching class ID from encrypted parameters', async () => {
   const { context, document } = installBridge();
   const detailPromise = nextDetail(document);
   const xhr = new context.XMLHttpRequest();
 
   xhr.open('POST', '/xsxkapp/sys/xsxkapp/elective/volunteer.do');
   xhr.send('addParam=encrypted-secret&studentCode=123456789');
-  xhr.complete({ responseText: JSON.stringify({ code: '0', msg: '当前时间不在选课开放时间范围内' }) });
+  xhr.complete({ responseText: JSON.stringify({ code: '0', msg: '添加选课失败' }) });
 
   const detail = await detailPromise;
-  assert.equal(detail.path, '/elective/volunteer.do');
-  assert.equal(detail.code, '0');
   assert.equal(detail.teachingClassId, '');
-  assert.equal(detail.message, '当前时间不在选课开放时间范围内');
   assert.equal(JSON.stringify(detail).includes('encrypted-secret'), false);
-  assert.equal(JSON.stringify(detail).includes('123456789'), false);
+});
+
+test('consumes an armed automated class for one encrypted volunteer XHR only', async () => {
+  const { context, document } = installBridge();
+  document.dispatchEvent(new CustomEvent('nju-autograb-volunteer-arm-v1', {
+    detail: JSON.stringify({ action: 'arm', teachingClassId: 'class-a' })
+  }));
+  const armedDetail = nextDetail(document);
+  const automated = new context.XMLHttpRequest();
+  automated.open('POST', '/xsxkapp/sys/xsxkapp/elective/volunteer.do');
+  automated.send('addParam=encrypted-secret&studentCode=123456789');
+  automated.complete({ responseText: JSON.stringify({ code: '0', msg: '课程冲突' }) });
+  assert.equal((await armedDetail).teachingClassId, 'class-a');
+
+  const manualDetail = nextDetail(document);
+  const manual = new context.XMLHttpRequest();
+  manual.open('POST', '/xsxkapp/sys/xsxkapp/elective/volunteer.do');
+  manual.send('addParam=encrypted-secret&studentCode=123456789');
+  manual.complete({ responseText: JSON.stringify({ code: '0', msg: '课程冲突' }) });
+  assert.equal((await manualDetail).teachingClassId, '');
+});
+
+test('consumes an armed automated class for an encrypted volunteer fetch request', async () => {
+  const fetch = async () => ({
+    status: 200,
+    url: 'https://xk.nju.edu.cn/xsxkapp/sys/xsxkapp/elective/volunteer.do',
+    clone: () => ({ text: async () => JSON.stringify({ code: '0', msg: '名额已满' }) })
+  });
+  const { context, document } = installBridge({ fetch });
+  document.dispatchEvent(new CustomEvent('nju-autograb-volunteer-arm-v1', {
+    detail: JSON.stringify({ action: 'arm', teachingClassId: 'class-a' })
+  }));
+  const detailPromise = nextDetail(document);
+  await context.fetch('/xsxkapp/sys/xsxkapp/elective/volunteer.do', {
+    method: 'POST', body: 'addParam=encrypted-secret&studentCode=123456789'
+  });
+  assert.equal((await detailPromise).teachingClassId, 'class-a');
 });
 
 test('reports course query completion without exposing query settings', async () => {

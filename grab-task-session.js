@@ -42,6 +42,8 @@
     'RATE_LIMITED',
     'NETWORK_ERROR',
     'SERVER_ERROR',
+    'STRUCTURE_ERROR',
+    'UNKNOWN_SCAN_ERROR',
     'UNKNOWN'
   ]);
 
@@ -217,6 +219,10 @@
       scanFailures: Math.floor(nonNegativeNumber(source.scanFailures)),
       lastTransientOutcome: source.lastTransientOutcome
         ? boundedText(source.lastTransientOutcome, 80)
+        : null,
+      structureFailures: Math.min(5, Math.floor(nonNegativeNumber(source.structureFailures))),
+      structureFailureSignature: source.structureFailureSignature
+        ? boundedText(source.structureFailureSignature, 380)
         : null,
       lastScan: sanitizeLastScan(source.lastScan),
       authRecovery: sanitizeAuthRecovery(source.authRecovery),

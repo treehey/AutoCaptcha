@@ -402,6 +402,7 @@ function loadAdapter(document, options = {}) {
     AbortController,
     clearTimeout,
     console,
+    CustomEvent,
     document,
     getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
     getStateSnapshot: () => options.grabState || {},
@@ -453,6 +454,26 @@ function loadAdapter(document, options = {}) {
   context.storageStateForTest = storageState;
   return context;
 }
+
+test('arms native choice and confirm clicks synchronously and clears even when a click throws', () => {
+  const document = new FakeDocument([]);
+  const adapter = loadAdapter(document);
+  const events = [];
+  document.addEventListener('nju-autograb-volunteer-arm-v1', event => {
+    events.push(JSON.parse(event.detail).action);
+  });
+  const candidate = { teachingClassId: 'class-2' };
+
+  adapter.clickWithVolunteerSubmissionArm(candidate, () => events.push('choice-click'));
+  adapter.clickWithVolunteerSubmissionArm(candidate, () => events.push('confirm-click'));
+  assert.deepEqual(events, ['arm', 'choice-click', 'clear', 'arm', 'confirm-click', 'clear']);
+
+  assert.throws(() => adapter.clickWithVolunteerSubmissionArm(candidate, () => {
+    events.push('throwing-click');
+    throw new Error('native click failure');
+  }), /native click failure/);
+  assert.deepEqual(events.slice(-3), ['arm', 'throwing-click', 'clear']);
+});
 
 test('splits every professional .jxb-item into an exact candidate', () => {
   const dom = createCapturedProfessionalDom();
@@ -1068,6 +1089,10 @@ test('maps runtime phases to truthful page button and radar states', () => {
       tone: 'active'
     }
   );
+  assert.deepEqual(
+    { ...adapter.grabPageSummaryPresentation({ phase: 'PAUSED_STRUCTURE', configuredTargets: [{ targetId: 'one' }] }, 3000) },
+    { title: '页面结构异常，监控已暂停', subtitle: '请刷新页面或更新扩展后重试', tone: 'danger' }
+  );
   assert.equal(
     adapter.grabPageScanLabel({ mode: 'NETWORK', deferredTargetCount: 2 }),
     '接口查询 · 2 个下轮分批'
@@ -1521,7 +1546,7 @@ test('waits for a delayed conflict dialog and dismisses it before trying later c
         status: 200,
         code: '0',
         message: '添加选课失败：课程冲突',
-        teachingClassId: ''
+        teachingClassId: 'class-2'
       })
     }));
     setTimeout(() => {
@@ -1568,7 +1593,7 @@ test('accepts only the matching teaching class studentstatus result as success',
   document.dispatchEvent(new CustomEvent('nju-autograb-network-v1', {
     detail: JSON.stringify({
       path: '/elective/studentstatus.do',
-      status: 500,
+      status: 200,
       code: '-1',
       message: '其他教学班失败',
       teachingClassId: 'class-1'
