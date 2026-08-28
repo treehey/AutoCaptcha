@@ -95,7 +95,28 @@ class FakeElement {
   set innerHTML(value) {
     this._innerHTML = String(value || '');
     this.ownText = '';
+    for (const child of this.children) {
+      child.isConnected = false;
+      child.parentElement = null;
+    }
     this.children = [];
+    if (String(value).includes('data-nju-grab-state-label')) {
+      const stateText = String(value).match(/data-nju-grab-state-label>([^<]*)<\/span>/)?.[1] || '';
+      const removeText = String(value).match(/data-nju-grab-remove-label>([^<]*)<\/span>/)?.[1] || '';
+      this.append(
+        new FakeElement('span', {
+          classes: ['nju-grab-state-label'],
+          attributes: { 'data-nju-grab-state-label': '' },
+          text: stateText
+        }),
+        new FakeElement('span', {
+          classes: ['nju-grab-remove-label'],
+          attributes: { 'data-nju-grab-remove-label': '' },
+          text: removeText
+        })
+      );
+      return;
+    }
     if (!String(value).includes('data-nju-grab-remove-confirm')) return;
     const leftResize = new FakeElement('div', { classes: ['nju-grab-resize-handle-l'], attributes: {
       'data-resize': 'left', role: 'button', tabindex: '0',
@@ -810,14 +831,45 @@ test('renders separate state and remove labels with an accessible action contrac
     running: true, targetStates: { ${JSON.stringify(target.targetId)}: { phase: 'SELECTED' } }
   };`, adapter);
   const button = new FakeElement('button');
-  button.ownerDocument = { createElement() {} };
+  button.ownerDocument = { createElement: tagName => new FakeElement(tagName) };
   adapter.updateGrabTargetButton(button, target);
 
-  assert.match(String(button.innerHTML || ''), /data-nju-grab-state-label/);
-  assert.match(String(button.innerHTML || ''), /data-nju-grab-remove-label/);
+  assert.equal(button.querySelector('[data-nju-grab-state-label]').textContent, '已选');
+  assert.equal(button.querySelector('[data-nju-grab-remove-label]').textContent, '移除监控');
   assert.match(button.getAttribute('aria-label'), /已选/);
   assert.match(button.getAttribute('aria-label'), /移除/);
   assert.match(button.title, /先停止监控后移除/);
+});
+
+test('keeps the visible remove label stable across repeated course-row decoration', () => {
+  const adapter = loadAdapter(new FakeDocument([]));
+  const target = grabTaskModel.normalizeTarget({
+    name: '稳定点击课程', electiveBatchId: 'BATCH-1', teachingClassId: 'stable-remove', teachingClassType: 'GG'
+  });
+  vm.runInContext(`configuredGrabTargets = [${JSON.stringify(target)}]; latestGrabPageState = {
+    running: true, targetStates: { ${JSON.stringify(target.targetId)}: { phase: 'WATCHING' } }
+  };`, adapter);
+  const ownerDocument = {
+    createElement(tagName) {
+      const element = new FakeElement(tagName);
+      element.ownerDocument = ownerDocument;
+      return element;
+    }
+  };
+  const button = new FakeElement('button');
+  button.ownerDocument = ownerDocument;
+
+  adapter.updateGrabTargetButton(button, target);
+  const firstRemoveLabel = button.querySelector('[data-nju-grab-remove-label]');
+  assert.ok(firstRemoveLabel, 'the removable target exposes its visible text layer');
+
+  adapter.updateGrabTargetButton(button, target);
+  assert.strictEqual(
+    button.querySelector('[data-nju-grab-remove-label]'),
+    firstRemoveLabel,
+    'a refresh must not replace the text node between pointer down and click'
+  );
+  assert.equal(firstRemoveLabel.isConnected, true);
 });
 
 test('running page removal opens a labeled panel confirmation and cancel is a true no-op', () => {
@@ -1388,6 +1440,7 @@ test('course radar styles are scoped, responsive and motion-safe', () => {
   assert.match(pageUiSource, /\.nju-grab-add-target\.is-exact-removable/);
   assert.match(pageUiSource, /grid-column: 2/);
   assert.match(pageUiSource, /grid-row: 1/);
+  assert.match(pageUiSource, /pointer-events: none/);
   assert.match(pageUiSource, /opacity: 0/);
   assert.doesNotMatch(pageUiSource, /\.nju-grab-add-target \.nju-grab-remove-label\s*\{\s*display:\s*none/);
   assert.match(pageUiSource, /\.is-exact-removable:focus-visible \.nju-grab-remove-label/);
