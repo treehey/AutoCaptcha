@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { createRoundSelectionPageDetector } = require('./helpers/grab-page-context.cjs');
 
 const repoRoot = path.resolve(__dirname, '..');
 const contentSource = fs.readFileSync(path.join(repoRoot, 'content-grab.js'), 'utf8');
@@ -15,7 +16,7 @@ assert.notEqual(solverEnd, -1, 'click-captcha solver end must exist');
 const solverSource = `${contentSource.slice(solverStart, solverEnd)}\n`
   + 'globalThis.__solverApi = { pollClickCaptchaSolver, runClickCaptchaSolver };';
 
-function createHarness({ authenticated = false, solveFrame = null } = {}) {
+function createHarness({ authenticated = false, solveFrame = null, roundSelectorPath = '' } = {}) {
   const target = {
     getBoundingClientRect() {
       return { left: 0, top: 0, width: 250, height: 120 };
@@ -30,6 +31,17 @@ function createHarness({ authenticated = false, solveFrame = null } = {}) {
     notify: 0
   };
   let authenticatedPage = authenticated;
+  const documentRef = {
+    contains(candidate) { return candidate === target; },
+    querySelector(selector) {
+      if (!roundSelectorPath) return null;
+      if (selector === '.electiveBatch-list-table' || selector === '.electiveBatch-body') return {};
+      return null;
+    }
+  };
+  const roundSelectionPageDetector = roundSelectorPath
+    ? createRoundSelectionPageDetector(documentRef, roundSelectorPath)
+    : null;
   const clickCaptchaSolver = {
     enabled: true,
     autoClick: false,
@@ -66,10 +78,10 @@ function createHarness({ authenticated = false, solveFrame = null } = {}) {
       resolveAutomation() {}
     },
     grabPageStatusPanel: null,
-    document: {
-      contains(candidate) { return candidate === target; }
+    document: documentRef,
+    isGrabAuthenticatedPage() {
+      return authenticatedPage || Boolean(roundSelectionPageDetector?.());
     },
-    isGrabAuthenticatedPage() { return authenticatedPage; },
     findClickCaptchaElement() { return target; },
     isReadyClickCaptchaElement() { return true; },
     getClickCaptchaFingerprint() { return 'captcha-a'; },
@@ -112,6 +124,16 @@ test('does not recognize a stale login captcha after the round selector is authe
 
   assert.equal(harness.calls.solve, 0, 'authenticated round selection must suppress recognition');
   assert.equal(harness.calls.render, 0, 'authenticated round selection must not render captcha markers');
+  assert.match(harness.clickCaptchaSolver.status, /已登录|选课系统/);
+});
+
+test('does not recognize a stale login captcha on the real root URL round selector', async () => {
+  const harness = createHarness({ roundSelectorPath: '/' });
+
+  await harness.api.pollClickCaptchaSolver();
+
+  assert.equal(harness.calls.solve, 0);
+  assert.equal(harness.calls.render, 0);
   assert.match(harness.clickCaptchaSolver.status, /已登录|选课系统/);
 });
 
