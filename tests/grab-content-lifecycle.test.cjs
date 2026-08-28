@@ -37,6 +37,55 @@ function createLifecycleHarness(runtimeRead, options = {}) {
     static now() { return clock.now; }
   }
   let preCourseEntryClicks = 0;
+  let roundConfirmClicks = 0;
+  const roundChoices = (options.roundChoices || []).map(choice => ({
+    checked: false,
+    clickCount: 0,
+    isConnected: true,
+    offsetParent: {},
+    getClientRects: () => [{}],
+    getAttribute(name) {
+      if (name === 'data-value') return JSON.stringify({
+        code: choice.code,
+        name: choice.name || choice.code,
+        canSelect: choice.canSelect === false ? '0' : '1'
+      });
+      return null;
+    },
+    click() {
+      this.clickCount += 1;
+      roundChoices.forEach(item => { item.checked = false; });
+      this.checked = true;
+    }
+  }));
+  const roundTableBody = {
+    isConnected: true,
+    offsetParent: {},
+    getClientRects: () => [{}]
+  };
+  const roundConfirmButton = {
+    disabled: false,
+    isConnected: true,
+    offsetParent: {},
+    getClientRects: () => [{}],
+    click() {
+      roundConfirmClicks += 1;
+      options.onRoundConfirmClick?.();
+    }
+  };
+  const roundDialog = {
+    querySelector(selector) {
+      return selector.includes('.bh-btn-primary') ? roundConfirmButton : null;
+    }
+  };
+  const roundTable = {
+    isConnected: true,
+    offsetParent: {},
+    getClientRects: () => [{}],
+    closest(selector) {
+      return selector.includes('.jqx-window') ? roundDialog : null;
+    }
+  };
   const neverFinishes = new Promise(() => {});
   const preCourseButton = {
     disabled: options.preCourseButtonDisabled === true,
@@ -88,10 +137,16 @@ function createLifecycleHarness(runtimeRead, options = {}) {
         return null;
       },
       querySelector(selector) {
+        if (pageState.roundSelectionPage && selector.includes('.electiveBatch-list-table')) return roundTable;
+        if (pageState.roundSelectionPage && selector.includes('.electiveBatch-body')) return roundTableBody;
         if (selector.includes('.result-container') || selector.includes('.course-list') || selector.includes('.refresh-btn')) {
           return pageState.coursePage === false ? null : {};
         }
         return null;
+      },
+      querySelectorAll(selector) {
+        if (pageState.roundSelectionPage && selector.includes('.cv-electiveBatch-select')) return roundChoices;
+        return [];
       }
     },
     isVisibleGrabElement: element => Boolean(element?.isConnected
@@ -103,6 +158,13 @@ function createLifecycleHarness(runtimeRead, options = {}) {
     scanDomCandidates: options.scan || (async () => neverFinishes),
     attemptDomCandidate: options.attempt || (async () => ({ outcome: grabModule.OUTCOME.UNKNOWN_COMMIT })),
     setTimeout,
+    sessionStorage: {
+      getItem(key) {
+        if (key === 'currentBatch') return JSON.stringify({ code: options.currentBatchCode || 'ROUND-ORIGINAL' });
+        if (key === 'studentInfo') return JSON.stringify({ electiveBatch: { code: options.currentBatchCode || 'ROUND-ORIGINAL' } });
+        return null;
+      }
+    },
     URL,
     chrome: {
       runtime: {
@@ -128,7 +190,9 @@ function createLifecycleHarness(runtimeRead, options = {}) {
     navigations,
     notifyDomMutation() { mutationObservers.slice().forEach(observer => observer.notify()); },
     setNow(value) { clock.now = Number(value); },
-    get preCourseEntryClicks() { return preCourseEntryClicks; }
+    get preCourseEntryClicks() { return preCourseEntryClicks; },
+    get roundConfirmClicks() { return roundConfirmClicks; },
+    get roundChoices() { return roundChoices; }
   };
 }
 
@@ -214,6 +278,7 @@ test('an auth-expired task is checkpointed before navigating to the course login
   assert.equal(checkpoint.phase, 'PAUSED_AUTH');
   assert.equal(checkpoint.authRecovery.stage, 'WAITING_LOGIN');
   assert.equal(checkpoint.authRecovery.attempts, 1);
+  assert.equal(checkpoint.authRecovery.electiveBatchCode, 'ROUND-ORIGINAL');
   assert.deepEqual(harness.navigations, ['https://xk.nju.edu.cn/']);
 });
 
@@ -270,6 +335,70 @@ test('a completed login opens the safe course-round landing page before resuming
     harness.saved.findLast(message => message.snapshot?.authRecovery)?.snapshot.authRecovery.stage,
     'RETURNING'
   );
+});
+
+test('a recovered task selects its original elective batch from a multi-round login result', async () => {
+  const pageState = { loginPage: false, roundSelectionPage: true, preCoursePage: false, coursePage: false };
+  const runtime = pausedAuthRuntime({
+    authRecovery: {
+      pending: true,
+      stage: 'WAITING_LOGIN',
+      attempts: 1,
+      startedAt: Date.now(),
+      electiveBatchCode: 'ROUND-OLD',
+      returnPath: '/xsxkapp/sys/xsxkapp/*default/grablessons.do',
+      lastMessage: '等待选课登录'
+    }
+  });
+  const harness = createLifecycleHarness({ promise: Promise.resolve(runtime) }, {
+    pathname: '/xsxkapp/sys/xsxkapp/*default/index.do',
+    pageState,
+    roundChoices: [
+      { code: 'ROUND-OLD', name: '原监控轮次' },
+      { code: 'ROUND-NEW', name: '其他轮次' }
+    ]
+  });
+
+  await waitFor(() => harness.roundConfirmClicks === 1);
+  assert.equal(harness.roundChoices[0].clickCount, 1);
+  assert.equal(harness.roundChoices[1].clickCount, 0);
+  assert.equal(
+    harness.saved.findLast(message => message.snapshot?.authRecovery)?.snapshot.authRecovery.stage,
+    'SELECTING_ROUND'
+  );
+
+  harness.notifyDomMutation();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.roundConfirmClicks, 1, 'the same round dialog must not be submitted twice');
+  harness.context.stopGrab();
+});
+
+test('a recovered task never guesses another elective batch when its original round is absent', async () => {
+  const runtime = pausedAuthRuntime({
+    authRecovery: {
+      pending: true,
+      stage: 'WAITING_LOGIN',
+      attempts: 1,
+      startedAt: Date.now(),
+      electiveBatchCode: 'ROUND-MISSING',
+      returnPath: '/xsxkapp/sys/xsxkapp/*default/grablessons.do',
+      lastMessage: '等待选课登录'
+    }
+  });
+  const harness = createLifecycleHarness({ promise: Promise.resolve(runtime) }, {
+    pathname: '/xsxkapp/sys/xsxkapp/*default/index.do',
+    pageState: { loginPage: false, roundSelectionPage: true, preCoursePage: false, coursePage: false },
+    roundChoices: [
+      { code: 'ROUND-OTHER-1', name: '其他轮次一' },
+      { code: 'ROUND-OTHER-2', name: '其他轮次二' }
+    ]
+  });
+
+  await waitFor(() => harness.context.getStateSnapshot().authRecovery?.stage === 'MANUAL_REQUIRED');
+  assert.equal(harness.roundConfirmClicks, 0);
+  assert.equal(harness.roundChoices.every(choice => choice.clickCount === 0), true);
+  assert.match(harness.context.getStateSnapshot().authRecovery.lastMessage, /原监控轮次/);
+  harness.context.stopGrab();
 });
 
 test('the course-round landing page checkpoints before using its native entry button', async () => {

@@ -15,7 +15,7 @@
     "verify:auth": "node scripts/verify-auth-login-fast-path.mjs && node scripts/verify-auth-slider-captcha.mjs && node scripts/verify-auth-session-prewarm.mjs",
     "verify:popup": "node scripts/verify-popup-help-ux.mjs",
     "verify:grab": "node --test --test-concurrency=1 tests/grab-task-model.test.cjs tests/grab-auth-presentation.test.cjs tests/grab-login-shield.test.cjs tests/grab-verification-engine.test.cjs tests/grab-engine.test.cjs tests/grab-dom-adapter.test.cjs tests/grab-network-bridge.test.cjs tests/grab-course-provider.test.cjs tests/grab-task-session.test.cjs tests/grab-content-lifecycle.test.cjs",
-    "verify:click-captcha": "node scripts/verify-captcha-test-context.mjs && node scripts/verify-click-captcha-sampler.mjs && node scripts/verify-click-captcha-solver.mjs && node scripts/verify-click-captcha-login-shield.mjs",
+    "verify:click-captcha": "node --test tests/grab-click-captcha-lifecycle.test.cjs && node scripts/verify-captcha-test-context.mjs && node scripts/verify-click-captcha-sampler.mjs && node scripts/verify-click-captcha-solver.mjs && node scripts/verify-click-captcha-login-shield.mjs",
     "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-package.ps1"
   },
   "engines": {

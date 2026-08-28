@@ -5,6 +5,7 @@
   const STAGE = Object.freeze({
     WAITING_LOGIN: 'WAITING_LOGIN',
     RETURNING: 'RETURNING',
+    SELECTING_ROUND: 'SELECTING_ROUND',
     ENTERING_COURSE: 'ENTERING_COURSE',
     VERIFYING: 'VERIFYING',
     MANUAL_REQUIRED: 'MANUAL_REQUIRED'
@@ -28,6 +29,15 @@
       tone: 'active',
       targetLabel: '恢复中',
       targetDetail: '正在返回课程页，不会在此阶段提交'
+    }),
+    [STAGE.SELECTING_ROUND]: Object.freeze({
+      badge: '自动恢复',
+      pill: '正在选择原轮次',
+      title: '正在恢复原监控轮次',
+      defaultMessage: '扩展只会选择任务暂停前的轮次；无法精确匹配时会等待人工确认。',
+      tone: 'active',
+      targetLabel: '恢复中',
+      targetDetail: '正在确认原监控轮次，不会选择其他轮次'
     }),
     [STAGE.ENTERING_COURSE]: Object.freeze({
       badge: '自动恢复',

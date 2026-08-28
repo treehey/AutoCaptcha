@@ -25,6 +25,7 @@ test('maps every auth recovery stage to explicit user-facing semantics', () => {
   const expectations = [
     [STAGE.WAITING_LOGIN, '等待登录', '任务已安全暂停', 'warning'],
     [STAGE.RETURNING, '自动恢复', '正在返回选课系统', 'active'],
+    [STAGE.SELECTING_ROUND, '自动恢复', '正在选择原轮次', 'active'],
     [STAGE.ENTERING_COURSE, '自动恢复', '正在进入选课轮次', 'active'],
     [STAGE.VERIFYING, '恢复验证', '正在核对选课状态', 'active'],
     [STAGE.MANUAL_REQUIRED, '需要操作', '等待人工登录', 'danger']

@@ -74,12 +74,34 @@ function createDocument() {
 function createFixture() {
   const clock = createClock();
   const documentRef = createDocument();
+  const observers = [];
+  let authenticatedPage = false;
   const shield = createLoginShield({
     documentRef,
     setTimeoutFn: clock.setTimeout,
-    clearTimeoutFn: clock.clearTimeout
+    clearTimeoutFn: clock.clearTimeout,
+    MutationObserverCtor: class FakeMutationObserver {
+      constructor(callback) {
+        this.callback = callback;
+        observers.push(this);
+      }
+      observe() {}
+      disconnect() { this.disconnected = true; }
+      notify() {
+        if (!this.disconnected) this.callback([{ type: 'childList' }]);
+      }
+    },
+    isAuthenticatedPage: () => authenticatedPage
   });
-  return { clock, documentRef, shield };
+  return {
+    clock,
+    documentRef,
+    shield,
+    reachAuthenticatedPage() {
+      authenticatedPage = true;
+      observers.forEach(observer => observer.notify());
+    }
+  };
 }
 
 test('blocks the login panel synchronously and always releases the preparation lease', () => {
@@ -130,4 +152,16 @@ test('a newer shield state cancels the older lease instead of clearing early', (
   assert.equal(recognitionLease.delay, 12000);
   clock.fire(recognitionLease.id);
   assert.equal(documentRef.documentElement.hasAttribute('data-nju-ai-status'), false);
+});
+
+test('a same-document transition to the round selector releases a submitted-login shield immediately', () => {
+  const { clock, documentRef, shield, reachAuthenticatedPage } = createFixture();
+
+  shield.show(STATUS.SUCCESS, '登录请求已提交，正在等待页面响应…');
+  assert.equal(documentRef.documentElement.getAttribute('data-nju-ai-status'), STATUS.SUCCESS);
+
+  reachAuthenticatedPage();
+
+  assert.equal(documentRef.documentElement.hasAttribute('data-nju-ai-status'), false);
+  assert.deepEqual(clock.pending(), []);
 });

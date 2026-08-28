@@ -23,6 +23,7 @@
   const VALID_AUTH_RECOVERY_STAGES = new Set([
     'WAITING_LOGIN',
     'RETURNING',
+    'SELECTING_ROUND',
     'ENTERING_COURSE',
     'VERIFYING',
     'MANUAL_REQUIRED'
@@ -72,6 +73,7 @@
       stage: VALID_AUTH_RECOVERY_STAGES.has(value.stage) ? value.stage : 'WAITING_LOGIN',
       attempts: Math.min(4, Math.floor(nonNegativeNumber(value.attempts))),
       startedAt: nonNegativeNumber(value.startedAt),
+      electiveBatchCode: boundedText(value.electiveBatchCode, 200),
       returnPath,
       lastMessage: boundedText(value.lastMessage, 500)
     };
