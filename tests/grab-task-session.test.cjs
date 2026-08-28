@@ -373,6 +373,7 @@ test('preserves only a same-site course return path for login recovery', () => {
       stage: 'WAITING_LOGIN',
       attempts: 2,
       startedAt: 1700000000000,
+      electiveBatchCode: 'ROUND-ORIGINAL',
       returnPath: '/xsxkapp/sys/xsxkapp/demo/grablessons.do',
       lastMessage: '等待重新登录',
       token: 'must-not-persist'
@@ -384,6 +385,7 @@ test('preserves only a same-site course return path for login recovery', () => {
     stage: 'WAITING_LOGIN',
     attempts: 2,
     startedAt: 1700000000000,
+    electiveBatchCode: 'ROUND-ORIGINAL',
     returnPath: '/xsxkapp/sys/xsxkapp/demo/grablessons.do',
     lastMessage: '等待重新登录'
   });
@@ -414,4 +416,23 @@ test('preserves the pre-course entry recovery stage', () => {
 
   assert.equal(snapshot.authRecovery.stage, 'ENTERING_COURSE');
   assert.equal(snapshot.authRecovery.pending, true);
+});
+
+test('preserves the selecting-round recovery stage without accepting arbitrary batch data', () => {
+  const snapshot = sanitizeSnapshot(runtimeSnapshot({
+    running: false,
+    phase: 'PAUSED_AUTH',
+    authRecovery: {
+      pending: true,
+      stage: 'SELECTING_ROUND',
+      attempts: 1,
+      startedAt: 1700000000000,
+      electiveBatchCode: '  ROUND-ORIGINAL  ',
+      returnPath: '/xsxkapp/sys/xsxkapp/demo/grablessons.do',
+      lastMessage: '正在选择原监控轮次'
+    }
+  }));
+
+  assert.equal(snapshot.authRecovery.stage, 'SELECTING_ROUND');
+  assert.equal(snapshot.authRecovery.electiveBatchCode, 'ROUND-ORIGINAL');
 });

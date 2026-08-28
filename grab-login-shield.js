@@ -97,19 +97,54 @@
     const documentRef = options.documentRef || global.document;
     const setTimeoutFn = options.setTimeoutFn || global.setTimeout?.bind(global);
     const clearTimeoutFn = options.clearTimeoutFn || global.clearTimeout?.bind(global);
+    const MutationObserverCtor = options.MutationObserverCtor || global.MutationObserver;
+    const isAuthenticatedPage = typeof options.isAuthenticatedPage === 'function'
+      ? options.isAuthenticatedPage
+      : null;
     let leaseTimer = null;
+    let pageObserver = null;
 
     function cancelLease() {
       if (leaseTimer !== null && clearTimeoutFn) clearTimeoutFn(leaseTimer);
       leaseTimer = null;
     }
 
+    function cancelPageObserver() {
+      pageObserver?.disconnect?.();
+      pageObserver = null;
+    }
+
+    function authenticatedPageReached() {
+      if (!isAuthenticatedPage) return false;
+      try {
+        return Boolean(isAuthenticatedPage());
+      } catch {
+        return false;
+      }
+    }
+
     function clear() {
       cancelLease();
+      cancelPageObserver();
       const root = documentRef?.documentElement;
       if (!root) return;
       root.removeAttribute(ROOT_ATTRIBUTE);
       root.style?.removeProperty(MESSAGE_PROPERTY);
+    }
+
+    function watchAuthenticatedPage() {
+      cancelPageObserver();
+      if (!isAuthenticatedPage) return;
+      if (authenticatedPageReached()) {
+        clear();
+        return;
+      }
+      const root = documentRef?.documentElement;
+      if (!root || typeof MutationObserverCtor !== 'function') return;
+      pageObserver = new MutationObserverCtor(() => {
+        if (authenticatedPageReached()) clear();
+      });
+      pageObserver.observe(root, { childList: true, subtree: true, attributes: true });
     }
 
     function ensureStyle() {
@@ -132,9 +167,13 @@
       if (!ensureStyle()) return false;
 
       cancelLease();
+      cancelPageObserver();
       root.setAttribute(ROOT_ATTRIBUTE, status);
       if (message) root.style?.setProperty(MESSAGE_PROPERTY, JSON.stringify(String(message)));
       else root.style?.removeProperty(MESSAGE_PROPERTY);
+
+      watchAuthenticatedPage();
+      if (!root.hasAttribute(ROOT_ATTRIBUTE)) return true;
 
       const requestedLease = Number(showOptions.leaseMs);
       const leaseMs = Number.isFinite(requestedLease) && requestedLease > 0
