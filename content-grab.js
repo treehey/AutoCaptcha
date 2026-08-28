@@ -938,7 +938,8 @@ function isGrabPreCoursePage() {
 }
 
 function isGrabRoundSelectionPage() {
-  if (!/\/index\.do$/i.test(String(globalThis.location?.pathname || ''))) return false;
+  const pathname = String(globalThis.location?.pathname || '');
+  if (pathname !== '/' && !/\/index\.do$/i.test(pathname)) return false;
   const table = document.querySelector?.('.electiveBatch-list-table');
   const body = document.querySelector?.('.electiveBatch-body');
   return Boolean(table && body && isVisibleGrabElement(table));

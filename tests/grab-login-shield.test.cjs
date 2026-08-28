@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { createLoginShield, STATUS } = require('../grab-login-shield.js');
+const { createRoundSelectionPageDetector } = require('./helpers/grab-page-context.cjs');
 
 function createClock() {
   let nextId = 1;
@@ -71,9 +72,9 @@ function createDocument() {
   };
 }
 
-function createFixture() {
+function createFixture(options = {}) {
   const clock = createClock();
-  const documentRef = createDocument();
+  const documentRef = options.documentRef || createDocument();
   const observers = [];
   let authenticatedPage = false;
   const shield = createLoginShield({
@@ -91,7 +92,7 @@ function createFixture() {
         if (!this.disconnected) this.callback([{ type: 'childList' }]);
       }
     },
-    isAuthenticatedPage: () => authenticatedPage
+    isAuthenticatedPage: options.isAuthenticatedPage || (() => authenticatedPage)
   });
   return {
     clock,
@@ -99,6 +100,9 @@ function createFixture() {
     shield,
     reachAuthenticatedPage() {
       authenticatedPage = true;
+      observers.forEach(observer => observer.notify());
+    },
+    notifyPageMutation() {
       observers.forEach(observer => observer.notify());
     }
   };
@@ -164,4 +168,35 @@ test('a same-document transition to the round selector releases a submitted-logi
 
   assert.equal(documentRef.documentElement.hasAttribute('data-nju-ai-status'), false);
   assert.deepEqual(clock.pending(), []);
+});
+
+test('the real root URL round selector detector releases a submitted-login shield', () => {
+  const documentRef = createDocument();
+  const roundElements = {
+    '.electiveBatch-list-table': {},
+    '.electiveBatch-body': {}
+  };
+  documentRef.querySelector = selector => roundElements[selector] || null;
+  const detector = createRoundSelectionPageDetector(documentRef, '/');
+  const { clock, shield, notifyPageMutation } = createFixture({
+    documentRef,
+    isAuthenticatedPage: detector
+  });
+
+  shield.show(STATUS.SUCCESS, '登录请求已提交，正在等待页面响应…');
+  notifyPageMutation();
+
+  assert.equal(documentRef.documentElement.hasAttribute('data-nju-ai-status'), false);
+  assert.deepEqual(clock.pending(), []);
+});
+
+test('the round selector detector rejects the same DOM on an unrelated course path', () => {
+  const documentRef = createDocument();
+  documentRef.querySelector = () => ({});
+  const detector = createRoundSelectionPageDetector(
+    documentRef,
+    '/xsxkapp/sys/xsxkapp/*default/grablessons.do'
+  );
+
+  assert.equal(detector(), false);
 });
