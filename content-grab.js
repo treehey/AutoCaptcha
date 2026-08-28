@@ -2586,7 +2586,20 @@ function updateGrabTargetButton(button, target) {
   else delete button.dataset.configuredTargetId;
   const hasNativeDom = Boolean(button.ownerDocument?.createElement);
   if (hasNativeDom && exactConfiguredTarget) {
-    button.innerHTML = `<span class="nju-grab-state-label" data-nju-grab-state-label>${presentation.label.replace(/ · 移除$/, '')}</span><span class="nju-grab-remove-label" data-nju-grab-remove-label>移除监控</span>`;
+    let stateLabel = button.querySelector('[data-nju-grab-state-label]');
+    let removeLabel = button.querySelector('[data-nju-grab-remove-label]');
+    if (!stateLabel || !removeLabel) {
+      stateLabel = button.ownerDocument.createElement('span');
+      stateLabel.className = 'nju-grab-state-label';
+      stateLabel.setAttribute('data-nju-grab-state-label', '');
+      removeLabel = button.ownerDocument.createElement('span');
+      removeLabel.className = 'nju-grab-remove-label';
+      removeLabel.setAttribute('data-nju-grab-remove-label', '');
+      button.replaceChildren(stateLabel, removeLabel);
+    }
+    const stateText = presentation.label.replace(/ · 移除$/, '');
+    if (stateLabel.textContent !== stateText) stateLabel.textContent = stateText;
+    if (removeLabel.textContent !== '移除监控') removeLabel.textContent = '移除监控';
   } else if (!hasNativeDom || !exactConfiguredTarget) {
     button.textContent = presentation.label;
   }

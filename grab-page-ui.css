@@ -38,6 +38,7 @@
 .nju-grab-add-target.is-exact-removable .nju-grab-remove-label {
   grid-column: 2;
   grid-row: 1;
+  pointer-events: none;
   transition: opacity 0.12s ease, visibility 0.12s ease;
 }
 
