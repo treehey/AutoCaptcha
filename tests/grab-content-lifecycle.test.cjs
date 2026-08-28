@@ -373,6 +373,43 @@ test('a recovered task selects its original elective batch from a multi-round lo
   harness.context.stopGrab();
 });
 
+test('a recovered task selects its original elective batch from the root URL round selector', async () => {
+  const pageState = { loginPage: true, roundSelectionPage: true, preCoursePage: false, coursePage: false };
+  const runtime = pausedAuthRuntime({
+    authRecovery: {
+      pending: true,
+      stage: 'WAITING_LOGIN',
+      attempts: 1,
+      startedAt: Date.now(),
+      electiveBatchCode: 'ROUND-OLD',
+      returnPath: '/xsxkapp/sys/xsxkapp/*default/grablessons.do',
+      lastMessage: '等待选课登录'
+    }
+  });
+  const harness = createLifecycleHarness({ promise: Promise.resolve(runtime) }, {
+    pathname: '/',
+    pageState,
+    roundChoices: [
+      { code: 'ROUND-OLD', name: '原监控轮次' },
+      { code: 'ROUND-NEW', name: '其他轮次' }
+    ]
+  });
+
+  await waitFor(() => harness.roundConfirmClicks === 1);
+  assert.equal(harness.roundChoices[0].clickCount, 1);
+  assert.equal(harness.roundChoices[1].clickCount, 0);
+  assert.equal(
+    harness.saved.findLast(message => message.snapshot?.authRecovery)?.snapshot.authRecovery.stage,
+    'SELECTING_ROUND'
+  );
+  assert.equal(harness.navigations.length, 0, 'must not navigate away when round selector is already visible on root URL');
+
+  harness.notifyDomMutation();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.roundConfirmClicks, 1, 'the root URL round dialog must not be submitted twice');
+  harness.context.stopGrab();
+});
+
 test('a recovered task never guesses another elective batch when its original round is absent', async () => {
   const runtime = pausedAuthRuntime({
     authRecovery: {
