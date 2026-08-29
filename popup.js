@@ -81,6 +81,7 @@ const els = {
   intervalGrid: document.getElementById('intervalGrid'),
   grabBtn: document.getElementById('grabBtn'),
   importFavoriteCoursesBtn: document.getElementById('importFavoriteCoursesBtn'),
+  clearAllTargetsBtn: document.getElementById('clearAllTargetsBtn'),
   openGrabPageBtn: document.getElementById('openGrabPageBtn'),
   clickCaptchaCaptureBadge: document.getElementById('clickCaptchaCaptureBadge'),
   clickCaptchaCaptureTitle: document.getElementById('clickCaptchaCaptureTitle'),
@@ -1529,6 +1530,65 @@ function initGrabEvents() {
     }
   });
 
+  let clearTargetsConfirmTimer = null;
+  els.clearAllTargetsBtn?.addEventListener('click', async () => {
+    if (grabRunning) {
+      showToast('请先停止抢课任务，再清空监控目标');
+      return;
+    }
+    const config = getConfiguredTaskConfig();
+    const hasKeyword = Boolean(els.courseNames.value.trim());
+    if (config.targets.length === 0 && !hasKeyword) {
+      showToast('当前没有配置任何监控目标');
+      return;
+    }
+    if (!els.clearAllTargetsBtn.dataset.confirming) {
+      els.clearAllTargetsBtn.dataset.confirming = 'true';
+      els.clearAllTargetsBtn.textContent = '确认清空？';
+      els.clearAllTargetsBtn.classList.add('is-confirming');
+      clearTargetsConfirmTimer = setTimeout(() => {
+        delete els.clearAllTargetsBtn.dataset.confirming;
+        els.clearAllTargetsBtn.textContent = '清空全部';
+        els.clearAllTargetsBtn.classList.remove('is-confirming');
+      }, 3000);
+      return;
+    }
+    if (clearTargetsConfirmTimer) {
+      clearTimeout(clearTargetsConfirmTimer);
+      clearTargetsConfirmTimer = null;
+    }
+    delete els.clearAllTargetsBtn.dataset.confirming;
+    els.clearAllTargetsBtn.disabled = true;
+    els.clearAllTargetsBtn.textContent = '正在清空…';
+
+    const nextConfig = grabTaskModel.clearTaskConfig
+      ? grabTaskModel.clearTaskConfig(grabTaskConfig)
+      : grabTaskModel.normalizeTaskConfig({
+          ...grabTaskConfig,
+          groups: [],
+          targets: [],
+          updatedAt: Date.now()
+        });
+    try {
+      await chrome.storage.local.set({
+        [GRAB_TASK_CONFIG_KEY]: nextConfig,
+        nju_grab_courses: '',
+        nju_grab_interval: String(nextConfig.intervalMs)
+      });
+      grabTaskConfig = nextConfig;
+      els.courseNames.value = '';
+      renderCourseTags();
+      updateCourseCount({ persist: false });
+      showToast('已清空全部监控目标');
+    } catch (error) {
+      showToast(`清空失败：${error?.message || '保存失败，请重试'}`);
+    } finally {
+      els.clearAllTargetsBtn.disabled = false;
+      els.clearAllTargetsBtn.textContent = '清空全部';
+      els.clearAllTargetsBtn.classList.remove('is-confirming');
+    }
+  });
+
   els.grabBtn.addEventListener('click', async () => {
     if (!grabConnected && !grabRunning) {
       window.open(GRAB_ENTRY_URL, '_blank');
@@ -1747,6 +1807,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local' || !changes[GRAB_TASK_CONFIG_KEY]) return;
   grabTaskConfig = grabTaskModel.normalizeTaskConfig(changes[GRAB_TASK_CONFIG_KEY].newValue);
   els.courseNames.value = grabTaskModel.keywordTextFromTargets(grabTaskConfig.targets);
+  renderCourseTags();
   updateCourseCount({ persist: false });
 });
 
