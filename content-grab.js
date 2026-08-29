@@ -1072,6 +1072,8 @@ let grabMoreMenu = null;
 let grabMoreButton = null;
 let grabPageEnhancementsEnabled = true;
 let grabPanelHideSelected = false;
+let grabPanelTranslateX = 0;
+let grabPanelTranslateY = 0;
 let automaticCourseScopeNavigationTimer = null;
 let automaticCourseScopeNavigationInFlight = false;
 let automaticCourseScopeNavigationInFlightToken = null;
@@ -1137,6 +1139,65 @@ function removeGrabPanelPreference(key) {
   try {
     globalThis.localStorage?.removeItem(key);
   } catch {}
+}
+
+function clampGrabPanelToBounds(panel = grabPageStatusPanel) {
+  if (!panel || !panel.isConnected) return;
+  const viewportHeight = Number(globalThis.innerHeight) || 800;
+  const viewportWidth = Number(globalThis.innerWidth) || 1200;
+
+  const maxSafeHeight = Math.max(120, viewportHeight - 36);
+  const heightProp = typeof panel.style?.getPropertyValue === 'function'
+    ? panel.style.getPropertyValue('--nju-panel-height')
+    : (panel.style ? panel.style['--nju-panel-height'] : null);
+  if (heightProp && typeof heightProp === 'string' && heightProp.endsWith('px')) {
+    const parsedH = parseFloat(heightProp);
+    if (!Number.isNaN(parsedH) && parsedH > maxSafeHeight) {
+      if (typeof panel.style?.setProperty === 'function') {
+        panel.style.setProperty('--nju-panel-height', `${maxSafeHeight}px`);
+      } else if (panel.style) {
+        panel.style['--nju-panel-height'] = `${maxSafeHeight}px`;
+      }
+      writeGrabPanelPreference(GRAB_PANEL_HEIGHT_KEY, maxSafeHeight);
+    }
+  }
+
+  if (typeof panel.getBoundingClientRect !== 'function') return;
+  const rect = panel.getBoundingClientRect();
+  if (!rect || typeof rect.top !== 'number') return;
+  let adjusted = false;
+
+  if (rect.top < 12) {
+    grabPanelTranslateY += Math.ceil(12 - rect.top);
+    adjusted = true;
+  }
+
+  const rectAfterTop = panel.getBoundingClientRect();
+  if (rectAfterTop && typeof rectAfterTop.bottom === 'number' && rectAfterTop.bottom > viewportHeight - 12 && rectAfterTop.top > 12) {
+    const maxShiftUp = rectAfterTop.top - 12;
+    const shiftUp = Math.min(rectAfterTop.bottom - (viewportHeight - 12), maxShiftUp);
+    if (shiftUp > 0) {
+      grabPanelTranslateY -= Math.ceil(shiftUp);
+      adjusted = true;
+    }
+  }
+
+  const currentRect = panel.getBoundingClientRect();
+  if (currentRect && typeof currentRect.left === 'number') {
+    if (currentRect.left < 12) {
+      grabPanelTranslateX += Math.ceil(12 - currentRect.left);
+      adjusted = true;
+    } else if (typeof currentRect.right === 'number' && currentRect.right > viewportWidth - 12) {
+      grabPanelTranslateX -= Math.ceil(currentRect.right - (viewportWidth - 12));
+      adjusted = true;
+    }
+  }
+
+  if (adjusted && panel.style) {
+    panel.style.transform = (grabPanelTranslateX === 0 && grabPanelTranslateY === 0)
+      ? ''
+      : `translate3d(${grabPanelTranslateX}px, ${grabPanelTranslateY}px, 0)`;
+  }
 }
 
 function isGrabSelectedTarget(target, state) {
@@ -1424,6 +1485,7 @@ function setGrabPanelMiniMode(panel, mini, { dismissTutorial = false } = {}) {
   toggle?.setAttribute('aria-label', enabled ? '展开课程监控面板' : '折叠或展开课程监控状态');
   if (body) body.hidden = enabled || !grabPageStatusExpanded;
   if (dismissTutorial) dismissGrabPanelMiniTutorial(panel);
+  if (!enabled) clampGrabPanelToBounds(panel);
 }
 
 function revealGrabPageStatusPanel() {
@@ -1433,6 +1495,7 @@ function revealGrabPageStatusPanel() {
   const restore = document.getElementById?.('nju-grab-restore-btn');
   restore?.remove?.();
   setGrabPageStatusExpanded(true);
+  clampGrabPanelToBounds(panel);
   return panel;
 }
 
@@ -1460,6 +1523,7 @@ function hideGrabPageStatusPanel() {
       restoreBtn.remove();
       panel.style.display = '';
       setGrabPageStatusExpanded(true);
+      clampGrabPanelToBounds(panel);
     });
     document.body?.appendChild(restoreBtn);
   }
@@ -1469,6 +1533,8 @@ function hideGrabPageStatusPanel() {
 function resetGrabPanelPositionAndSize(panel) {
   removeGrabPanelPreference(GRAB_PANEL_WIDTH_KEY);
   removeGrabPanelPreference(GRAB_PANEL_HEIGHT_KEY);
+  grabPanelTranslateX = 0;
+  grabPanelTranslateY = 0;
   panel?.style?.removeProperty?.('--nju-panel-width');
   panel?.style?.removeProperty?.('--nju-panel-height');
   panel?.style?.removeProperty?.('transform');
@@ -1546,13 +1612,15 @@ function removeGrabPageStatusPanel() {
   grabMoreMenu?.remove?.();
   grabMoreMenu = null;
   grabMoreButton = null;
+  grabPanelTranslateX = 0;
+  grabPanelTranslateY = 0;
   document.getElementById?.('nju-grab-restore-btn')?.remove?.();
   if (grabPanelDismissHandlers) {
     document.removeEventListener('pointerdown', grabPanelDismissHandlers.pointerdown);
     document.removeEventListener('keydown', grabPanelDismissHandlers.keydown);
     if (typeof globalThis.window?.removeEventListener === 'function') {
       globalThis.window.removeEventListener('scroll', grabPanelDismissHandlers.dismissFloatingMenus, true);
-      globalThis.window.removeEventListener('resize', grabPanelDismissHandlers.dismissFloatingMenus);
+      globalThis.window.removeEventListener('resize', grabPanelDismissHandlers.onWindowResize || grabPanelDismissHandlers.dismissFloatingMenus);
     }
     grabPanelDismissHandlers = null;
   }
@@ -1616,6 +1684,7 @@ function ensureGrabPageStatusPanel() {
            <button type="button" role="menuitem" data-nju-grab-copy-diagnostic>复制脱敏诊断摘要</button>
            <button type="button" role="menuitem" data-nju-grab-reset-panel>重置面板位置和尺寸</button>
            <button type="button" role="menuitem" data-nju-grab-hide-panel>隐藏面板</button>
+           <button type="button" role="menuitem" data-nju-grab-clear-targets class="is-destructive">清空全部监控目标</button>
            <button type="button" role="menuitem" data-nju-grab-disable-enhancements class="is-destructive">关闭选课页增强</button>
          </div>
       </div>
@@ -1645,11 +1714,23 @@ function ensureGrabPageStatusPanel() {
   let wasDragged = false;
   let isDragging = false;
   let startX = 0, startY = 0;
-  let currentTranslateX = 0, currentTranslateY = 0;
   const savedWidth = readGrabPanelPreference(GRAB_PANEL_WIDTH_KEY);
   const savedHeight = readGrabPanelPreference(GRAB_PANEL_HEIGHT_KEY);
+  const viewportHeightOnLoad = Number(globalThis.innerHeight) || 800;
+  const maxSafeHeightOnLoad = Math.max(120, viewportHeightOnLoad - 36);
   if (savedWidth) panel.style.setProperty('--nju-panel-width', savedWidth + 'px');
-  if (savedHeight) panel.style.setProperty('--nju-panel-height', savedHeight + 'px');
+  if (savedHeight) {
+    const numHeight = Number(savedHeight);
+    if (!Number.isNaN(numHeight)) {
+      const clampedHeight = Math.max(120, Math.min(maxSafeHeightOnLoad, numHeight));
+      panel.style.setProperty('--nju-panel-height', clampedHeight + 'px');
+      if (clampedHeight !== numHeight) {
+        writeGrabPanelPreference(GRAB_PANEL_HEIGHT_KEY, clampedHeight);
+      }
+    } else if (savedHeight === '90vh') {
+      panel.style.setProperty('--nju-panel-height', '90vh');
+    }
+  }
 
   panel.addEventListener('pointerdown', e => {
     const resizeHandle = e.target.closest('[data-resize]');
@@ -1666,14 +1747,24 @@ function ensureGrabPageStatusPanel() {
     if (type === 'top') {
       const now = Date.now();
       if (panel.dataset.lastTopClick && (now - Number(panel.dataset.lastTopClick)) < 300) {
-        // Double click: toggle between auto and 90vh
-        const isExpanded = panel.style.getPropertyValue('--nju-panel-height') === '90vh';
-        panel.style.setProperty('--nju-panel-height', isExpanded ? 'auto' : '90vh');
+        const isExpanded = typeof panel.style?.getPropertyValue === 'function'
+          ? panel.style.getPropertyValue('--nju-panel-height') === '90vh'
+          : panel.style?.['--nju-panel-height'] === '90vh';
+        if (isExpanded) {
+          panel.style.setProperty('--nju-panel-height', 'auto');
+        } else {
+          panel.style.setProperty('--nju-panel-height', '90vh');
+          if (grabPanelTranslateY < 0) {
+            grabPanelTranslateY = 0;
+            panel.style.transform = (grabPanelTranslateX === 0) ? '' : `translate3d(${grabPanelTranslateX}px, 0px, 0)`;
+          }
+        }
         removeGrabPanelPreference(GRAB_PANEL_HEIGHT_KEY);
         if (!isExpanded && !grabPageStatusExpanded) {
           setGrabPageStatusExpanded(true);
         }
         panel.dataset.lastTopClick = '0';
+        clampGrabPanelToBounds(panel);
         return;
       }
       panel.dataset.lastTopClick = String(now);
@@ -1693,6 +1784,12 @@ function ensureGrabPageStatusPanel() {
     const startX = e.clientX;
     const startY = e.clientY;
     
+    const initialRect = panel.getBoundingClientRect();
+    const currentViewportHeight = Number(globalThis.innerHeight) || 800;
+    const currentViewportWidth = Number(globalThis.innerWidth) || 1200;
+    const maxTopResizeHeight = Math.max(120, Math.min(currentViewportHeight - 24, Math.floor(initialRect.bottom - 12)));
+    const maxLeftResizeWidth = Math.max(340, Math.min(800, Math.floor(initialRect.right - 12)));
+
     panel.setPointerCapture(e.pointerId);
     
     const onPointerMove = moveEvent => {
@@ -1700,14 +1797,13 @@ function ensureGrabPageStatusPanel() {
       const dy = moveEvent.clientY - startY;
       
       if (type === 'left') {
-        const newWidth = Math.max(340, Math.min(800, initialWidth - dx));
+        const newWidth = Math.max(340, Math.min(maxLeftResizeWidth, initialWidth - dx));
         panel.style.setProperty('--nju-panel-width', newWidth + 'px');
         writeGrabPanelPreference(GRAB_PANEL_WIDTH_KEY, newWidth);
       }
       
       if (type === 'top') {
-        // Dragging top UP (negative dy) INCREASES the height since bottom is fixed
-        const newHeight = Math.max(120, initialHeight - dy);
+        const newHeight = Math.max(120, Math.min(maxTopResizeHeight, initialHeight - dy));
         panel.style.setProperty('--nju-panel-height', newHeight + 'px');
         writeGrabPanelPreference(GRAB_PANEL_HEIGHT_KEY, newHeight);
         
@@ -1722,6 +1818,7 @@ function ensureGrabPageStatusPanel() {
       panel.removeEventListener('pointermove', onPointerMove);
       panel.removeEventListener('pointerup', onPointerUp);
       panel.removeEventListener('pointercancel', onPointerUp);
+      clampGrabPanelToBounds(panel);
     };
     
     panel.addEventListener('pointermove', onPointerMove);
@@ -1736,13 +1833,13 @@ function ensureGrabPageStatusPanel() {
 
     isDragging = false;
     wasDragged = false;
-    startX = e.clientX - currentTranslateX;
-    startY = e.clientY - currentTranslateY;
+    startX = e.clientX - grabPanelTranslateX;
+    startY = e.clientY - grabPanelTranslateY;
     head.setPointerCapture(e.pointerId);
 
     const rect = panel.getBoundingClientRect();
-    const baseLeft = rect.left - currentTranslateX;
-    const baseTop = rect.top - currentTranslateY;
+    const baseLeft = rect.left - grabPanelTranslateX;
+    const baseTop = rect.top - grabPanelTranslateY;
     const baseWidth = rect.width;
 
     // Bounds constraints
@@ -1758,14 +1855,14 @@ function ensureGrabPageStatusPanel() {
       const dx = Math.max(minDx, Math.min(rawDx, maxDx));
       const dy = Math.max(minDy, Math.min(rawDy, maxDy));
 
-      if (!isDragging && (Math.abs(dx - currentTranslateX) > 3 || Math.abs(dy - currentTranslateY) > 3)) {
+      if (!isDragging && (Math.abs(dx - grabPanelTranslateX) > 3 || Math.abs(dy - grabPanelTranslateY) > 3)) {
         isDragging = true;
         wasDragged = true;
         panel.style.transition = 'none';
       }
       if (isDragging) {
-        currentTranslateX = dx;
-        currentTranslateY = dy;
+        grabPanelTranslateX = dx;
+        grabPanelTranslateY = dy;
         panel.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
       }
     };
@@ -1779,6 +1876,7 @@ function ensureGrabPageStatusPanel() {
       if (isDragging) {
         panel.style.transition = '';
         setTimeout(() => wasDragged = false, 150);
+        clampGrabPanelToBounds(panel);
       }
     };
 
@@ -1915,11 +2013,15 @@ function ensureGrabPageStatusPanel() {
   });
   panel.querySelector('[data-nju-grab-reset-panel]')?.addEventListener('click', () => {
     closeMoreMenu();
-    currentTranslateX = 0;
-    currentTranslateY = 0;
+    grabPanelTranslateX = 0;
+    grabPanelTranslateY = 0;
     wasDragged = false;
     isDragging = false;
     resetGrabPanelPositionAndSize(panel);
+  });
+  panel.querySelector('[data-nju-grab-clear-targets]')?.addEventListener('click', () => {
+    closeMoreMenu();
+    requestClearAllGrabTargets();
   });
   panel.querySelector('[data-nju-grab-disable-enhancements]')?.addEventListener('click', () => {
     closeMoreMenu();
@@ -1950,13 +2052,17 @@ function ensureGrabPageStatusPanel() {
     closeMoreMenu();
     closeGrabTargetMenuPortal();
   };
+  const onWindowResize = () => {
+    dismissFloatingMenus();
+    clampGrabPanelToBounds(panel);
+  };
   if (typeof globalThis.window?.addEventListener === 'function') {
     globalThis.window.addEventListener('scroll', dismissFloatingMenus, true);
-    globalThis.window.addEventListener('resize', dismissFloatingMenus);
+    globalThis.window.addEventListener('resize', onWindowResize);
   }
   document.addEventListener('pointerdown', dismissPointerdown);
   document.addEventListener('keydown', dismissKeydown);
-  grabPanelDismissHandlers = { pointerdown: dismissPointerdown, keydown: dismissKeydown, dismissFloatingMenus };
+  grabPanelDismissHandlers = { pointerdown: dismissPointerdown, keydown: dismissKeydown, dismissFloatingMenus, onWindowResize };
   panel.querySelector('[data-nju-grab-status-close]')?.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
@@ -1965,6 +2071,8 @@ function ensureGrabPageStatusPanel() {
   panel.querySelector('[data-nju-grab-remove-cancel]')?.addEventListener('click', () => {
     if (pendingGrabRemoval?.processing) return;
     pendingGrabRemoval = null;
+    pendingClearAllTargets = false;
+    clearAllGrabTargetsStopped = false;
     const confirm = panel.querySelector('[data-nju-grab-remove-confirm]');
     if (confirm) confirm.hidden = true;
   });
@@ -2004,6 +2112,7 @@ function ensureGrabPageStatusPanel() {
     });
   }
 
+  clampGrabPanelToBounds(panel);
   return panel;
 }
 
@@ -2300,6 +2409,7 @@ function renderGrabPageStatus(state) {
     grabPageStatusTimer = setTimeout(() => updateGrabPageStatus(latestGrabPageState), 1000);
   }
   scheduleCourseTargetDecoration();
+  clampGrabPanelToBounds(panel);
 }
 
 function clearNativeCourseTabHighlights() {
@@ -2318,11 +2428,81 @@ function updateGrabPageStatus(state) {
   }
 }
 
+let pendingClearAllTargets = false;
+let clearAllGrabTargetsStopped = false;
+
+function requestClearAllGrabTargets() {
+  if (configuredGrabTargets.length === 0) {
+    showGrabPanelFeedback('当前没有配置任何监控目标', 'warning');
+    return;
+  }
+  const state = typeof getStateSnapshot === 'function' ? getStateSnapshot() : latestGrabPageState;
+  const isRunning = Boolean(state?.running || state?.authRecovery?.pending);
+  const panel = ensureGrabPageStatusPanel();
+  revealGrabPageStatusPanel();
+  const confirm = panel?.querySelector?.('[data-nju-grab-remove-confirm]');
+  if (confirm) {
+    pendingClearAllTargets = true;
+    clearAllGrabTargetsStopped = false;
+    pendingGrabRemoval = null;
+    confirm.hidden = false;
+    const count = configuredGrabTargets.length;
+    confirm.querySelector('[data-nju-grab-remove-message]').textContent = isRunning
+      ? `清空全部 ${count} 门课程目标需要先停止全部监控。`
+      : `确定要清空全部 ${count} 门监控目标吗？`;
+    const stopButton = confirm.querySelector('[data-nju-grab-remove-stop]');
+    if (stopButton) {
+      stopButton.disabled = false;
+      stopButton.textContent = isRunning ? '停止并清空全部' : '确定清空';
+    }
+    setGrabPageStatusExpanded(true);
+    confirm.querySelector('[data-nju-grab-remove-cancel]')?.focus?.();
+  }
+}
+
+async function clearAllConfiguredGrabTargets() {
+  try {
+    const stored = await chrome.storage.local.get([
+      GRAB_TASK_CONFIG_KEY,
+      'nju_grab_courses',
+      'nju_grab_interval'
+    ]);
+    const current = grabTaskModel.normalizeTaskConfig(stored[GRAB_TASK_CONFIG_KEY], {
+      legacyCourseText: stored.nju_grab_courses,
+      intervalMs: stored.nju_grab_interval
+    });
+    const next = grabTaskModel.clearTaskConfig
+      ? grabTaskModel.clearTaskConfig(current)
+      : grabTaskModel.normalizeTaskConfig({
+          ...current,
+          groups: [],
+          targets: [],
+          updatedAt: Date.now()
+        });
+    await chrome.storage.local.set({
+      [GRAB_TASK_CONFIG_KEY]: next,
+      nju_grab_courses: ''
+    });
+    configuredGrabTargetIds = new Set();
+    configuredGrabTargets = [];
+    configuredGrabGroups = [];
+    updateGrabPageStatus(latestGrabPageState || {});
+    decorateCourseTargets();
+    scheduleCourseTargetDecoration();
+    sendGrabRuntimeMessage({ action: 'grabTaskUpdated' });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: error?.message || '清空失败' };
+  }
+}
+
 function requestGrabTargetRemoval(target, button = null) {
   if (!target) return { ok: false, code: 'INVALID_TARGET' };
   const state = typeof getStateSnapshot === 'function' ? getStateSnapshot() : latestGrabPageState;
   if (state?.running || state?.authRecovery?.pending) {
     if (pendingGrabRemoval?.processing) return;
+    pendingClearAllTargets = false;
+    clearAllGrabTargetsStopped = false;
     pendingGrabRemoval = { target, button, stopped: false, processing: false };
     const panel = ensureGrabPageStatusPanel();
     revealGrabPageStatusPanel();
@@ -2358,7 +2538,11 @@ function updateGrabRemovalConfirmation({ hidden = false, message, error = false,
   const stopButton = confirm.querySelector('[data-nju-grab-remove-stop]');
   if (stopButton) {
     stopButton.disabled = Boolean(processing);
-    stopButton.textContent = retry ? '重试移除' : '停止并移除';
+    if (pendingClearAllTargets) {
+      stopButton.textContent = processing ? '正在清空…' : retry ? '重试清空' : '停止并清空全部';
+    } else {
+      stopButton.textContent = processing ? '正在移除…' : retry ? '重试移除' : '停止并移除';
+    }
   }
   const cancelButton = confirm.querySelector('[data-nju-grab-remove-cancel]');
   if (cancelButton) cancelButton.disabled = Boolean(processing);
@@ -2366,6 +2550,28 @@ function updateGrabRemovalConfirmation({ hidden = false, message, error = false,
 }
 
 async function confirmGrabTargetRemoval() {
+  if (pendingClearAllTargets) {
+    updateGrabRemovalConfirmation({ processing: true });
+    const state = typeof getStateSnapshot === 'function' ? getStateSnapshot() : latestGrabPageState;
+    if (!clearAllGrabTargetsStopped && (state?.running || state?.authRecovery?.pending)) {
+      stopGrab();
+    }
+    clearAllGrabTargetsStopped = true;
+    const result = await clearAllConfiguredGrabTargets();
+    if (result?.ok) {
+      pendingClearAllTargets = false;
+      clearAllGrabTargetsStopped = false;
+      updateGrabRemovalConfirmation({ hidden: true });
+      showGrabPanelFeedback('已清空全部监控目标', 'success');
+    } else {
+      updateGrabRemovalConfirmation({
+        message: `清空失败：${result?.message || '保存失败'}`,
+        error: true,
+        retry: true
+      });
+    }
+    return;
+  }
   const pending = pendingGrabRemoval;
   if (!pending || pending.processing) return;
   pending.processing = true;
