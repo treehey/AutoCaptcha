@@ -8,6 +8,7 @@ const {
   normalizeTarget,
   normalizeTargets,
   normalizeTaskConfig,
+  clearTaskConfig,
   replaceKeywordTargets,
   addTargetToTaskConfig,
   removeTargetFromTaskConfig,
@@ -240,4 +241,44 @@ test('persists an exact target query scope without changing teaching-class ident
 
   assert.equal(target.queryScope, 'SC');
   assert.equal(target.targetId, 'class:BATCH-1:GG01:class-2');
+});
+
+test('clearTaskConfig clears all groups and targets completely', () => {
+  const config = normalizeTaskConfig({
+    groups: [{
+      groupId: 'sport',
+      label: '体育组',
+      requiredCount: 2,
+      targets: [
+        { name: '羽毛球 A 班', priority: 100 },
+        { name: '羽毛球 B 班', priority: 80 }
+      ]
+    }]
+  });
+  assert.equal(config.targets.length, 2);
+
+  const cleared = clearTaskConfig(config);
+  assert.equal(cleared.groups.length, 0);
+  assert.equal(cleared.targets.length, 0);
+
+  // Subsequent addTargetToTaskConfig should only have the newly added target, not reviving old targets
+  const added = addTargetToTaskConfig(cleared, { name: '新课程' });
+  assert.equal(added.targets.length, 1);
+  assert.equal(added.targets[0].name, '新课程');
+});
+
+test('normalizeTaskConfig preserves legacy targets when an older config has no usable groups', () => {
+  const migrated = normalizeTaskConfig({ groups: [], targets: ['课程A', '课程B'] });
+
+  assert.deepEqual(migrated.targets.map(target => target.name), ['课程A', '课程B']);
+  assert.equal(migrated.groups.length, 2);
+});
+
+test('removeTargetFromTaskConfig on the last remaining target results in 0 targets without resurrection', () => {
+  let config = normalizeTaskConfig({ targets: ['唯一课程'] });
+  assert.equal(config.targets.length, 1);
+
+  config = removeTargetFromTaskConfig(config, config.targets[0].targetId);
+  assert.equal(config.groups.length, 0);
+  assert.equal(config.targets.length, 0);
 });

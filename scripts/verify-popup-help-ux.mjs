@@ -97,6 +97,17 @@ assert.match(source, /updateTargetPriority/, 'The popup must persist target prio
 assert.match(source, /updateTargetFilters/, 'The popup must persist keyword teacher, time, and campus filters.');
 assert.match(source, /moveTargetToGroup/, 'The popup must support grouping fallback targets.');
 assert.match(source, /TARGET_KIND\.TEACHING_CLASS/, 'The popup must distinguish exact teaching-class targets.');
+const clearTargetsHandler = source.slice(
+  source.indexOf("els.clearAllTargetsBtn?.addEventListener"),
+  source.indexOf("els.grabBtn.addEventListener", source.indexOf("els.clearAllTargetsBtn?.addEventListener"))
+);
+assert.match(clearTargetsHandler, /addEventListener\('click', async/, 'Clearing all targets must await durable storage.');
+assert.match(clearTargetsHandler, /await chrome\.storage\.local\.set/, 'Clearing all targets must persist before updating the popup.');
+assert.ok(
+  clearTargetsHandler.indexOf('await chrome.storage.local.set') < clearTargetsHandler.indexOf('grabTaskConfig = nextConfig'),
+  'The popup must not show an empty target list before storage confirms the clear.'
+);
+assert.match(clearTargetsHandler, /清空失败：/, 'A failed clear must remain visible to the user instead of reporting success.');
 const targetLabelSource = source.slice(
   source.indexOf('function createTargetLabelElement'),
   source.indexOf('function renderExactTargets')

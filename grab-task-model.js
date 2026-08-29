@@ -236,18 +236,18 @@
     const source = value && typeof value === 'object' ? value : {};
     let groups = normalizeGroups(source.groups || source.configuredGroups);
     if (groups.length === 0) {
-      let values = Array.isArray(source.targets)
+      const values = Array.isArray(source.targets)
         ? source.targets
         : Array.isArray(source.configuredTargets)
           ? source.configuredTargets
           : Array.isArray(source.courseNames)
             ? source.courseNames
-            : [];
-      if (values.length === 0 && options.legacyCourseText) {
-        values = String(options.legacyCourseText).split(/\r?\n/);
-      }
+            : options.legacyCourseText
+              ? String(options.legacyCourseText).split(/\r?\n/)
+              : [];
       groups = singletonGroupsFromTargets(values);
     }
+
     const targets = groups.flatMap(group => group.targets);
     return {
       schemaVersion: SCHEMA_VERSION,
@@ -257,6 +257,21 @@
       targets,
       updatedAt: Math.max(0, Number(source.updatedAt) || 0)
     };
+  }
+
+  function normalizeTaskConfigWithGroups(config, groups) {
+    const normalizedGroups = normalizeGroups(groups);
+    return normalizeTaskConfig({
+      ...config,
+      groups: normalizedGroups,
+      targets: normalizedGroups.flatMap(group => group.targets),
+      updatedAt: Date.now()
+    });
+  }
+
+  function clearTaskConfig(configValue) {
+    const config = normalizeTaskConfig(configValue);
+    return normalizeTaskConfigWithGroups(config, []);
   }
 
   function replaceKeywordTargets(configValue, values) {
@@ -284,22 +299,17 @@
     const keywordGroups = singletonGroupsFromTargets(
       requestedKeywords.filter(target => !preservedNames.has(nameKey(target)))
     );
-    return normalizeTaskConfig({
-      ...config,
-      groups: [...preservedGroups, ...keywordGroups],
-      updatedAt: Date.now()
-    });
+    return normalizeTaskConfigWithGroups(config, [...preservedGroups, ...keywordGroups]);
   }
 
   function addTargetToTaskConfig(configValue, value) {
     const config = normalizeTaskConfig(configValue);
     const target = normalizeTarget(value);
     if (!target || config.targets.some(item => item.targetId === target.targetId)) return config;
-    return normalizeTaskConfig({
-      ...config,
-      groups: [...config.groups, ...singletonGroupsFromTargets([target])],
-      updatedAt: Date.now()
-    });
+    return normalizeTaskConfigWithGroups(config, [
+      ...config.groups,
+      ...singletonGroupsFromTargets([target])
+    ]);
   }
 
   function removeTargetFromTaskConfig(configValue, targetId) {
@@ -313,7 +323,7 @@
         targets
       };
     }).filter(Boolean);
-    return normalizeTaskConfig({ ...config, groups, updatedAt: Date.now() });
+    return normalizeTaskConfigWithGroups(config, groups);
   }
 
   function updateCourseGroup(configValue, groupId, changes = {}) {
@@ -323,7 +333,7 @@
       label: Object.hasOwn(changes, 'label') ? boundedText(changes.label, 200) : group.label,
       requiredCount: Object.hasOwn(changes, 'requiredCount') ? changes.requiredCount : group.requiredCount
     } : group);
-    return normalizeTaskConfig({ ...config, groups, updatedAt: Date.now() });
+    return normalizeTaskConfigWithGroups(config, groups);
   }
 
   function updateTargetPriority(configValue, targetId, priority) {
@@ -334,7 +344,7 @@
         ? { ...target, priority: normalizePriority(priority) }
         : target)
     }));
-    return normalizeTaskConfig({ ...config, groups, updatedAt: Date.now() });
+    return normalizeTaskConfigWithGroups(config, groups);
   }
 
   function updateTargetFilters(configValue, targetId, filters) {
@@ -345,7 +355,7 @@
         ? { ...target, filters: normalizeTargetFilters(filters) }
         : target)
     }));
-    return normalizeTaskConfig({ ...config, groups, updatedAt: Date.now() });
+    return normalizeTaskConfigWithGroups(config, groups);
   }
 
   function moveTargetToGroup(configValue, targetId, destinationGroupId) {
@@ -365,7 +375,7 @@
       };
     }).filter(Boolean);
     if (!destinationExists) groups.push(...singletonGroupsFromTargets([target]));
-    return normalizeTaskConfig({ ...config, groups, updatedAt: Date.now() });
+    return normalizeTaskConfigWithGroups(config, groups);
   }
 
   function targetMatchesCourse(targetValue, course = {}) {
@@ -417,6 +427,7 @@
     keywordTargetsFromText,
     keywordTextFromTargets,
     normalizeTaskConfig,
+    clearTaskConfig,
     replaceKeywordTargets,
     addTargetToTaskConfig,
     removeTargetFromTaskConfig,

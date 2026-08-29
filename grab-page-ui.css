@@ -290,6 +290,9 @@
   z-index: 2147483000;
   width: min(var(--nju-panel-width, 380px), calc(100vw - 32px));
   height: var(--nju-panel-height, auto);
+  max-height: calc(100vh - 36px);
+  min-height: 48px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -591,7 +594,8 @@
 .nju-grab-target-menu button:hover,
 .nju-grab-target-menu button:focus-visible { background: rgba(0, 122, 255, 0.1); outline: none; }
 .nju-grab-more-menu button:disabled { opacity: 0.45; cursor: not-allowed; }
-.nju-grab-more-menu .is-destructive { margin-top: 3px; border-top: 1px solid rgba(60, 60, 67, 0.12); color: var(--nju-panel-red, #ff3b30); }
+.nju-grab-more-menu .is-destructive { color: var(--nju-panel-red, #ff3b30); }
+.nju-grab-more-menu button:not(.is-destructive) + .is-destructive { margin-top: 3px; border-top: 1px solid rgba(60, 60, 67, 0.12); }
 
 .nju-grab-control-btn {
   -webkit-appearance: none;

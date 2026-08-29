@@ -414,6 +414,7 @@ function createCapturedFavoriteDom() {
 
 function loadAdapter(document, options = {}) {
   const storageWrites = [];
+  const storageSetAttempts = [];
   const storageState = {
     nju_grab_courses: '旧关键词',
     nju_grab_interval: '5000',
@@ -439,6 +440,7 @@ function loadAdapter(document, options = {}) {
             .filter(key => Object.hasOwn(storageState, key))
             .map(key => [key, structuredClone(storageState[key])])),
           set: async value => {
+            storageSetAttempts.push(structuredClone(value));
             if (options.storageSetError) throw new Error(options.storageSetError);
             Object.assign(storageState, structuredClone(value));
             storageWrites.push(structuredClone(value));
@@ -472,6 +474,7 @@ function loadAdapter(document, options = {}) {
     filename: 'content-grab-adapter.js'
   });
   context.storageWritesForTest = storageWrites;
+  context.storageSetAttemptsForTest = storageSetAttempts;
   context.storageStateForTest = storageState;
   return context;
 }
@@ -683,6 +686,18 @@ test('reduced-motion styling disables the redesigned panel animations', () => {
 test('keeps capsule height independent from the ordinary collapsed panel rule', () => {
   assert.match(pageUiSource, /\.nju-grab-status-panel:not\(\.is-expanded\):not\(\.is-mini\)\s*\{/);
   assert.match(pageUiSource, /\.nju-grab-status-panel\.is-mini\s*\{[^}]*height:\s*48px\s*!important/s);
+});
+
+test('clamps an oversized or off-screen radar panel back into the viewport', () => {
+  const adapter = loadAdapter(new FakeDocument([]));
+  const panel = new FakeElement('aside');
+  panel.style['--nju-panel-height'] = '1000px';
+  panel.getBoundingClientRect = () => ({ top: -50, bottom: 350, left: -20, right: 380, width: 400, height: 400 });
+
+  adapter.clampGrabPanelToBounds(panel);
+
+  assert.equal(panel.style['--nju-panel-height'], '764px');
+  assert.equal(panel.style.transform, 'translate3d(32px, 62px, 0)');
 });
 
 test('treats auth recovery as active so the primary action stops recovery instead of starting a task', () => {
@@ -1061,6 +1076,71 @@ test('confirm stops before saving, and save failure keeps a stable retry confirm
   assert.equal(confirm.hidden, false);
 });
 
+test('clear all stops a pending login recovery before removing every configured target', async () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const events = [];
+  const config = grabTaskModel.normalizeTaskConfig({ targets: ['课程甲', '课程乙'] });
+  const adapter = loadAdapter(document, {
+    grabState: { running: false, authRecovery: { pending: true } },
+    storageState: {
+      [grabTaskModel.STORAGE_KEY]: config,
+      nju_grab_courses: '课程甲\n课程乙',
+      nju_grab_interval: '5000'
+    },
+    stopGrab: () => { events.push('stop'); return { running: false, phase: 'STOPPED' }; }
+  });
+  vm.runInContext(`
+    configuredGrabTargets = ${JSON.stringify(config.targets)};
+    configuredGrabGroups = ${JSON.stringify(config.groups)};
+    configuredGrabTargetIds = new Set(configuredGrabTargets.map(target => target.targetId));
+    latestGrabPageState = { running: false, authRecovery: { pending: true } };
+  `, adapter);
+
+  adapter.requestClearAllGrabTargets();
+  const confirm = document.querySelector('[data-nju-grab-remove-confirm]');
+  assert.equal(confirm.querySelector('[data-nju-grab-remove-stop]').textContent, '停止并清空全部');
+  confirm.querySelector('[data-nju-grab-remove-stop]').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.deepEqual(events, ['stop']);
+  assert.equal(confirm.hidden, true);
+  assert.equal(adapter.storageStateForTest[grabTaskModel.STORAGE_KEY].targets.length, 0);
+  assert.equal(adapter.storageStateForTest.nju_grab_courses, '');
+});
+
+test('clear-all persistence failure remains retryable and does not stop twice', async () => {
+  const root = new FakeElement('main', { classes: ['result-container'] });
+  const document = new FakeDocument([root]);
+  const events = [];
+  const config = grabTaskModel.normalizeTaskConfig({ targets: ['失败课程'] });
+  const adapter = loadAdapter(document, {
+    grabState: { running: true },
+    storageSetError: 'quota',
+    storageState: { [grabTaskModel.STORAGE_KEY]: config, nju_grab_courses: '失败课程' },
+    stopGrab: () => { events.push('stop'); return { running: false, phase: 'STOPPED' }; }
+  });
+  vm.runInContext(`configuredGrabTargets = ${JSON.stringify(config.targets)}; latestGrabPageState = { running: true };`, adapter);
+
+  adapter.requestClearAllGrabTargets();
+  const confirm = document.querySelector('[data-nju-grab-remove-confirm]');
+  const clearButton = confirm.querySelector('[data-nju-grab-remove-stop]');
+  clearButton.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.deepEqual(events, ['stop']);
+  assert.equal(confirm.hidden, false);
+  assert.match(confirm.querySelector('[data-nju-grab-remove-message]').textContent, /清空失败/);
+  assert.equal(clearButton.textContent, '重试清空');
+  assert.equal(adapter.storageSetAttemptsForTest.length, 1);
+
+  clearButton.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(events, ['stop'], 'retry must not stop a second time');
+  assert.equal(adapter.storageSetAttemptsForTest.length, 2, 'retry must perform another persistence attempt');
+  assert.equal(clearButton.textContent, '重试清空');
+});
+
 test('maps runtime phases to truthful page button and radar states', () => {
   const document = new FakeDocument([]);
   const adapter = loadAdapter(document);
@@ -1434,6 +1514,8 @@ test('course radar styles are scoped, responsive and motion-safe', () => {
   assert.match(pageUiSource, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(pageUiSource, /\.nju-grab-more-menu\s*\{[\s\S]*z-index:\s*2147483647/);
   assert.match(pageUiSource, /\.nju-grab-more-menu\[hidden\][\s\S]*display:\s*none\s*!important/);
+  assert.match(pageUiSource, /\.nju-grab-more-menu button:disabled\s*\{[\s\S]*cursor:\s*not-allowed/);
+  assert.match(pageUiSource, /button:not\(\.is-destructive\) \+ \.is-destructive[\s\S]*border-top:/);
   assert.match(pageUiSource, /\.nju-grab-target-menu \.nju-grab-target-remove[\s\S]*var\(--nju-panel-red,\s*#ff3b30\)/);
   assert.match(pageUiSource, /\.nju-grab-target-menu\s*\{[\s\S]*font-family:/);
   assert.match(pageUiSource, /\.nju-grab-now-btn[\s\S]*font-family:\s*inherit[\s\S]*font-size:\s*11px[\s\S]*font-weight:\s*600/);
