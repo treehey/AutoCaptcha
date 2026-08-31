@@ -30,6 +30,7 @@
 - 提交信息使用简短祈使句，可采用 Conventional Commits，例如 `fix: stop retries after manual auth`。
 - 每个提交应能独立解释，避免同时包含功能、数据迁移和全仓格式化。
 - 不重写他人的公开历史，不移动已发布标签。
+- 版本号从 `v6.4.0` 起遵循 SemVer；Bug 修复升 `PATCH`，向后兼容的新功能升 `MINOR`，不兼容变化升 `MAJOR`。完整判定见[发布流程](docs/releasing.md#版本号规则)。
 
 ## Pull Request 要求
 

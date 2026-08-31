@@ -43,6 +43,11 @@ test('uses the versioned source interval before the legacy options fallback', ()
   assert.equal(normalizeTaskConfig({ targets: ['课程甲'] }, { intervalMs: 2000 }).intervalMs, 2000);
 });
 
+test('preserves a custom sub-second interval and clamps unsafe values to 100ms', () => {
+  assert.equal(normalizeTaskConfig({ targets: ['课程甲'], intervalMs: 250 }).intervalMs, 250);
+  assert.equal(normalizeTaskConfig({ targets: ['课程甲'], intervalMs: 50 }).intervalMs, 100);
+});
+
 test('normalizes course groups, required counts and bounded target priorities', () => {
   const config = normalizeTaskConfig({
     groups: [{

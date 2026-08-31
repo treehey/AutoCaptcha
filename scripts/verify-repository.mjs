@@ -133,6 +133,34 @@ assert.match(manifest.version, /^\d+\.\d+\.\d+$/, 'Manifest version must use x.y
 assert.equal(packageJson.version, manifest.version, 'package.json and manifest.json versions must match');
 assert.equal(packageJson.private, true, 'package.json must remain private');
 
+const escapedVersion = manifest.version.replaceAll('.', '\\.');
+const changelog = await readFile(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
+assert.match(
+  changelog,
+  new RegExp(`^## v${escapedVersion} - \\d{4}-\\d{2}-\\d{2}$`, 'm'),
+  `CHANGELOG.md must contain a dated v${manifest.version} heading`
+);
+const releaseNotesRelativePath = `docs/RELEASE_NOTES_v${manifest.version}.md`;
+const releaseNotesPath = path.join(repoRoot, releaseNotesRelativePath);
+assert.equal(await exists(releaseNotesPath), true, `Missing current release notes: ${releaseNotesRelativePath}`);
+const releaseNotes = await readFile(releaseNotesPath, 'utf8');
+assert.match(
+  releaseNotes,
+  new RegExp(`^# NJU Login Pro v${escapedVersion}$`, 'm'),
+  `Current release notes must be titled NJU Login Pro v${manifest.version}`
+);
+assert.match(
+  releaseNotes,
+  new RegExp(`NJU-Login-Pro-v${escapedVersion}\\.zip`),
+  `Current release notes must name NJU-Login-Pro-v${manifest.version}.zip`
+);
+const docsIndex = await readFile(path.join(repoRoot, 'docs', 'README.md'), 'utf8');
+assert.match(
+  docsIndex,
+  new RegExp(`\\[v${escapedVersion}\\]\\(RELEASE_NOTES_v${escapedVersion}\\.md\\)`),
+  `docs/README.md must link the v${manifest.version} release notes`
+);
+
 const declaredPermissions = new Set(manifest.permissions || []);
 for (const permission of ['cookies', 'history', 'offscreen', 'tabs', 'unlimitedStorage']) {
   assert(!declaredPermissions.has(permission), `Unexpected sensitive permission: ${permission}`);

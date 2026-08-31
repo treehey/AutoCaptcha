@@ -604,7 +604,7 @@ test('stops before a third search when the second public response expires auth',
   assert.deepEqual(detail.results.map(result => result.outcome), ['', 'AUTH_EXPIRED']);
 });
 
-test('classifies an explicit request-too-fast message as rate limited and stops', async () => {
+test('promotes a public-course request-too-fast response to auth recovery and stops', async () => {
   const { context, document } = installBridge();
   captureQueryTemplate(context, 'programCourse.do', 'GG02');
   const resultPromise = nextCourseDetail(document);
@@ -625,7 +625,8 @@ test('classifies an explicit request-too-fast message as rate limited and stops'
   const detail = await resultPromise;
   assert.equal(FakeXmlHttpRequest.instances.length, 3);
   assert.equal(detail.results.length, 2);
-  assert.equal(detail.results[1].outcome, 'RATE_LIMITED');
+  assert.equal(detail.results[1].outcome, 'AUTH_EXPIRED');
+  assert.match(detail.results[1].message, /重新登录/);
 });
 
 test('does not pace favorite-course queries that do not exhibit the public-course burst limit', async () => {
@@ -673,7 +674,7 @@ test('does not pace favorite-course queries that do not exhibit the public-cours
   assert.deepEqual(detail.results.map(result => result.searchId), searches.map(search => search.searchId));
 });
 
-test('stops the remaining course-query batch after the first rate-limit response', async () => {
+test('stops the remaining public-course batch and requests auth recovery after rate limiting', async () => {
   const { context, document } = installBridge();
   const nativeXhr = new context.XMLHttpRequest();
   const nativeSetting = {
@@ -709,6 +710,25 @@ test('stops the remaining course-query batch after the first rate-limit response
 
   assert.equal(FakeXmlHttpRequest.instances.length, 2, 'no later target should be queried after rate limiting');
   assert.equal(detail.results.length, 1);
+  assert.equal(detail.results[0].outcome, 'AUTH_EXPIRED');
+});
+
+test('keeps a favorite-course rate limit as a normal retryable backoff', async () => {
+  const { context, document } = installBridge();
+  captureQueryTemplate(context, 'queryfavorite.do', 'SC');
+  const resultPromise = nextCourseDetail(document);
+  document.dispatchEvent(new CustomEvent('nju-autograb-course-query-v1', {
+    detail: JSON.stringify({
+      action: 'query',
+      requestId: 'request-favorite-rate-limit',
+      searches: [{ searchId: 'favorite-limit', query: 'FAVORITE-LIMIT', queryScope: 'SC' }]
+    })
+  }));
+
+  await new Promise(resolveEvent => setImmediate(resolveEvent));
+  FakeXmlHttpRequest.instances.at(-1).complete({ status: 429, responseText: '' });
+  const detail = await resultPromise;
+
   assert.equal(detail.results[0].outcome, 'RATE_LIMITED');
 });
 

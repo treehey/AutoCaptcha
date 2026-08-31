@@ -229,7 +229,7 @@
   }
 
   function normalizeInterval(value) {
-    return Math.min(600000, Math.max(1000, Number(value) || 5000));
+    return Math.min(600000, Math.max(100, Number(value) || 5000));
   }
 
   function normalizeTaskConfig(value, options = {}) {
