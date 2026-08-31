@@ -75,10 +75,23 @@ const LEGACY_COURSE_SCOPE_ALIASES = Object.freeze({
   TCT4: 'GG02',
   TCT5: 'TY'
 });
+const PUBLIC_COURSE_SCOPES = new Set(['GG', 'GG01', 'GG02']);
+const DOM_MATERIALIZATION_WAIT_MS = 800;
+const DOM_MATERIALIZATION_POLL_MS = 80;
 
 function normalizeCourseScope(scope) {
   const normalized = String(scope || '').trim().toUpperCase();
   return LEGACY_COURSE_SCOPE_ALIASES[normalized] || normalized;
+}
+
+function normalizeDomAttemptResultForScope(scope, result) {
+  if (!PUBLIC_COURSE_SCOPES.has(normalizeCourseScope(scope))
+      || result?.outcome !== grabModule.OUTCOME.RATE_LIMITED) return result;
+  return {
+    ...result,
+    outcome: grabModule.OUTCOME.AUTH_EXPIRED,
+    message: '公共课选课触发访问限制，需要重新登录后恢复监控'
+  };
 }
 
 function courseScopeLabel(scope) {
@@ -501,60 +514,96 @@ async function scanDomCandidates(targets, context, options = {}) {
   await refreshCourseList(signal);
   throwIfGrabAborted(signal);
 
-  const rows = [...document.querySelectorAll(COURSE_ROW_SELECTOR)];
-  if (rows.length === 0) {
+  const normalizedTargets = grabTaskModel.normalizeTargets(targets);
+  const expectedTeachingClassIds = new Set(
+    (Array.isArray(options.expectedTeachingClassIds) ? options.expectedTeachingClassIds : [])
+      .map(value => String(value || '').trim())
+      .filter(Boolean)
+  );
+  const requestedWaitMs = Number(options.materializationWaitMs);
+  const waitMs = expectedTeachingClassIds.size > 0
+    ? Math.min(1500, Math.max(0, Number.isFinite(requestedWaitMs)
+      ? requestedWaitMs
+      : DOM_MATERIALIZATION_WAIT_MS))
+    : 0;
+  const deadline = Date.now() + waitMs;
+
+  const collectCandidates = async () => {
+    const rows = [...document.querySelectorAll(COURSE_ROW_SELECTOR)];
+    const result = new Map(normalizedTargets.map(target => [target.targetId, []]));
+    const seenRows = new Map(normalizedTargets.map(target => [target.targetId, new Set()]));
+    const seenCandidateIds = new Map(normalizedTargets.map(target => [target.targetId, new Set()]));
+    const expandedRows = new Map();
+    let order = 0;
+
+    const addCandidate = (target, row) => {
+      if (!row || seenRows.get(target.targetId).has(row)) return;
+      const candidate = buildDomCandidate(row, target, order++);
+      if (!grabTaskModel.targetAcceptsCandidate(target, candidate)) return;
+      if (seenCandidateIds.get(target.targetId).has(candidate.id)) return;
+      seenRows.get(target.targetId).add(row);
+      seenCandidateIds.get(target.targetId).add(candidate.id);
+      result.get(target.targetId).push(candidate);
+    };
+
+    for (const row of rows) {
+      const text = elementText(row);
+      const courseNumber = extractCourseNumber(row, findChoiceButton(row));
+      const matchedTargets = normalizedTargets.filter(target => grabTaskModel.targetMatchesCourse(target, {
+        text,
+        courseNumber
+      }));
+      if (matchedTargets.length === 0) continue;
+
+      const expandBtn = row.querySelector('.cv-zy-expand');
+      if (expandBtn) {
+        let promise = expandedRows.get(row);
+        if (!promise) {
+          promise = ensureProfessionalRows(row, signal);
+          expandedRows.set(row, promise);
+        }
+        const classRows = await promise;
+        for (const target of matchedTargets) {
+          if (classRows.length === 0) addCandidate(target, row);
+          else classRows.forEach(classRow => addCandidate(target, classRow));
+        }
+        continue;
+      }
+
+      if (findChoiceButton(row) || /已满/.test(text) || rowShowsSelected(row)) {
+        matchedTargets.forEach(target => addCandidate(target, row));
+      }
+    }
+    return { result, rowCount: rows.length };
+  };
+
+  const hasExpectedActionableCandidate = result => {
+    const candidates = [...result.values()].flat();
+    return [...expectedTeachingClassIds].some(teachingClassId => candidates.some(candidate => {
+      if (String(candidate.teachingClassId || '') !== teachingClassId) return false;
+      return candidate.status === grabModule.CANDIDATE_STATUS.SELECTED
+        || (candidate.status === grabModule.CANDIDATE_STATUS.AVAILABLE
+          && candidate.choiceBtn
+          && isVisibleGrabElement(candidate.choiceBtn));
+    }));
+  };
+
+  let collected = await collectCandidates();
+  while (expectedTeachingClassIds.size > 0
+    && !hasExpectedActionableCandidate(collected.result)
+    && Date.now() < deadline) {
+    const remainingMs = deadline - Date.now();
+    await sleep(Math.min(DOM_MATERIALIZATION_POLL_MS, remainingMs), signal);
+    throwIfGrabAborted(signal);
+    collected = await collectCandidates();
+  }
+
+  if (collected.rowCount === 0) {
     const error = new Error('未发现课程列表，请确认已打开选课页面');
     error.outcome = grabModule.OUTCOME.STRUCTURE_ERROR;
     throw error;
   }
-
-  const normalizedTargets = grabTaskModel.normalizeTargets(targets);
-  const result = new Map(normalizedTargets.map(target => [target.targetId, []]));
-  const seenRows = new Map(normalizedTargets.map(target => [target.targetId, new Set()]));
-  const seenCandidateIds = new Map(normalizedTargets.map(target => [target.targetId, new Set()]));
-  const expandedRows = new Map();
-  let order = 0;
-
-  const addCandidate = (target, row) => {
-    if (!row || seenRows.get(target.targetId).has(row)) return;
-    const candidate = buildDomCandidate(row, target, order++);
-    if (!grabTaskModel.targetAcceptsCandidate(target, candidate)) return;
-    if (seenCandidateIds.get(target.targetId).has(candidate.id)) return;
-    seenRows.get(target.targetId).add(row);
-    seenCandidateIds.get(target.targetId).add(candidate.id);
-    result.get(target.targetId).push(candidate);
-  };
-
-  for (const row of rows) {
-    const text = elementText(row);
-    const courseNumber = extractCourseNumber(row, findChoiceButton(row));
-    const matchedTargets = normalizedTargets.filter(target => grabTaskModel.targetMatchesCourse(target, {
-      text,
-      courseNumber
-    }));
-    if (matchedTargets.length === 0) continue;
-
-    const expandBtn = row.querySelector('.cv-zy-expand');
-    if (expandBtn) {
-      let promise = expandedRows.get(row);
-      if (!promise) {
-        promise = ensureProfessionalRows(row, signal);
-        expandedRows.set(row, promise);
-      }
-      const classRows = await promise;
-      for (const target of matchedTargets) {
-        if (classRows.length === 0) addCandidate(target, row);
-        else classRows.forEach(classRow => addCandidate(target, classRow));
-      }
-      continue;
-    }
-
-    if (findChoiceButton(row) || /已满/.test(text) || rowShowsSelected(row)) {
-      matchedTargets.forEach(target => addCandidate(target, row));
-    }
-  }
-
-  return result;
+  return collected.result;
 }
 
 function visibleConfirmButtons() {
@@ -1050,7 +1099,8 @@ const GRAB_PANEL_WIDTH_KEY = 'njuGrabPanelWidth';
 const GRAB_PANEL_MINI_TUTORIAL_KEY = 'njuGrabPanelMiniTutorialSeen';
 const GRAB_PANEL_HEIGHT_KEY = 'njuGrabPanelHeight';
 const GRAB_PANEL_HIDE_SELECTED_KEY = 'njuGrabPanelHideSelected';
-const GRAB_INTERVAL_PRESETS = Object.freeze([3000, 5000, 10000, 30000]);
+const PUBLIC_FAVORITE_TIP_SEEN_KEY = 'nju_grab_public_favorite_tip_seen';
+const GRAB_INTERVAL_PRESETS = Object.freeze([1000, 2000, 3000, 5000, 10000, 30000]);
 let configuredGrabTargetIds = new Set();
 let configuredGrabTargets = [];
 let configuredGrabGroups = [];
@@ -1222,7 +1272,7 @@ function readGrabPanelBooleanPreference(key) {
   return readGrabPanelPreference(key) === 'true';
 }
 
-function showGrabPanelFeedback(message, tone = 'info') {
+function showGrabPanelFeedback(message, tone = 'info', durationMs = 3500) {
   const panel = grabPageStatusPanel;
   const node = panel?.querySelector?.('[data-nju-grab-panel-feedback]');
   if (!node) return;
@@ -1234,7 +1284,7 @@ function showGrabPanelFeedback(message, tone = 'info') {
   grabPanelFeedbackTimer = setTimeout(() => {
     if (node) node.hidden = true;
     grabPanelFeedbackTimer = null;
-  }, 3500);
+  }, Math.max(1000, Number(durationMs) || 3500));
 }
 
 function buildGrabDiagnosticSummary(state) {
@@ -1293,6 +1343,11 @@ async function persistGrabInterval(intervalMs) {
   return interval;
 }
 
+function formatGrabInterval(intervalMs) {
+  const interval = Math.max(100, Number(intervalMs) || 5000);
+  return `${Number((interval / 1000).toFixed(3))} 秒`;
+}
+
 function grabPageScanLabel(scan) {
   if (!scan || typeof scan !== 'object') return '查询通道待命';
   const compared = Math.max(0, Number(scan.shadowComparison?.comparisonCount) || 0);
@@ -1302,16 +1357,22 @@ function grabPageScanLabel(scan) {
     : '';
   if (scan.mode === 'NETWORK') {
     const deferred = Math.max(0, Number(scan.deferredTargetCount) || 0);
+    const publicDeferred = Math.min(deferred, Math.max(0, Number(scan.publicDeferredTargetCount) || 0));
     const scoped = Math.max(0, Number(scan.scopeDeferredTargetCount) || 0);
     const waits = [
-      deferred > 0 ? `${deferred} 个下轮分批` : '',
+      deferred - publicDeferred > 0 ? `${deferred - publicDeferred} 个下轮分批` : '',
+      publicDeferred > 0 ? `${publicDeferred} 个公共课限速轮转` : '',
       scoped > 0 ? `${scoped} 个等待分类` : ''
     ].filter(Boolean).join(' · ');
     return waits ? `接口查询 · ${waits}${comparison}` : `接口查询${comparison}`;
   }
   if (scan.mode === 'NETWORK_WITH_DOM') {
     const materialized = Math.max(0, Number(scan.materializedQueryCount) || 0);
-    return materialized > 0 ? `接口命中 · 精确物化${comparison}` : `接口查询 · 页面校验${comparison}`;
+    const publicDeferred = Math.max(0, Number(scan.publicDeferredTargetCount) || 0);
+    const publicWait = publicDeferred > 0 ? ` · ${publicDeferred} 个公共课限速轮转` : '';
+    return materialized > 0
+      ? `接口命中 · 当前页确认${publicWait}${comparison}`
+      : `接口查询 · 当前页校验${publicWait}${comparison}`;
   }
   if (scan.mode === 'DOM_FALLBACK') return 'DOM 兼容扫描';
   if (scan.mode === 'ERROR') return '查询暂时异常';
@@ -1696,10 +1757,10 @@ function ensureGrabPageStatusPanel() {
          <span><strong data-nju-grab-status-channel>待命</strong><small>底层状态</small></span>
        </div>
        <div class="nju-grab-command-bar" data-nju-grab-command-bar>
-         <button type="button" class="nju-grab-now-btn" data-nju-grab-run-now>立即检查</button>
-         <label>间隔 <select data-nju-grab-interval aria-label="监控间隔">
-           <option value="3000">3 秒</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="30000">30 秒</option>
-         </select></label>
+          <button type="button" class="nju-grab-now-btn" data-nju-grab-run-now>立即检查</button>
+          <label>间隔 <select data-nju-grab-interval aria-label="监控间隔">
+            <option value="1000">1 秒</option><option value="2000">2 秒</option><option value="3000">3 秒</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="30000">30 秒</option>
+          </select></label>
          <span data-nju-grab-next-check>下次检查：—</span>
        </div>
        <div class="nju-grab-panel-feedback" data-nju-grab-panel-feedback hidden role="status"></div>
@@ -1951,7 +2012,7 @@ function ensureGrabPageStatusPanel() {
     }
     try {
       const interval = await persistGrabInterval(select.value);
-      showGrabPanelFeedback(`已保存监控间隔：${interval / 1000} 秒`, 'success');
+      showGrabPanelFeedback(`已保存监控间隔：${formatGrabInterval(interval)}`, 'success');
     } catch (error) {
       showGrabPanelFeedback(`保存间隔失败：${error?.message || '未知错误'}`, 'danger');
     }
@@ -2201,7 +2262,7 @@ function renderGrabPageStatus(state) {
       }
       if (currentOption) {
         currentOption.value = String(interval);
-        currentOption.textContent = `当前值 ${Math.max(1, Math.round(interval / 1000))} 秒`;
+        currentOption.textContent = `当前值 ${formatGrabInterval(interval)}`;
       }
     } else {
       intervalSelect.querySelector('[data-nju-grab-current-interval]')?.remove?.();
@@ -2465,7 +2526,8 @@ async function clearAllConfiguredGrabTargets() {
     const stored = await chrome.storage.local.get([
       GRAB_TASK_CONFIG_KEY,
       'nju_grab_courses',
-      'nju_grab_interval'
+      'nju_grab_interval',
+      PUBLIC_FAVORITE_TIP_SEEN_KEY
     ]);
     const current = grabTaskModel.normalizeTaskConfig(stored[GRAB_TASK_CONFIG_KEY], {
       legacyCourseText: stored.nju_grab_courses,
@@ -2880,13 +2942,27 @@ async function addConfiguredGrabTarget(target, button) {
       intervalMs: stored.nju_grab_interval
     });
     const next = grabTaskModel.addTargetToTaskConfig(current, target);
-    await chrome.storage.local.set({ [GRAB_TASK_CONFIG_KEY]: next });
+    const queryScope = normalizeCourseScope(target.queryScope || target.teachingClassType);
+    const recommendFavorite = PUBLIC_COURSE_SCOPES.has(queryScope)
+      && queryScope !== 'SC'
+      && !stored[PUBLIC_FAVORITE_TIP_SEEN_KEY];
+    await chrome.storage.local.set({
+      [GRAB_TASK_CONFIG_KEY]: next,
+      ...(recommendFavorite ? { [PUBLIC_FAVORITE_TIP_SEEN_KEY]: true } : {})
+    });
     configuredGrabTargetIds = new Set(next.targets.map(item => item.targetId));
     configuredGrabTargets = next.targets.slice();
     configuredGrabGroups = next.groups.slice();
     updateGrabTargetButton(button, target);
     updateGrabPageStatus(latestGrabPageState || {});
     sendGrabRuntimeMessage({ action: 'grabTargetAdded', target });
+    if (recommendFavorite) {
+      showGrabPanelFeedback(
+        '公共课建议先收藏，再从收藏页导入监控，查询更稳定；当前目标已正常加入',
+        'info',
+        10000
+      );
+    }
   } catch (error) {
     button.disabled = false;
     button.classList.remove('is-loading');
@@ -3355,7 +3431,10 @@ const grabEngine = grabModule
   ? grabModule.createGrabEngine({
       adapter: {
         scan: grabCourseProvider?.scan || scanDomCandidates,
-        attempt: attemptDomCandidate
+        attempt: async (candidate, context) => normalizeDomAttemptResultForScope(
+          currentCourseQueryScope(document.body),
+          await attemptDomCandidate(candidate, context)
+        )
       },
       onState: handleGrabEngineState,
       onLog: (entry, state) => sendGrabRuntimeMessage({

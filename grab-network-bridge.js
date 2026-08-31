@@ -75,6 +75,15 @@
     return PUBLIC_COURSE_QUERY_SCOPES.has(normalizeCourseScope(queryScope));
   }
 
+  function normalizeReplayResult(result, isPublicCourseQuery) {
+    if (!isPublicCourseQuery || result?.outcome !== 'RATE_LIMITED') return result;
+    return {
+      ...result,
+      outcome: 'AUTH_EXPIRED',
+      message: '公共课查询触发访问限制，需要重新登录后恢复监控'
+    };
+  }
+
   function waitForPublicCourseBatchCooldown(control, cooldownStartedAt) {
     if (control.cancelled) return false;
     const elapsed = Math.max(0, Date.now() - cooldownStartedAt);
@@ -575,11 +584,12 @@
           }
 
           index += 1;
-          const result = await replayCourseSearch(prepared.template, prepared.search, control);
+          const replayResult = await replayCourseSearch(prepared.template, prepared.search, control);
           if (isPublicCourseQuery) {
             publicQueriesInBurst += 1;
             if (publicQueriesInBurst === PUBLIC_COURSE_BURST_SIZE) cooldownStartedAt = Date.now();
           }
+          const result = normalizeReplayResult(replayResult, isPublicCourseQuery);
           if (result) {
             results.push({ ...result, queryScope: prepared.queryScope });
             if (STOP_BATCH_OUTCOMES.has(result.outcome)) break;

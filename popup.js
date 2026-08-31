@@ -10,6 +10,8 @@ const GRAB_PAGE_ENHANCEMENTS_ENABLED_KEY = 'nju_grab_page_enhancements_enabled';
 const grabTaskModel = globalThis.NjuGrabTaskModel;
 const grabAuthPresentation = globalThis.NjuGrabAuthPresentation;
 const GRAB_TASK_CONFIG_KEY = grabTaskModel.STORAGE_KEY;
+const GRAB_INTERVAL_MIN_MS = 100;
+const GRAB_INTERVAL_MAX_MS = 600000;
 
 const storageKeys = [
   'nju_user',
@@ -77,6 +79,8 @@ const els = {
   courseGroups: document.getElementById('courseGroups'),
   courseGroupList: document.getElementById('courseGroupList'),
   grabInterval: document.getElementById('grabInterval'),
+  grabIntervalCustom: document.getElementById('grabIntervalCustom'),
+  applyGrabIntervalCustom: document.getElementById('applyGrabIntervalCustom'),
   intervalLabel: document.getElementById('intervalLabel'),
   intervalGrid: document.getElementById('intervalGrid'),
   grabBtn: document.getElementById('grabBtn'),
@@ -752,10 +756,38 @@ function renderClickCaptchaSolverState() {
   renderCurrentCaptchaPanel();
 }
 
+function normalizeGrabInterval(value, fallback = 5000) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(GRAB_INTERVAL_MAX_MS, Math.max(GRAB_INTERVAL_MIN_MS, parsed));
+}
+
+function formatGrabInterval(value) {
+  const interval = normalizeGrabInterval(value);
+  return `${Number((interval / 1000).toFixed(3))} 秒`;
+}
+
 function setIntervalValue(value, { persist = true } = {}) {
-  const normalized = String(value || '3000');
+  const interval = normalizeGrabInterval(value);
+  const normalized = String(interval);
+  let customOption = els.grabInterval.querySelector('option[data-custom-interval]');
+  const presetOption = Array.from(els.grabInterval.options).find(option => {
+    return !option.dataset.customInterval && option.value === normalized;
+  });
+  if (!presetOption) {
+    if (!customOption) {
+      customOption = document.createElement('option');
+      customOption.dataset.customInterval = 'true';
+      els.grabInterval.appendChild(customOption);
+    }
+    customOption.value = normalized;
+    customOption.textContent = formatGrabInterval(interval);
+  } else {
+    customOption?.remove();
+  }
   els.grabInterval.value = normalized;
-  els.intervalLabel.textContent = `${Number(normalized) / 1000}s`;
+  els.grabIntervalCustom.value = String(Number((interval / 1000).toFixed(3)));
+  els.intervalLabel.textContent = formatGrabInterval(interval);
   document.querySelectorAll('.interval-option').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.value === normalized);
   });
@@ -1480,6 +1512,18 @@ function initGrabEvents() {
     const btn = event.target.closest('.interval-option');
     if (!btn) return;
     setIntervalValue(btn.dataset.value);
+  });
+
+  const applyCustomInterval = () => {
+    const interval = normalizeGrabInterval(Number(els.grabIntervalCustom.value) * 1000);
+    setIntervalValue(interval);
+    showToast(`刷新间隔已设为 ${formatGrabInterval(interval)}`);
+  };
+  els.applyGrabIntervalCustom.addEventListener('click', applyCustomInterval);
+  els.grabIntervalCustom.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    applyCustomInterval();
   });
 
   els.openGrabPageBtn.addEventListener('click', () => {

@@ -53,6 +53,7 @@ function runtimeSnapshot(overrides = {}) {
 
 test('sanitizes session snapshots and excludes page/request objects', () => {
   const snapshot = sanitizeSnapshot(runtimeSnapshot({
+    interval: 250,
     configuredCourseNames: ['课程甲', '课程甲', '', '课程乙'],
     token: 'must-not-persist',
     targetStates: {
@@ -70,6 +71,7 @@ test('sanitizes session snapshots and excludes page/request objects', () => {
   assert.deepEqual(snapshot.configuredCourseNames, ['课程甲', '课程乙']);
   assert.equal(snapshot.targetStates[keywordTargetId('课程甲')].phase, 'SELECTED');
   assert.equal(snapshot.targetStates[keywordTargetId('课程乙')].phase, 'WATCHING');
+  assert.equal(snapshot.interval, 250);
   assert.equal(Object.hasOwn(snapshot, 'token'), false);
   assert.equal(JSON.stringify(snapshot).includes('private page content'), false);
   assert.equal(JSON.stringify(snapshot).includes('encrypted-secret'), false);
@@ -322,6 +324,7 @@ test('persists only aggregate scan diagnostics', () => {
       durationMs: 321,
       queriedTargetCount: 3,
       deferredTargetCount: 2,
+      publicDeferredTargetCount: 1,
       materializedQueryCount: 1,
       candidateCount: 4,
       shadowComparison: {
@@ -347,6 +350,7 @@ test('persists only aggregate scan diagnostics', () => {
     durationMs: 321,
     queriedTargetCount: 3,
     deferredTargetCount: 2,
+    publicDeferredTargetCount: 1,
     materializedQueryCount: 1,
     candidateCount: 4,
     fallbackReason: null,
