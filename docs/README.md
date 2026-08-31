@@ -28,6 +28,7 @@
 
 ## 发布说明
 
+- [v6.5.0](RELEASE_NOTES_v6.5.0.md)
 - [v6.4.0](RELEASE_NOTES_v6.4.0.md)
 - [v6.3.4](RELEASE_NOTES_v6.3.4.md)
 - [v6.3.3](RELEASE_NOTES_v6.3.3.md)
