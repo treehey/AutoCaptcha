@@ -1818,6 +1818,35 @@ test('scans a structured target down to the exact professional teaching class', 
   assert.equal(candidates[0].teachingClassId, 'class-2');
 });
 
+test('waits for a delayed exact professional class during network materialization', async () => {
+  const dom = createCapturedProfessionalDom();
+  const classList = dom.classContainer.querySelector('.course-jxb-container');
+  dom.availableItem.remove();
+  const document = new FakeDocument([dom.courseRow, dom.classContainer, dom.nextCourse]);
+  const adapter = loadAdapter(document);
+  const target = grabTaskModel.normalizeTarget({
+    name: '测试课程', courseNumber: 'COURSE-1', electiveBatchId: 'BATCH-1',
+    teachingClassType: 'ZY', teachingClassId: 'class-2'
+  });
+
+  setTimeout(() => {
+    classList.append(dom.availableItem);
+  }, 60);
+
+  const result = await adapter.scanDomCandidates([target], {
+    signal: new AbortController().signal
+  }, {
+    expectedTeachingClassIds: ['class-2'],
+    materializationWaitMs: 350
+  });
+  const candidates = result.get(target.targetId);
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].teachingClassId, 'class-2');
+  assert.equal(candidates[0].status, 'AVAILABLE');
+  assert.equal(candidates[0].choiceBtn, dom.availableButton);
+});
+
 test('builds a persistent exact target from a captured professional class item', () => {
   const dom = createCapturedProfessionalDom();
   const document = new FakeDocument([dom.courseRow, dom.classContainer, dom.nextCourse]);

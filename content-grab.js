@@ -76,6 +76,8 @@ const LEGACY_COURSE_SCOPE_ALIASES = Object.freeze({
   TCT5: 'TY'
 });
 const PUBLIC_COURSE_SCOPES = new Set(['GG', 'GG01', 'GG02']);
+const DOM_MATERIALIZATION_WAIT_MS = 800;
+const DOM_MATERIALIZATION_POLL_MS = 80;
 
 function normalizeCourseScope(scope) {
   const normalized = String(scope || '').trim().toUpperCase();
@@ -512,60 +514,96 @@ async function scanDomCandidates(targets, context, options = {}) {
   await refreshCourseList(signal);
   throwIfGrabAborted(signal);
 
-  const rows = [...document.querySelectorAll(COURSE_ROW_SELECTOR)];
-  if (rows.length === 0) {
+  const normalizedTargets = grabTaskModel.normalizeTargets(targets);
+  const expectedTeachingClassIds = new Set(
+    (Array.isArray(options.expectedTeachingClassIds) ? options.expectedTeachingClassIds : [])
+      .map(value => String(value || '').trim())
+      .filter(Boolean)
+  );
+  const requestedWaitMs = Number(options.materializationWaitMs);
+  const waitMs = expectedTeachingClassIds.size > 0
+    ? Math.min(1500, Math.max(0, Number.isFinite(requestedWaitMs)
+      ? requestedWaitMs
+      : DOM_MATERIALIZATION_WAIT_MS))
+    : 0;
+  const deadline = Date.now() + waitMs;
+
+  const collectCandidates = async () => {
+    const rows = [...document.querySelectorAll(COURSE_ROW_SELECTOR)];
+    const result = new Map(normalizedTargets.map(target => [target.targetId, []]));
+    const seenRows = new Map(normalizedTargets.map(target => [target.targetId, new Set()]));
+    const seenCandidateIds = new Map(normalizedTargets.map(target => [target.targetId, new Set()]));
+    const expandedRows = new Map();
+    let order = 0;
+
+    const addCandidate = (target, row) => {
+      if (!row || seenRows.get(target.targetId).has(row)) return;
+      const candidate = buildDomCandidate(row, target, order++);
+      if (!grabTaskModel.targetAcceptsCandidate(target, candidate)) return;
+      if (seenCandidateIds.get(target.targetId).has(candidate.id)) return;
+      seenRows.get(target.targetId).add(row);
+      seenCandidateIds.get(target.targetId).add(candidate.id);
+      result.get(target.targetId).push(candidate);
+    };
+
+    for (const row of rows) {
+      const text = elementText(row);
+      const courseNumber = extractCourseNumber(row, findChoiceButton(row));
+      const matchedTargets = normalizedTargets.filter(target => grabTaskModel.targetMatchesCourse(target, {
+        text,
+        courseNumber
+      }));
+      if (matchedTargets.length === 0) continue;
+
+      const expandBtn = row.querySelector('.cv-zy-expand');
+      if (expandBtn) {
+        let promise = expandedRows.get(row);
+        if (!promise) {
+          promise = ensureProfessionalRows(row, signal);
+          expandedRows.set(row, promise);
+        }
+        const classRows = await promise;
+        for (const target of matchedTargets) {
+          if (classRows.length === 0) addCandidate(target, row);
+          else classRows.forEach(classRow => addCandidate(target, classRow));
+        }
+        continue;
+      }
+
+      if (findChoiceButton(row) || /已满/.test(text) || rowShowsSelected(row)) {
+        matchedTargets.forEach(target => addCandidate(target, row));
+      }
+    }
+    return { result, rowCount: rows.length };
+  };
+
+  const hasExpectedActionableCandidate = result => {
+    const candidates = [...result.values()].flat();
+    return [...expectedTeachingClassIds].some(teachingClassId => candidates.some(candidate => {
+      if (String(candidate.teachingClassId || '') !== teachingClassId) return false;
+      return candidate.status === grabModule.CANDIDATE_STATUS.SELECTED
+        || (candidate.status === grabModule.CANDIDATE_STATUS.AVAILABLE
+          && candidate.choiceBtn
+          && isVisibleGrabElement(candidate.choiceBtn));
+    }));
+  };
+
+  let collected = await collectCandidates();
+  while (expectedTeachingClassIds.size > 0
+    && !hasExpectedActionableCandidate(collected.result)
+    && Date.now() < deadline) {
+    const remainingMs = deadline - Date.now();
+    await sleep(Math.min(DOM_MATERIALIZATION_POLL_MS, remainingMs), signal);
+    throwIfGrabAborted(signal);
+    collected = await collectCandidates();
+  }
+
+  if (collected.rowCount === 0) {
     const error = new Error('未发现课程列表，请确认已打开选课页面');
     error.outcome = grabModule.OUTCOME.STRUCTURE_ERROR;
     throw error;
   }
-
-  const normalizedTargets = grabTaskModel.normalizeTargets(targets);
-  const result = new Map(normalizedTargets.map(target => [target.targetId, []]));
-  const seenRows = new Map(normalizedTargets.map(target => [target.targetId, new Set()]));
-  const seenCandidateIds = new Map(normalizedTargets.map(target => [target.targetId, new Set()]));
-  const expandedRows = new Map();
-  let order = 0;
-
-  const addCandidate = (target, row) => {
-    if (!row || seenRows.get(target.targetId).has(row)) return;
-    const candidate = buildDomCandidate(row, target, order++);
-    if (!grabTaskModel.targetAcceptsCandidate(target, candidate)) return;
-    if (seenCandidateIds.get(target.targetId).has(candidate.id)) return;
-    seenRows.get(target.targetId).add(row);
-    seenCandidateIds.get(target.targetId).add(candidate.id);
-    result.get(target.targetId).push(candidate);
-  };
-
-  for (const row of rows) {
-    const text = elementText(row);
-    const courseNumber = extractCourseNumber(row, findChoiceButton(row));
-    const matchedTargets = normalizedTargets.filter(target => grabTaskModel.targetMatchesCourse(target, {
-      text,
-      courseNumber
-    }));
-    if (matchedTargets.length === 0) continue;
-
-    const expandBtn = row.querySelector('.cv-zy-expand');
-    if (expandBtn) {
-      let promise = expandedRows.get(row);
-      if (!promise) {
-        promise = ensureProfessionalRows(row, signal);
-        expandedRows.set(row, promise);
-      }
-      const classRows = await promise;
-      for (const target of matchedTargets) {
-        if (classRows.length === 0) addCandidate(target, row);
-        else classRows.forEach(classRow => addCandidate(target, classRow));
-      }
-      continue;
-    }
-
-    if (findChoiceButton(row) || /已满/.test(text) || rowShowsSelected(row)) {
-      matchedTargets.forEach(target => addCandidate(target, row));
-    }
-  }
-
-  return result;
+  return collected.result;
 }
 
 function visibleConfirmButtons() {

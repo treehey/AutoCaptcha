@@ -453,7 +453,15 @@
       const observedDomCandidates = new Map();
 
       for (const query of queries) {
-        const domResult = await scanDom([target], context, { query });
+        const expectedTeachingClassIds = apiCandidates
+          .filter(candidate => candidate.status === candidateStatus.AVAILABLE
+            && (candidate.courseNumber || targetQuery(target)) === query)
+          .map(candidate => candidate.teachingClassId)
+          .filter(Boolean);
+        const domResult = await scanDom([target], context, {
+          query,
+          expectedTeachingClassIds
+        });
         const domCandidates = domResult instanceof Map ? domResult.get(target.targetId) || [] : [];
         for (const candidate of domCandidates) {
           result.set(candidate.id, candidate);

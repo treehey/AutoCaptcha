@@ -427,14 +427,20 @@ test('materializes an available network candidate through an exact DOM query bef
       }]
     },
     scanDom: async (targets, context, options) => {
-      materializedQueries.push(options.query);
+      materializedQueries.push({
+        query: options.query,
+        expectedTeachingClassIds: options.expectedTeachingClassIds
+      });
       return new Map([[targets[0].targetId, [domCandidate]]]);
     }
   });
 
   const result = await provider.scan([target], { signal: new AbortController().signal });
 
-  assert.deepEqual(materializedQueries, ['COURSE-1']);
+  assert.deepEqual(materializedQueries, [{
+    query: 'COURSE-1',
+    expectedTeachingClassIds: ['class-open']
+  }]);
   assert.equal(result.get(target.targetId).find(candidate => candidate.id === domCandidate.id), domCandidate);
   assert.equal(result.get(target.targetId).some(candidate => candidate.status === 'AVAILABLE' && !candidate.choiceBtn), false);
   assert.equal(result.diagnostics.mode, SCAN_MODE.NETWORK_WITH_DOM);
