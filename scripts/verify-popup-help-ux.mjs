@@ -22,6 +22,11 @@ assert.match(html, /data-help-target="help-grab-interval"/, 'Refresh interval ne
 assert.match(html, /无感登录/, 'The prewarm control should use plain user-facing language.');
 assert.doesNotMatch(html, /提前准备统一认证|启动时预认证/, 'The popup should not expose implementation-oriented prewarm terminology.');
 assert.match(html, /value="5000" selected/, 'Five seconds should be the visible default interval.');
+assert.match(html, /data-value="1000"/, 'The popup should expose the tested one-second fast interval.');
+assert.match(html, /data-value="2000"/, 'The popup should expose a two-second fast interval.');
+assert.match(html, /id="grabIntervalCustom"[^>]*min="0\.1"[^>]*max="600"[^>]*step="0\.1"/, 'Advanced users need a bounded custom interval expressed in seconds.');
+assert.match(source, /GRAB_INTERVAL_MIN_MS\s*=\s*100/, 'Custom intervals must keep the tested 100ms safety floor.');
+assert.match(source, /Number\(els\.grabIntervalCustom\.value\) \* 1000/, 'The seconds-based custom interval must convert to internal milliseconds.');
 assert.match(html, /id="grabSteps"/, 'Disconnected course monitoring needs a guided next step.');
 const grabTabStart = html.indexOf('<div class="tab-panel" id="tab-grab"');
 const divTokens = /<\/?div\b[^>]*>/g;

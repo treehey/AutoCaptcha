@@ -209,6 +209,42 @@ test('defers an exact target when its catalog query template has not been captur
   assert.equal(domScans, 1);
 });
 
+test('does not refresh the public catalog to verify an exact favorite target whose query channel is missing', async () => {
+  const [target] = taskModel.normalizeTargets([{
+    name: '收藏中的公共课程',
+    teachingClassId: 'favorite-public-class',
+    teachingClassType: 'GG02',
+    queryScope: 'SC'
+  }]);
+  let domScans = 0;
+  const provider = createCourseProvider({
+    taskModel,
+    candidateStatus: CANDIDATE_STATUS,
+    getCurrentQueryScope: () => 'GG02',
+    queryClient: {
+      query: async () => [{
+        searchId: target.targetId,
+        queryScope: 'SC',
+        outcome: 'OUT_OF_SCOPE',
+        message: '等待打开 SC 课程分类以建立查询通道',
+        candidates: []
+      }]
+    },
+    scanDom: async () => {
+      domScans += 1;
+      return new Map();
+    }
+  });
+
+  const result = await provider.scan([target], {});
+  const [candidate] = result.get(target.targetId);
+
+  assert.equal(domScans, 0);
+  assert.equal(candidate.status, CANDIDATE_STATUS.DEFERRED);
+  assert.match(candidate.label, /SC|收藏/);
+  assert.equal(result.diagnostics.scopeDeferredTargetCount, 1);
+});
+
 test('uses an exact course row visible in favorites even when the target came from GG02', async () => {
   const [target] = taskModel.normalizeTargets([{
     name: '混合来源通识课',
@@ -489,6 +525,137 @@ test('queries every normal-sized target in the first round by default', async ()
   assert.equal(result.diagnostics.queriedTargetCount, 5);
   assert.equal(result.diagnostics.deferredTargetCount, 0);
   assert.equal(targets.every(target => result.get(target.targetId)[0].status === 'FULL'), true);
+});
+
+test('keeps favorite queries on the user cadence while pacing public targets independently', async () => {
+  const targets = taskModel.normalizeTargets([
+    { name: '收藏目标', electiveBatchId: 'BATCH-1', teachingClassType: 'GG02', teachingClassId: 'favorite-1', courseNumber: 'FAVORITE-1', queryScope: 'SC' },
+    { name: '公共目标一', electiveBatchId: 'BATCH-1', teachingClassType: 'GG02', teachingClassId: 'public-1', courseNumber: 'PUBLIC-1', queryScope: 'GG02' },
+    { name: '公共目标二', electiveBatchId: 'BATCH-1', teachingClassType: 'GG02', teachingClassId: 'public-2', courseNumber: 'PUBLIC-2', queryScope: 'GG02' },
+    { name: '公共目标三', electiveBatchId: 'BATCH-1', teachingClassType: 'GG02', teachingClassId: 'public-3', courseNumber: 'PUBLIC-3', queryScope: 'GG02' },
+    { name: '公共目标四', electiveBatchId: 'BATCH-1', teachingClassType: 'GG02', teachingClassId: 'public-4', courseNumber: 'PUBLIC-4', queryScope: 'GG02' }
+  ]);
+  const targetById = new Map(targets.map(target => [target.targetId, target]));
+  const rounds = [];
+  let currentTime = 0;
+  const provider = createCourseProvider({
+    taskModel,
+    candidateStatus: CANDIDATE_STATUS,
+    now: () => currentTime,
+    queryClient: {
+      query: async searches => {
+        rounds.push(searches.map(search => search.searchId));
+        return searches.map(search => {
+          const target = targetById.get(search.searchId);
+          return {
+            searchId: search.searchId,
+            queryScope: search.queryScope,
+            candidates: [networkEntry({
+              teachingClassId: target.teachingClassId,
+              teachingClassType: target.teachingClassType,
+              electiveBatchId: target.electiveBatchId,
+              name: target.name,
+              courseNumber: target.courseNumber,
+              status: 'FULL'
+            })]
+          };
+        });
+      }
+    },
+    scanDom: async () => new Map()
+  });
+
+  const first = await provider.scan(targets, { runId: 'mixed-run', intervalMs: 100 });
+  currentTime = 100;
+  const second = await provider.scan(targets, { runId: 'mixed-run', intervalMs: 100 });
+  currentTime = 1000;
+  const third = await provider.scan(targets, { runId: 'mixed-run', intervalMs: 100 });
+
+  assert.deepEqual(rounds[0], targets.slice(0, 4).map(target => target.targetId));
+  assert.deepEqual(rounds[1], [targets[0].targetId]);
+  assert.deepEqual(rounds[2], [
+    targets[0].targetId,
+    targets[1].targetId,
+    targets[4].targetId,
+    targets[2].targetId
+  ]);
+  assert.equal(first.get(targets[4].targetId)[0].status, 'DEFERRED');
+  assert.equal(second.get(targets[1].targetId)[0].status, 'DEFERRED');
+  assert.equal(third.get(targets[3].targetId)[0].status, 'DEFERRED');
+  assert.equal(first.diagnostics.publicDeferredTargetCount, 1);
+  assert.equal(second.diagnostics.publicDeferredTargetCount, 4);
+  assert.equal(third.diagnostics.publicDeferredTargetCount, 1);
+});
+
+test('does not page-verify an empty favorite result while the public catalog is visible', async () => {
+  const [target] = taskModel.normalizeTargets([{
+    name: '收藏中的公共课程',
+    teachingClassId: 'favorite-public-class',
+    teachingClassType: 'GG02',
+    electiveBatchId: 'BATCH-1',
+    queryScope: 'SC'
+  }]);
+  let domScans = 0;
+  const provider = createCourseProvider({
+    taskModel,
+    candidateStatus: CANDIDATE_STATUS,
+    getCurrentQueryScope: () => 'GG02',
+    queryClient: {
+      query: async searches => searches.map(search => ({
+        searchId: search.searchId,
+        queryScope: 'SC',
+        candidates: []
+      }))
+    },
+    scanDom: async () => {
+      domScans += 1;
+      return new Map();
+    }
+  });
+
+  const result = await provider.scan([target], { runId: 'cross-scope', intervalMs: 100 });
+
+  assert.equal(domScans, 0);
+  assert.equal(result.diagnostics.mode, SCAN_MODE.NETWORK);
+  assert.equal(result.diagnostics.materializedQueryCount, 0);
+});
+
+test('does not page-verify an available favorite result on the public catalog when the bridge omits its echoed scope', async () => {
+  const [target] = taskModel.normalizeTargets([{
+    name: '收藏中的有余量公共课程',
+    teachingClassId: 'favorite-public-open',
+    teachingClassType: 'GG02',
+    electiveBatchId: 'BATCH-1',
+    queryScope: 'SC'
+  }]);
+  let domScans = 0;
+  const provider = createCourseProvider({
+    taskModel,
+    candidateStatus: CANDIDATE_STATUS,
+    getCurrentQueryScope: () => 'GG02',
+    queryClient: {
+      query: async searches => searches.map(search => ({
+        searchId: search.searchId,
+        candidates: [networkEntry({
+          teachingClassId: 'favorite-public-open',
+          teachingClassType: 'GG02',
+          status: CANDIDATE_STATUS.AVAILABLE
+        })]
+      }))
+    },
+    scanDom: async () => {
+      domScans += 1;
+      return new Map();
+    }
+  });
+
+  const result = await provider.scan([target], { runId: 'cross-scope-open', intervalMs: 100 });
+  const [candidate] = result.get(target.targetId);
+
+  assert.equal(domScans, 0);
+  assert.equal(candidate.status, CANDIDATE_STATUS.DEFERRED);
+  assert.match(candidate.label, /收藏课程分类发现余量.*进入.*提交/);
+  assert.equal(result.diagnostics.materializedQueryCount, 0);
 });
 
 test('bounds network searches while checking the highest priority target every round', async () => {

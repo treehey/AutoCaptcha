@@ -83,6 +83,7 @@
     const source = value && typeof value === 'object' ? value : null;
     if (!source || !VALID_SCAN_MODES.has(source.mode)) return null;
     const scopeDeferredTargetCount = Math.floor(nonNegativeNumber(source.scopeDeferredTargetCount));
+    const publicDeferredTargetCount = Math.floor(nonNegativeNumber(source.publicDeferredTargetCount));
     const shadowSource = source.shadowComparison && typeof source.shadowComparison === 'object'
       ? source.shadowComparison
       : null;
@@ -104,6 +105,7 @@
       queriedTargetCount: Math.floor(nonNegativeNumber(source.queriedTargetCount)),
       deferredTargetCount: Math.floor(nonNegativeNumber(source.deferredTargetCount)),
       ...(scopeDeferredTargetCount > 0 ? { scopeDeferredTargetCount } : {}),
+      ...(publicDeferredTargetCount > 0 ? { publicDeferredTargetCount } : {}),
       materializedQueryCount: Math.floor(nonNegativeNumber(source.materializedQueryCount)),
       candidateCount: Math.floor(nonNegativeNumber(source.candidateCount)),
       fallbackReason: VALID_SCAN_FALLBACK_REASONS.has(source.fallbackReason)
@@ -196,7 +198,7 @@
       .filter(target => !successfulIds.has(target.targetId))
       .filter(target => !satisfiedGroups.has(groupByTarget.get(target.targetId)))
       .filter(target => !['SKIPPED', 'BLOCKED'].includes(targetStates[target.targetId].phase));
-    const interval = Math.min(600000, Math.max(1000, Number(source.interval) || 5000));
+    const interval = Math.min(600000, Math.max(100, Number(source.interval) || 5000));
     return {
       running: Boolean(source.running && configuredTargets.length > 0),
       phase: boundedText(source.phase || 'STOPPED', 80),

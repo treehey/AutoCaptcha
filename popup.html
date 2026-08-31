@@ -1097,6 +1097,50 @@
       background: var(--primary-soft);
     }
 
+    .custom-interval-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .custom-interval-field {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      height: 32px;
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface-muted);
+    }
+
+    .custom-interval-field input {
+      min-width: 0;
+      width: 100%;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .custom-interval-unit {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .custom-interval-apply {
+      min-width: 58px;
+      border: 1px solid rgba(99, 71, 152, 0.3);
+      border-radius: 7px;
+      color: var(--primary);
+      background: var(--primary-soft);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
     .hidden-select {
       display: none;
     }
@@ -1765,9 +1809,9 @@
           </div>
           <textarea id="courseNames" hidden></textarea>
           <div class="course-meta">
-            <span>关键词用于兼容搜索；精确教学班更安全。</span>
+            <span>关键词用于兼容搜索；公共课建议先收藏再导入，查询更稳定。</span>
             <div class="course-meta-actions">
-              <button class="tiny-btn" id="importFavoriteCoursesBtn" type="button" aria-label="导入当前收藏页已加载的教学班" title="导入当前收藏页">导入收藏</button>
+              <button class="tiny-btn" id="importFavoriteCoursesBtn" type="button" aria-label="导入当前收藏页已加载的教学班" title="公共课从收藏页导入后查询更稳定">导入收藏</button>
               <button class="tiny-btn" id="clearAllTargetsBtn" type="button" aria-label="清空全部已添加的监控目标" title="清空全部监控目标">清空全部</button>
               <button class="tiny-btn" id="openGrabPageBtn" type="button">打开选课系统</button>
             </div>
@@ -1827,7 +1871,7 @@
           <div class="field">
             <div class="field-head">
               <span class="field-title-with-help">刷新间隔 <button class="help-button" type="button" aria-label="了解刷新间隔" aria-expanded="false" aria-controls="help-grab-interval" data-help-target="help-grab-interval">?</button></span>
-              <span id="intervalLabel">5s</span>
+              <span id="intervalLabel">5 秒</span>
             </div>
             <select class="hidden-select" id="grabInterval" aria-label="刷新间隔">
               <option value="1000">1s</option>
@@ -1845,6 +1889,13 @@
               <button class="interval-option" data-value="10000" type="button">10s</button>
               <button class="interval-option" data-value="30000" type="button">30s</button>
             </div>
+            <div class="custom-interval-row">
+              <label class="custom-interval-field" for="grabIntervalCustom">
+                <input id="grabIntervalCustom" type="number" min="0.1" max="600" step="0.1" value="5" inputmode="decimal" aria-label="自定义刷新间隔（秒）">
+                <span class="custom-interval-unit">秒</span>
+              </label>
+              <button class="custom-interval-apply" id="applyGrabIntervalCustom" type="button">应用</button>
+            </div>
             <div class="help-panel" id="help-grab-interval" role="region" aria-label="刷新间隔说明" hidden>
               <dl class="help-list">
                 <div>
@@ -1854,6 +1905,10 @@
                 <div>
                   <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></dt>
                   <dd><strong>取舍</strong>：间隔越短检查越快，请求也越频繁；请按实际需要选择。</dd>
+                </div>
+                <div>
+                  <dt><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg></dt>
+                  <dd><strong>高速</strong>：0.1–2 秒主要用于专业课或收藏查询；混合任务中的公共课会独立限速，不拖慢其他课程，触发限制后自动重新登录恢复。</dd>
                 </div>
               </dl>
             </div>

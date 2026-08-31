@@ -757,14 +757,14 @@ test('shows the real non-preset interval while running instead of silently chang
   const root = new FakeElement('main', { classes: ['result-container'] });
   const document = new FakeDocument([root]);
   const adapter = loadAdapter(document);
-  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', interval: 1000, targetStates: {} });
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', interval: 1500, targetStates: {} });
   const panel = vm.runInContext('grabPageStatusPanel', adapter);
   const interval = new FakeElement('select', { attributes: { 'data-nju-grab-interval': '' } });
   panel.querySelector('[data-nju-grab-status-body]').append(interval);
-  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', interval: 1000, targetStates: {} });
-  assert.equal(interval.value, '1000');
+  adapter.renderGrabPageStatus({ running: true, phase: 'RUNNING', interval: 1500, targetStates: {} });
+  assert.equal(interval.value, '1500');
   assert.equal(interval.disabled, true);
-  assert.match(interval.querySelector('[data-nju-grab-current-interval]').textContent, /1 秒/);
+  assert.match(interval.querySelector('[data-nju-grab-current-interval]').textContent, /1\.5 秒/);
 });
 
 test('diagnostic summary contains aggregate runtime facts but no target content', () => {
@@ -791,6 +791,30 @@ test('persists a stopped interval in both versioned task config and legacy stora
   assert.equal(write.nju_grab_interval, 10000);
   assert.equal(write.nju_grab_task_v1.intervalMs, 10000);
   assert.deepEqual(write.nju_grab_task_v1.targets.map(target => target.name), ['旧关键词']);
+});
+
+test('persists the one-second fast interval instead of replacing it with five seconds', async () => {
+  const adapter = loadAdapter(new FakeDocument([]), {
+    storageState: { nju_grab_interval: '5000', nju_grab_courses: '旧关键词' }
+  });
+  await adapter.persistGrabInterval(1000);
+  const write = adapter.storageWritesForTest.at(-1);
+  assert.equal(write.nju_grab_interval, 1000);
+  assert.equal(write.nju_grab_task_v1.intervalMs, 1000);
+});
+
+test('promotes a public-page submission rate limit to immediate auth recovery only in public scopes', () => {
+  const adapter = loadAdapter(new FakeDocument([]));
+  const publicResult = vm.runInContext(`normalizeDomAttemptResultForScope('GG02', {
+    outcome: 'RATE_LIMITED', message: '请求过快，请稍后再试'
+  })`, adapter);
+  const favoriteResult = vm.runInContext(`normalizeDomAttemptResultForScope('SC', {
+    outcome: 'RATE_LIMITED', message: '请求过快，请稍后再试'
+  })`, adapter);
+
+  assert.equal(publicResult.outcome, 'AUTH_EXPIRED');
+  assert.match(publicResult.message, /重新登录/);
+  assert.equal(favoriteResult.outcome, 'RATE_LIMITED');
 });
 
 test('matches an exact target across page metadata changes but not another class or missing batch', () => {
@@ -1831,6 +1855,21 @@ test('persists a page-added teaching class without losing legacy keyword targets
   assert.equal(saved.targets[1].teachingClassId, 'class-2');
   assert.equal(button.textContent, '移除监控');
   assert.equal(button.disabled, false);
+});
+
+test('shows the public-course favorite recommendation only through a persisted one-time marker', async () => {
+  const dom = createCapturedPublicDom();
+  const adapter = loadAdapter(new FakeDocument([dom.open.row]));
+  const target = adapter.targetFromCourseElement(dom.open.row);
+  const button = new FakeElement('button', { text: '加入监控' });
+
+  await adapter.addConfiguredGrabTarget(target, button);
+
+  const write = adapter.storageWritesForTest.at(-1);
+  assert.equal(target.queryScope, 'GG02');
+  assert.equal(write.nju_grab_public_favorite_tip_seen, true);
+  assert.equal(write[grabTaskModel.STORAGE_KEY].targets.some(item => item.targetId === target.targetId), true);
+  assert.equal(adapter.storageWritesForTest.length, 1);
 });
 
 test('reads available and full public-course rows as separate exact candidates', async () => {

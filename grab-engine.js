@@ -94,6 +94,7 @@
         }
       : null;
     const scopeDeferredTargetCount = nonNegativeInteger(source?.scopeDeferredTargetCount);
+    const publicDeferredTargetCount = nonNegativeInteger(source?.publicDeferredTargetCount);
     return {
       mode,
       round: nonNegativeInteger(defaults.round ?? source?.round),
@@ -102,6 +103,7 @@
       queriedTargetCount: nonNegativeInteger(source?.queriedTargetCount),
       deferredTargetCount: nonNegativeInteger(source?.deferredTargetCount),
       ...(scopeDeferredTargetCount > 0 ? { scopeDeferredTargetCount } : {}),
+      ...(publicDeferredTargetCount > 0 ? { publicDeferredTargetCount } : {}),
       materializedQueryCount: nonNegativeInteger(source?.materializedQueryCount),
       candidateCount: nonNegativeInteger(source?.candidateCount),
       fallbackReason: SCAN_FALLBACK_REASONS.has(fallbackReason) ? fallbackReason : null,
@@ -146,7 +148,7 @@
     }
     const targets = normalizeTargets(Array.isArray(value) ? value : value?.targets);
     return {
-      intervalMs: Math.max(1000, Number(intervalMs) || 3000),
+      intervalMs: Math.max(100, Number(intervalMs) || 3000),
       targets,
       groups: targets.map(target => ({
         groupId: `group:${target.targetId}`,
@@ -837,6 +839,7 @@
         const scanResult = await adapter.scan(remaining, {
           runId: run.id,
           round: run.state.round,
+          intervalMs: run.state.interval,
           signal: run.controller.signal
         });
         if (!isCurrentRunning(run)) throw abortError();
@@ -933,7 +936,7 @@
       const task = normalizeTask(taskValue, intervalMs);
       const groups = task.groups;
       const targets = task.targets;
-      const interval = Math.max(1000, Number(task.intervalMs) || 3000);
+      const interval = Math.max(100, Number(task.intervalMs) || 3000);
       const restoredStates = resumeSnapshot?.targetStates && typeof resumeSnapshot.targetStates === 'object'
         ? resumeSnapshot.targetStates
         : {};

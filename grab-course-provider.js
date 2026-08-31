@@ -3,11 +3,14 @@
 
   const QUERY_EVENT = 'nju-autograb-course-query-v1';
   const RESULT_EVENT = 'nju-autograb-course-result-v1';
-  // Keep a hard safety bound, while allowing a normal multi-course task to be
-  // observed completely in one engine round. The bridge replays and paces these
-  // queries sequentially to avoid a short request burst.
+  // Keep a hard per-scan bound. Public catalogs use a separate three-course,
+  // one-second lane so a fast favorite/professional cadence cannot burst the
+  // public endpoint; the bridge still serializes every individual request.
   const DEFAULT_MAX_SEARCHES = 12;
   const DEFAULT_MAX_MATERIALIZATIONS = 2;
+  const PUBLIC_QUERY_SCOPES = new Set(['GG', 'GG01', 'GG02']);
+  const PUBLIC_QUERY_BATCH_SIZE = 3;
+  const PUBLIC_QUERY_MIN_INTERVAL_MS = 1000;
   const SCAN_MODE = Object.freeze({
     NETWORK: 'NETWORK',
     NETWORK_WITH_DOM: 'NETWORK_WITH_DOM',
@@ -77,6 +80,7 @@
     if (!result || typeof result !== 'object') return result;
     const shadowComparison = normalizeShadowComparison(value.shadowComparison);
     const scopeDeferredTargetCount = Math.max(0, Number(value.scopeDeferredTargetCount) || 0);
+    const publicDeferredTargetCount = Math.max(0, Number(value.publicDeferredTargetCount) || 0);
     const diagnostics = Object.freeze({
       mode: value.mode,
       queriedTargetCount: Math.max(0, Number(value.queriedTargetCount) || 0),
@@ -85,6 +89,7 @@
       candidateCount: Math.max(0, Number(value.candidateCount) || 0),
       fallbackReason: value.fallbackReason || null,
       ...(scopeDeferredTargetCount > 0 ? { scopeDeferredTargetCount } : {}),
+      ...(publicDeferredTargetCount > 0 ? { publicDeferredTargetCount } : {}),
       ...(shadowComparison ? { shadowComparison } : {})
     });
     Object.defineProperty(result, 'diagnostics', {
@@ -186,7 +191,10 @@
       Math.max(1, Number(options.maxSearches) || DEFAULT_MAX_SEARCHES));
     const maxMaterializations = Math.min(DEFAULT_MAX_SEARCHES,
       Math.max(1, Number(options.maxMaterializations) || DEFAULT_MAX_MATERIALIZATIONS));
-    let rotationCursor = 0;
+    const now = typeof options.now === 'function' ? options.now : Date.now;
+    const rotationCursors = { regular: 0, public: 0 };
+    let schedulingRunId = '';
+    let publicNextQueryAt = 0;
 
     if (!taskModel?.normalizeTargets || !taskModel?.targetAcceptsCandidate) {
       throw new TypeError('CourseProvider requires NjuGrabTaskModel');
@@ -195,16 +203,64 @@
       throw new TypeError('CourseProvider requires candidate statuses and a DOM scanner');
     }
 
-    function chooseTargets(targets) {
-      if (targets.length <= maxSearches) return targets;
-      if (maxSearches === 1) return [targets[rotationCursor++ % targets.length]];
+    function chooseRotatingTargets(targets, limit, lane) {
+      if (limit <= 0 || targets.length === 0) return [];
+      if (targets.length <= limit) return targets;
+      const rotationCursor = rotationCursors[lane] || 0;
+      if (limit === 1) {
+        rotationCursors[lane] = rotationCursor + 1;
+        return [targets[rotationCursor % targets.length]];
+      }
       const selected = [targets[0]];
       const rotating = targets.slice(1);
-      for (let index = 0; index < maxSearches - 1; index += 1) {
+      for (let index = 0; index < limit - 1; index += 1) {
         selected.push(rotating[(rotationCursor + index) % rotating.length]);
       }
-      rotationCursor = (rotationCursor + maxSearches - 1) % rotating.length;
+      rotationCursors[lane] = (rotationCursor + limit - 1) % rotating.length;
       return selected;
+    }
+
+    function isPublicTarget(target) {
+      const scope = normalizeQueryScope(
+        target?.queryScope || target?.teachingClassType || currentQueryScope()
+      );
+      return PUBLIC_QUERY_SCOPES.has(scope);
+    }
+
+    function chooseTargets(targets, context = {}) {
+      const runId = String(context.runId || 'standalone');
+      if (runId !== schedulingRunId) {
+        schedulingRunId = runId;
+        rotationCursors.regular = 0;
+        rotationCursors.public = 0;
+        publicNextQueryAt = 0;
+      }
+
+      const regularTargets = [];
+      const publicTargets = [];
+      for (const target of targets) {
+        (isPublicTarget(target) ? publicTargets : regularTargets).push(target);
+      }
+
+      const publicDue = now() >= publicNextQueryAt;
+      let publicLimit = publicDue
+        ? Math.min(PUBLIC_QUERY_BATCH_SIZE, publicTargets.length, maxSearches)
+        : 0;
+      if (regularTargets.length > 0 && publicLimit >= maxSearches) {
+        publicLimit = Math.max(0, maxSearches - 1);
+      }
+      const regularLimit = Math.max(0, maxSearches - publicLimit);
+      const selectedRegular = chooseRotatingTargets(regularTargets, regularLimit, 'regular');
+      const selectedPublic = chooseRotatingTargets(publicTargets, publicLimit, 'public');
+      const selectedPublicIds = new Set(selectedPublic.map(target => target.targetId));
+      return {
+        selectedTargets: [...selectedRegular, ...selectedPublic],
+        selectedPublicCount: selectedPublic.length,
+        publicDeferredTargetIds: new Set(publicTargets
+          .filter(target => !selectedPublicIds.has(target.targetId))
+          .map(target => target.targetId)),
+        publicDue
+      };
     }
 
     function targetQuery(target) {
@@ -281,6 +337,17 @@
       } catch {
         return '';
       }
+    }
+
+    function canPageVerifyTarget(target) {
+      if (!hasCurrentQueryScope) return true;
+      const activeScope = currentQueryScope();
+      const requiredScope = normalizeQueryScope(target?.queryScope);
+      if (!activeScope || !requiredScope) return true;
+      // Favorites aggregate exact courses from multiple catalog types, so an
+      // exact public/professional target can still be observed there. Other
+      // catalog pages must not stand in for a favorite (SC) query channel.
+      return activeScope === requiredScope || activeScope === 'SC';
     }
 
     function queryScopeLabel(scope) {
@@ -467,11 +534,18 @@
       const result = new Map(targets.map(target => [target.targetId, []]));
       if (targets.length === 0) return result;
       const normalizedTargets = targets.map(normalizeTargetScopes);
-      const selectedTargets = chooseTargets(normalizedTargets);
+      const selection = chooseTargets(normalizedTargets, context);
+      const selectedTargets = selection.selectedTargets;
       const selectedTargetIds = new Set(selectedTargets.map(target => target.targetId));
       for (const target of normalizedTargets) {
         if (!selectedTargetIds.has(target.targetId)) {
-          result.set(target.targetId, [deferredCandidate(target)]);
+          const publicDeferred = selection.publicDeferredTargetIds.has(target.targetId);
+          const label = publicDeferred
+            ? selection.publicDue
+              ? '公共课每批最多查询 3 门，等待下批轮转'
+              : '公共课查询冷却中，其他课程仍按设定间隔检查'
+            : undefined;
+          result.set(target.targetId, [deferredCandidate(target, label)]);
         }
       }
       const searches = selectedTargets.map(target => ({
@@ -481,14 +555,19 @@
         teachingClassType: normalizeQueryScope(target.teachingClassType)
       })).filter(search => search.query);
 
-      let networkResults;
-      try {
-        networkResults = await queryClient.query(searches, context);
-      } catch (error) {
-        if (error?.name === 'AbortError') throw error;
-        if (error?.outcome === 'AUTH_EXPIRED') throw error;
-        if (error?.outcome && error.outcome !== 'UNSUPPORTED') throw error;
-        return scanDomFallback(targets, context, 'NATIVE_QUERY_UNAVAILABLE');
+      let networkResults = [];
+      if (searches.length > 0) {
+        try {
+          networkResults = await queryClient.query(searches, context);
+          if (selection.selectedPublicCount > 0) {
+            publicNextQueryAt = now() + PUBLIC_QUERY_MIN_INTERVAL_MS;
+          }
+        } catch (error) {
+          if (error?.name === 'AbortError') throw error;
+          if (error?.outcome === 'AUTH_EXPIRED') throw error;
+          if (error?.outcome && error.outcome !== 'UNSUPPORTED') throw error;
+          return scanDomFallback(targets, context, 'NATIVE_QUERY_UNAVAILABLE');
+        }
       }
 
       const bySearchId = new Map(networkResults.map(item => [String(item?.searchId || ''), {
@@ -516,7 +595,7 @@
         const networkResult = bySearchId.get(target.targetId);
         if (!networkResult) continue;
         if (networkResult.outcome === 'OUT_OF_SCOPE') {
-          if (target.teachingClassId) {
+          if (target.teachingClassId && canPageVerifyTarget(target)) {
             outOfScopeExactTargets.push({
               target,
               message: networkResult.message || '等待进入对应课程分类查询'
@@ -538,7 +617,7 @@
         }
         const apiCandidates = candidatesForTarget(networkResult, target);
         if (apiCandidates.some(candidate => candidate.status === candidateStatus.AVAILABLE)) {
-          const observedScope = normalizeQueryScope(networkResult.queryScope);
+          const observedScope = normalizeQueryScope(networkResult.queryScope || target.queryScope);
           const activeScope = currentQueryScope();
           if (hasCurrentQueryScope && observedScope && observedScope !== activeScope) {
             scopeDeferredCount += 1;
@@ -558,7 +637,7 @@
           if (apiCandidates.length === 0) {
             emptyNetworkTargets.push({
               target,
-              queryScope: normalizeQueryScope(networkResult.queryScope)
+              queryScope: normalizeQueryScope(networkResult.queryScope || target.queryScope)
             });
           }
         }
@@ -589,10 +668,16 @@
       }
       if (emptyNetworkTargets.length > 0) {
         try {
-          const domTargets = emptyNetworkTargets.map(entry => entry.target);
-          const domResult = await scanDom(domTargets, context);
-          usedDom = true;
-          for (const entry of emptyNetworkTargets) {
+          const activeScope = currentQueryScope();
+          const pageVerifiableEntries = emptyNetworkTargets.filter(entry => {
+            return !hasCurrentQueryScope || !entry.queryScope || !activeScope || entry.queryScope === activeScope;
+          });
+          const domTargets = pageVerifiableEntries.map(entry => entry.target);
+          const domResult = domTargets.length > 0
+            ? await scanDom(domTargets, context)
+            : new Map();
+          usedDom ||= domTargets.length > 0;
+          for (const entry of pageVerifiableEntries) {
             const target = entry.target;
             const domCandidates = domResult instanceof Map ? domResult.get(target.targetId) || [] : [];
             addShadowComparison(shadowComparison, compareMaterializedCandidates([], domCandidates));
@@ -620,6 +705,7 @@
         mode: usedDom ? SCAN_MODE.NETWORK_WITH_DOM : SCAN_MODE.NETWORK,
         queriedTargetCount: searches.length,
         deferredTargetCount: Math.max(0, targets.length - selectedTargets.length),
+        publicDeferredTargetCount: selection.publicDeferredTargetIds.size,
         scopeDeferredTargetCount: scopeDeferredCount,
         materializedQueryCount,
         candidateCount,

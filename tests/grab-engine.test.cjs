@@ -74,6 +74,25 @@ async function runLatestTimer(harness) {
   await new Promise(resolve => setImmediate(resolve));
 }
 
+test('keeps a custom 250ms monitoring cadence', async () => {
+  let scanContext = null;
+  const harness = createHarness({
+    async scan(targets, context) {
+      scanContext = context;
+      return new Map(targets.map(target => [target.targetId, []]));
+    },
+    async attempt() { throw new Error('not reached'); }
+  });
+
+  harness.engine.start(['快速课程'], 250);
+  await waitFor(() => harness.engine.getSnapshot().round === 1 && !harness.engine.getSnapshot().inFlight);
+
+  assert.equal(harness.engine.getSnapshot().interval, 250);
+  assert.equal(scanContext.intervalMs, 250);
+  assert.equal(harness.timers.at(-1).delay, 250);
+  harness.engine.stop();
+});
+
 test('tries higher-priority targets first and stops after a course group is satisfied', async () => {
   const attempts = [];
   const harness = createHarness({
